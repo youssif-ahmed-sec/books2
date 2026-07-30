@@ -1,5 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordRequestForm
+from fastapi import APIRouter, Depends, HTTPException, status, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from uuid import UUID
@@ -13,6 +12,17 @@ from database import get_db
 router = APIRouter(prefix="/auth", tags=["Authentication & RBAC"])
 
 
+class SimpleLoginForm:
+    """Custom login form — shows only email (username) and password in Swagger."""
+    def __init__(
+        self,
+        username: str = Form(..., description="Your email address"),
+        password: str = Form(..., description="Your password"),
+    ):
+        self.username = username
+        self.password = password
+
+
 # ── Login ────────────────────────────────────────────────────────────────────
 
 @router.post(
@@ -22,7 +32,7 @@ router = APIRouter(prefix="/auth", tags=["Authentication & RBAC"])
     description="Enter your **email** in the `username` field and your **password**. Returns a JWT Bearer token.",
 )
 async def login(
-    form_data: OAuth2PasswordRequestForm = Depends(),
+    form_data: SimpleLoginForm = Depends(),
     db: AsyncSession = Depends(get_db),
 ):
     """
