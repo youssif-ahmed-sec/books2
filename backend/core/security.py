@@ -13,11 +13,22 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def hash_password(plain: str) -> str:
-    return pwd_context.hash(plain)
+    try:
+        return pwd_context.hash(plain)
+    except ValueError as e:
+        if "72 bytes" in str(e):
+            plain = plain.encode('utf-8')[:72].decode('utf-8', 'ignore')
+            return pwd_context.hash(plain)
+        raise
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    try:
+        return pwd_context.verify(plain, hashed)
+    except ValueError as e:
+        if "72 bytes" in str(e):
+            return False
+        raise
 
 
 # ── JWT ─────────────────────────────────────────────────
