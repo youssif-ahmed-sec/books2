@@ -7,25 +7,20 @@ from typing import List
 
 from models.inventory import InventoryTransaction, InventoryBalance, Warehouse
 from models.product import Product
+from models.user import User
 from schemas.inventory import InventoryTransactionCreate, InventoryTransactionResponse, InventoryBalanceResponse, InventoryStatsResponse, InventoryTransactionRecentResponse
 from sqlalchemy import func, desc
 from datetime import date
-# Assume get_db is defined in core.database and get_current_user in api.dependencies
-# from ...core.database import get_db
-# from ...api.dependencies import get_current_user
-
-router = APIRouter(prefix="/inventory", tags=["Inventory"])
-
+from core.dependencies import get_current_user
 from database import get_db
 
-async def get_current_user():
-    return type('User', (object,), {"id": UUID("00000000-0000-0000-0000-000000000000")})()
+router = APIRouter(prefix="/inventory", tags=["Inventory"])
 
 @router.post("/transactions", response_model=InventoryTransactionResponse, status_code=status.HTTP_201_CREATED)
 async def create_inventory_transaction(
     transaction_in: InventoryTransactionCreate,
     db: AsyncSession = Depends(get_db),
-    current_user = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """
     Create a new inventory transaction and update the inventory balance.

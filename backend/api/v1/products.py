@@ -7,15 +7,12 @@ from uuid import UUID
 from typing import List, Optional
 
 from models.product import Product, ProductUnit, ProductPrice, Category
-from models.user import AuditLog
+from models.user import AuditLog, User
 from schemas.product import ProductCreate, ProductUpdate, ProductResponse, CategoryResponse
-
-router = APIRouter(prefix="/products", tags=["Products"])
-
+from core.dependencies import get_current_user
 from database import get_db
 
-async def get_current_user():
-    return type('User', (object,), {"id": UUID("00000000-0000-0000-0000-000000000000")})()
+router = APIRouter(prefix="/products", tags=["Products"])
 
 @router.get("/categories", response_model=List[CategoryResponse])
 async def get_categories(db: AsyncSession = Depends(get_db)):
@@ -113,7 +110,7 @@ async def get_product(product_id: UUID, db: AsyncSession = Depends(get_db)):
 async def create_product(
     product_in: ProductCreate,
     db: AsyncSession = Depends(get_db),
-    current_user = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """
     Create a new product with multiple units and prices.
@@ -169,7 +166,7 @@ async def update_product(
     product_id: UUID,
     product_in: ProductUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """
     Update a product. For simplicity, units and prices replacement strategy can be used.
