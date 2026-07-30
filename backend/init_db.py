@@ -9,6 +9,14 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     DATABASE_URL = "postgresql://postgres:postgres@localhost:54322/postgres"
 
+# Ensure we use sync pg driver
+if DATABASE_URL.startswith("postgresql+asyncpg://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://", 1)
+elif DATABASE_URL.startswith("postgres+asyncpg://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres+asyncpg://", "postgresql://", 1)
+elif DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
 # Import models to register them with Base
 import models.user
 import models.product

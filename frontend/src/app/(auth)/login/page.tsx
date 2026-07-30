@@ -6,8 +6,8 @@ import { createClient } from "@supabase/supabase-js";
 import { useRouter } from "next/navigation";
 
 // Initialize Supabase client safely
-const supabaseUrl = "http://127.0.0.1:54321";
-const supabaseAnonKey = "sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH";
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "http://127.0.0.1:54321";
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH";
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 export default function LoginPage() {
@@ -38,7 +38,7 @@ export default function LoginPage() {
       if (!user) throw new Error("No user returned from Supabase.");
 
       // 2. Sync with backend API
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "/api/v1";
       const response = await fetch(`${apiUrl}/auth/sync`, {
         method: "POST",
         headers: {

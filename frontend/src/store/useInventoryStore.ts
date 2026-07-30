@@ -83,7 +83,7 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
   setError: (error) => set({ error }),
 
   // UI Actions
-  openTransactionModal: (productId = null) => set({ isTransactionModalOpen: true, selectedProductId: productId }),
+  openTransactionModal: (productId?: string) => set({ isTransactionModalOpen: true, selectedProductId: productId ?? null }),
   closeTransactionModal: () => set({ isTransactionModalOpen: false, selectedProductId: null }),
 
   // Async Actions

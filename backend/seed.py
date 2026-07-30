@@ -13,7 +13,11 @@ if not DATABASE_URL:
 
 # Ensure we use sync pg driver
 if DATABASE_URL.startswith("postgresql+asyncpg://"):
-    DATABASE_URL = DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
+    DATABASE_URL = DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://", 1)
+elif DATABASE_URL.startswith("postgres+asyncpg://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres+asyncpg://", "postgresql://", 1)
+elif DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
 # Import models
 from models.product import Category, Product, ProductUnit, ProductPrice, PriceLevelEnum

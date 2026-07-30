@@ -1,8 +1,8 @@
 import { create } from 'zustand';
 import { createClient, User } from '@supabase/supabase-js';
 
-const supabaseUrl = "http://127.0.0.1:54321";
-const supabaseAnonKey = "sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH";
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "http://127.0.0.1:54321";
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH";
 
 console.log("Supabase URL:", supabaseUrl);
 
