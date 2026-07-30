@@ -1,15 +1,62 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from uuid import UUID
+import jwt
+import os
 
 from models.user import User
 from schemas.auth import UserProfileResponse, UserSyncRequest
-# from ...core.database import get_db
+from database import get_db
 
 router = APIRouter(prefix="/auth", tags=["Authentication & RBAC"])
 
-from database import get_db
+security = HTTPBearer()
+
+
+def get_user_id_from_token(credentials: HTTPAuthorizationCredentials = Depends(security)) -> UUID:
+    """
+    Decode Supabase JWT and extract user ID (sub claim).
+    """
+    token = credentials.credentials
+    jwt_secret = os.getenv("SUPABASE_JWT_SECRET")
+
+    try:
+        if jwt_secret:
+            # Verify signature with the Supabase JWT secret
+            payload = jwt.decode(
+                token,
+                jwt_secret,
+                algorithms=["HS256"],
+                options={"verify_aud": False}
+            )
+        else:
+            # No secret configured — decode without verification (dev fallback)
+            payload = jwt.decode(
+                token,
+                options={"verify_signature": False}
+            )
+
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token: missing user ID"
+            )
+        return UUID(user_id)
+
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has expired"
+        )
+    except jwt.InvalidTokenError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid token: {str(e)}"
+        )
+
 
 @router.post("/sync", response_model=UserProfileResponse)
 async def sync_user_profile(
@@ -35,13 +82,23 @@ async def sync_user_profile(
 
     return user
 
+
 @router.get("/me", response_model=UserProfileResponse)
 async def get_current_user_profile(
-    # current_user = Depends(get_current_user),
+    user_id: UUID = Depends(get_user_id_from_token),
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Get the currently logged-in user's profile and roles.
+    Get the currently logged-in user's profile using their Supabase JWT.
     """
-    # Mocking for structure
-    pass
+    query = select(User).where(User.id == user_id, User.is_deleted == False)
+    result = await db.execute(query)
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User profile not found. Please sync your account first via POST /auth/sync."
+        )
+
+    return user
