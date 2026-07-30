@@ -42,9 +42,20 @@ async def on_startup():
     import models.product
     import models.inventory
     from models.user import Base
+    from sqlalchemy import text
+
     async with engine.begin() as conn:
+        # Create any new tables
         await conn.run_sync(Base.metadata.create_all)
-    print("Database tables created successfully on startup.")
+
+        # Migrate existing 'users' table — add columns if they don't exist yet
+        await conn.execute(text("""
+            ALTER TABLE users
+            ADD COLUMN IF NOT EXISTS email VARCHAR UNIQUE,
+            ADD COLUMN IF NOT EXISTS hashed_password VARCHAR;
+        """))
+
+    print("Database tables created/migrated successfully on startup.")
 
 
 @app.get("/", tags=["Health"])
