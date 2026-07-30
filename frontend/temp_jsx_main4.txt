@@ -1,0 +1,20 @@
+<main className="fixed inset-0 p-gutter lg:pr-[312px] opacity-20 pointer-events-none">
+<header className="flex justify-between items-center mb-lg h-20">
+<h2 className="font-display-lg text-display-lg font-bold text-primary">لوحة القيادة الرئيسية</h2>
+<div className="flex gap-4">
+<div className="w-12 h-12 rounded-full bg-surface-container-high border border-white/10"></div>
+<div className="w-12 h-12 rounded-full bg-surface-container-high border border-white/10"></div>
+</div>
+</header>
+<div className="grid grid-cols-12 gap-gutter">
+<div className="col-span-8 h-96 glass-card rounded-lg p-md">
+<div className="h-full w-full rounded-DEFAULT bg-white/5"></div>
+</div>
+<div className="col-span-4 h-96 glass-card rounded-lg p-md">
+<div className="h-full w-full rounded-DEFAULT bg-white/5"></div>
+</div>
+<div className="col-span-4 h-64 glass-card rounded-lg p-md"></div>
+<div className="col-span-4 h-64 glass-card rounded-lg p-md"></div>
+<div className="col-span-4 h-64 glass-card rounded-lg p-md"></div>
+</div>
+</main>
