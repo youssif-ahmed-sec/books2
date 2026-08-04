@@ -7,3 +7,5 @@ pydantic>=2.0.0
 pydantic[email]>=2.0.0
 PyJWT>=2.8.0
 passlib[bcrypt]>=1.7.4
+cloudinary==1.38.0
+fastapi-cache2>=0.2.2

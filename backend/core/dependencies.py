@@ -7,7 +7,7 @@ import jwt
 
 from core.security import decode_access_token
 from database import get_db
-from models.user import User
+from models.user import User, RoleEnum
 
 # This tells Swagger where to send login requests to get a token
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
@@ -55,3 +55,33 @@ async def get_current_user(
             detail="User not found or inactive",
         )
     return user
+
+
+async def require_admin(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """
+    Dependency that requires the current user to have the 'Admin' role.
+    Raises 403 Forbidden if the user is not an admin.
+    """
+    if current_user.role != RoleEnum.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required",
+        )
+    return current_user
+
+
+async def require_staff_or_admin(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """
+    Dependency that requires the current user to be staff (Inventory Controller/Cashier) or admin.
+    Raises 403 Forbidden for regular users.
+    """
+    if current_user.role not in (RoleEnum.ADMIN, RoleEnum.INVENTORY_CONTROLLER, RoleEnum.CASHIER):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Staff or Admin access required",
+        )
+    return current_user

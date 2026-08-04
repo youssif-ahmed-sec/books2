@@ -1,34 +1,35 @@
 import os
 import jwt
 from datetime import datetime, timedelta, timezone
-from passlib.context import CryptContext
+import bcrypt
 
 # ── Config ──────────────────────────────────────────────
 SECRET_KEY = os.getenv("JWT_SECRET_KEY", "CHANGE_ME_IN_PRODUCTION_USE_A_LONG_RANDOM_STRING")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
 
-# ── Password hashing ────────────────────────────────────
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-
 def hash_password(plain: str) -> str:
-    try:
-        return pwd_context.hash(plain)
-    except ValueError as e:
-        if "72 bytes" in str(e):
-            plain = plain.encode('utf-8')[:72].decode('utf-8', 'ignore')
-            return pwd_context.hash(plain)
-        raise
+    # bcrypt requires bytes
+    pwd_bytes = plain.encode('utf-8')
+    if len(pwd_bytes) > 72:
+        pwd_bytes = pwd_bytes[:72]
+    salt = bcrypt.gensalt()
+    hashed_bytes = bcrypt.hashpw(pwd_bytes, salt)
+    return hashed_bytes.decode('utf-8')
 
 
 def verify_password(plain: str, hashed: str) -> bool:
+    pwd_bytes = plain.encode('utf-8')
+    if len(pwd_bytes) > 72:
+        # FastAPI's old passlib implementation truncated to 72 bytes.
+        # We do the same to remain compatible.
+        pwd_bytes = pwd_bytes[:72]
+        
+    hashed_bytes = hashed.encode('utf-8')
     try:
-        return pwd_context.verify(plain, hashed)
-    except ValueError as e:
-        if "72 bytes" in str(e):
-            return False
-        raise
+        return bcrypt.checkpw(pwd_bytes, hashed_bytes)
+    except ValueError:
+        return False
 
 
 # ── JWT ─────────────────────────────────────────────────

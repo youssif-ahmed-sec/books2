@@ -6,7 +6,7 @@ from uuid import UUID
 from models.user import User, RoleEnum
 from schemas.auth import UserProfileResponse, UserSyncRequest, UserRegisterRequest, TokenResponse
 from core.security import hash_password, verify_password, create_access_token
-from core.dependencies import get_current_user
+from core.dependencies import get_current_user, require_admin
 from database import get_db
 
 router = APIRouter(prefix="/auth", tags=["Authentication & RBAC"])
@@ -39,8 +39,10 @@ async def login(
     OAuth2 compatible login — Swagger will show username + password fields.
     Use the returned `access_token` with the 🔒 Authorize button in Swagger.
     """
+    clean_email = form_data.username.strip().lower()
+    
     query = select(User).where(
-        User.email == form_data.username,
+        User.email == clean_email,
         User.is_deleted == False,
         User.is_active == True,
     )
@@ -75,11 +77,12 @@ async def login(
     "/register",
     response_model=UserProfileResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="📝 Register a new local user",
+    summary="📝 Register a new local user (Admin only)",
 )
 async def register_user(
     user_data: UserRegisterRequest,
     db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_admin),
 ):
     """
     Create a new user with email + password (hashed with bcrypt).
@@ -131,6 +134,7 @@ async def get_current_user_profile(
 async def sync_user_profile(
     user_data: UserSyncRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Sync a Supabase authenticated user with our local User profile table.

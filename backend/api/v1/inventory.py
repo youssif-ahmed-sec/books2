@@ -6,13 +6,14 @@ from uuid import UUID
 from typing import List
 
 from models.inventory import InventoryTransaction, InventoryBalance, Warehouse
-from models.product import Product
+from models.product import Product, ProductUnit, ProductPrice
 from models.user import User
-from schemas.inventory import InventoryTransactionCreate, InventoryTransactionResponse, InventoryBalanceResponse, InventoryStatsResponse, InventoryTransactionRecentResponse
+from schemas.inventory import InventoryTransactionCreate, InventoryTransactionResponse, InventoryBalanceResponse, InventoryStatsResponse, InventoryTransactionRecentResponse, PaginatedInventoryTransactionResponse
 from sqlalchemy import func, desc
 from datetime import date
 from core.dependencies import get_current_user
 from database import get_db
+from fastapi_cache.decorator import cache
 
 router = APIRouter(prefix="/inventory", tags=["Inventory"])
 
@@ -70,10 +71,12 @@ async def create_inventory_transaction(
     
     return new_transaction
 
-@router.get("/balances", response_model=List[InventoryBalanceResponse])
+@router.get("/balances", response_model=List[InventoryBalanceResponse],
+           summary="🏦 Get inventory balances by warehouse")
 async def get_inventory_balances(
     warehouse_id: UUID = None,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Get all inventory balances, optionally filtered by warehouse, including product and warehouse names.
@@ -106,8 +109,13 @@ async def get_inventory_balances(
         
     return balances
 
-@router.get("/stats", response_model=InventoryStatsResponse)
-async def get_inventory_stats(db: AsyncSession = Depends(get_db)):
+@router.get("/stats", response_model=InventoryStatsResponse,
+           summary="📊 Inventory dashboard statistics")
+@cache(expire=60)
+async def get_inventory_stats(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """
     Get inventory dashboard statistics.
     """
@@ -119,15 +127,34 @@ async def get_inventory_stats(db: AsyncSession = Depends(get_db)):
     today_movements = (await db.execute(today_movements_query)).scalar() or 0
 
     # 2. Low stock and critical stock
-    # Let's assume < 20 is low stock, < 5 is critical stock
-    low_stock_query = select(func.count(InventoryBalance.id)).where(InventoryBalance.current_stock < 20, InventoryBalance.current_stock >= 5)
+    # Join Product and InventoryBalance to include products with no balance (stock = 0)
+    # Low stock: stock > 0 AND stock <= min_stock_level
+    low_stock_query = select(func.count(Product.id)).outerjoin(
+        InventoryBalance, Product.id == InventoryBalance.product_id
+    ).where(
+        (func.coalesce(InventoryBalance.current_stock, 0) > 0) &
+        (func.coalesce(InventoryBalance.current_stock, 0) <= Product.min_stock_level),
+        Product.is_deleted == False
+    )
     low_stock = (await db.execute(low_stock_query)).scalar() or 0
     
-    critical_stock_query = select(func.count(InventoryBalance.id)).where(InventoryBalance.current_stock < 5)
+    # Critical stock: stock <= 0
+    critical_stock_query = select(func.count(Product.id)).outerjoin(
+        InventoryBalance, Product.id == InventoryBalance.product_id
+    ).where(
+        (func.coalesce(InventoryBalance.current_stock, 0) <= 0),
+        Product.is_deleted == False
+    )
     critical_stock = (await db.execute(critical_stock_query)).scalar() or 0
 
-    # 3. Total value (sum of current_stock * product.cost)
-    value_query = select(func.sum(InventoryBalance.current_stock * Product.cost)).join(Product, InventoryBalance.product_id == Product.id)
+    # 3. Total value (sum of current_stock * retail_price of base unit)
+    value_query = select(func.sum(InventoryBalance.current_stock * ProductPrice.price)).join(
+        Product, InventoryBalance.product_id == Product.id
+    ).join(
+        ProductUnit, (ProductUnit.product_id == Product.id) & (ProductUnit.unit_name == Product.base_unit)
+    ).join(
+        ProductPrice, (ProductPrice.unit_id == ProductUnit.id) & (ProductPrice.price_level == 'Retail')
+    ).where(Product.is_deleted == False)
     total_value = (await db.execute(value_query)).scalar() or 0
 
     return {
@@ -137,8 +164,46 @@ async def get_inventory_stats(db: AsyncSession = Depends(get_db)):
         "total_value": total_value
     }
 
-@router.get("/transactions/recent", response_model=List[InventoryTransactionRecentResponse])
-async def get_recent_transactions(limit: int = 5, db: AsyncSession = Depends(get_db)):
+@router.get("/transactions", response_model=PaginatedInventoryTransactionResponse,
+           summary="Get paginated inventory transactions")
+async def get_inventory_transactions(
+    page: int = 1,
+    limit: int = 20,
+    db: AsyncSession = Depends(get_db)
+):
+    offset = (page - 1) * limit
+    
+    # Get total count
+    total_query = select(func.count(InventoryTransaction.id))
+    total = (await db.execute(total_query)).scalar() or 0
+
+    # Get paginated data with product names
+    query = (
+        select(InventoryTransaction, Product.name_ar)
+        .outerjoin(Product, InventoryTransaction.product_id == Product.id)
+        .order_by(InventoryTransaction.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    result = await db.execute(query)
+    rows = result.all()
+    
+    transactions = []
+    for row in rows:
+        transaction, product_name = row
+        tx_dict = transaction.__dict__.copy()
+        tx_dict["product_name"] = product_name
+        transactions.append(tx_dict)
+        
+    return {"data": transactions, "total": total}
+
+@router.get("/transactions/recent", response_model=List[InventoryTransactionRecentResponse],
+           summary="⏳ Recent inventory transactions")
+async def get_recent_transactions(
+    limit: int = 5,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """
     Get the most recent inventory transactions.
     """

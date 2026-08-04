@@ -49,3 +49,8 @@ class InventoryStatsResponse(BaseModel):
 
 class InventoryTransactionRecentResponse(InventoryTransactionResponse):
     product_name: Optional[str] = None
+
+class PaginatedInventoryTransactionResponse(BaseModel):
+    data: List[InventoryTransactionRecentResponse]
+    total: int
+

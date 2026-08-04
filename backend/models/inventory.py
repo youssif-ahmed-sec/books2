@@ -20,7 +20,7 @@ class InventoryBalance(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     product_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
     warehouse_id = Column(UUID(as_uuid=True), ForeignKey("warehouses.id"), nullable=False)
-    current_stock = Column(Numeric(10, 2), nullable=False, default=0)
+    current_stock = Column(Numeric(18, 2), nullable=False, default=0)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
 
 class TransactionTypeEnum(str, enum.Enum):
@@ -38,7 +38,7 @@ class InventoryTransaction(Base):
     warehouse_id = Column(UUID(as_uuid=True), ForeignKey("warehouses.id"), nullable=False)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     transaction_type = Column(Enum(TransactionTypeEnum), nullable=False)
-    quantity_changed = Column(Numeric(10, 2), nullable=False)
+    quantity_changed = Column(Numeric(18, 2), nullable=False)
     reference_document = Column(String, nullable=True)
     notes = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
