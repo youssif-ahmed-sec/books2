@@ -56,11 +56,11 @@ async def get_supplier_detail(supplier_id: UUID, db: AsyncSession = Depends(get_
         raise HTTPException(status_code=404, detail="Supplier not found")
 
     # Calculate total purchases from inventory transactions (stock-in from this supplier)
-    purchases_query = select(func.sum(InventoryTransaction.quantity * InventoryTransaction.unit_cost)).join(
+    purchases_query = select(func.sum(InventoryTransaction.quantity_changed * Product.cost)).join(
         Product, InventoryTransaction.product_id == Product.id
     ).where(
         Product.supplier_id == supplier_id,
-        InventoryTransaction.transaction_type == "StockIn"
+        InventoryTransaction.transaction_type == "Receiving"
     )
     purchases_result = await db.execute(purchases_query)
     total_purchases = purchases_result.scalar() or Decimal("0")
@@ -82,12 +82,14 @@ async def get_supplier_detail(supplier_id: UUID, db: AsyncSession = Depends(get_
     opening_balance = supplier.opening_balance or Decimal("0")
     balance = opening_balance + Decimal(str(total_purchases)) - Decimal(str(total_payments))
 
-    setattr(supplier, "total_purchases", total_purchases)
-    setattr(supplier, "total_payments", total_payments)
-    setattr(supplier, "balance", balance)
-    setattr(supplier, "payments", payments)
+    supplier_data = supplier.__dict__.copy()
+    supplier_data.pop("_sa_instance_state", None)
+    supplier_data["total_purchases"] = total_purchases
+    supplier_data["total_payments"] = total_payments
+    supplier_data["balance"] = balance
+    supplier_data["payments"] = payments
 
-    return supplier
+    return supplier_data
 
 
 @router.post("", response_model=SupplierResponse, status_code=status.HTTP_201_CREATED)
