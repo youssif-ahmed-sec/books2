@@ -146,12 +146,15 @@ export default function InventoryPage() {
           let typeLabel = "غير معروف";
           let style = "bg-gray-500/10 text-gray-400 border-gray-500/20";
           
-          if (tx.transaction_type === "Receiving" || tx.quantity_changed > 0) {
+          if (tx.transaction_type === "Receiving") {
             typeLabel = "وارد";
             style = "bg-green-500/10 text-green-400 border-green-500/20";
-          } else if (tx.transaction_type === "Issuing" || tx.quantity_changed < 0) {
+          } else if (tx.transaction_type === "Issuing") {
             typeLabel = "صادر";
             style = "bg-red-500/10 text-red-400 border-red-500/20";
+          } else if (tx.transaction_type === "Adjustment") {
+            typeLabel = "تسوية";
+            style = "bg-[#ffb4ab]/10 text-[#ffb4ab] border-[#ffb4ab]/20";
           }
           
           const d = new Date(tx.created_at);

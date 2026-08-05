@@ -79,6 +79,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
     imageUrl: "",
     costPrice: "0",
     vatRate: "0",
+    profitMargin: "0",
     minStockLevel: "0",
     maxStockLevel: "0",
   });
@@ -119,6 +120,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
           imageUrl: data.image_url || "",
           costPrice: data.cost?.toString() || "0",
           vatRate: data.tax_rate?.toString() || "0",
+          profitMargin: "0",
           minStockLevel: data.min_stock_level?.toString() || "0",
           maxStockLevel: data.max_stock_level?.toString() || "0",
         });
@@ -813,7 +815,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
               <h3 className="text-2xl font-bold">هيكل التسعير (ج.م)</h3>
             </div>
 
-            <div className="grid grid-cols-2 gap-8 bg-primary/[0.03] p-8 rounded-2xl border border-primary/10">
+            <div className="grid grid-cols-3 gap-8 bg-primary/[0.03] p-8 rounded-2xl border border-primary/10">
               <div className="space-y-5">
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">سعر الشراء (للوحدة الأساسية)</label>
                 <div className="relative">
@@ -821,8 +823,19 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
                     type="number"
                     value={form.costPrice}
                     onChange={(e) => {
-                      setForm({ ...form, costPrice: e.target.value });
+                      const newCost = e.target.value;
+                      setForm({ ...form, costPrice: newCost });
                       if (errors.includes("costPrice")) setErrors(errors.filter(err => err !== "costPrice"));
+                      
+                      const margin = parseFloat(form.profitMargin) || 0;
+                      if (margin > 0) {
+                        const baseCost = parseFloat(newCost) || 0;
+                        const vat = parseFloat(form.vatRate) || 0;
+                        setUnits(units.map(u => ({
+                          ...u,
+                          retailPrice: (baseCost * u.conversionFactor * (1 + vat / 100) * (1 + margin / 100)).toFixed(2)
+                        })));
+                      }
                     }}
                     className={`w-full bg-[#201f1f] border rounded-full p-5 text-2xl font-bold text-primary focus:ring-2 focus:ring-primary/30 transition-all ${
                       errors.includes("costPrice") ? "border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.2)]" : "border-white/5"
@@ -838,12 +851,46 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
                     type="number"
                     value={form.vatRate}
                     onChange={(e) => {
-                      setForm({ ...form, vatRate: e.target.value });
+                      const newVat = e.target.value;
+                      setForm({ ...form, vatRate: newVat });
                       if (errors.includes("vatRate")) setErrors(errors.filter(err => err !== "vatRate"));
+                      
+                      const margin = parseFloat(form.profitMargin) || 0;
+                      if (margin > 0) {
+                        const baseCost = parseFloat(form.costPrice) || 0;
+                        const vat = parseFloat(newVat) || 0;
+                        setUnits(units.map(u => ({
+                          ...u,
+                          retailPrice: (baseCost * u.conversionFactor * (1 + vat / 100) * (1 + margin / 100)).toFixed(2)
+                        })));
+                      }
                     }}
                     className={`w-full bg-[#201f1f] border rounded-full p-5 text-2xl font-bold text-[#e5e2e1] focus:ring-2 focus:ring-primary/30 transition-all ${
                       errors.includes("vatRate") ? "border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.2)]" : "border-white/5"
                     }`}
+                  />
+                  <span className="absolute left-8 top-1/2 -translate-y-1/2 font-bold opacity-40">%</span>
+                </div>
+              </div>
+              <div className="space-y-5">
+                <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">هامش الربح (المستهلك)</label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    value={form.profitMargin}
+                    onChange={(e) => {
+                      const newMargin = e.target.value;
+                      setForm({ ...form, profitMargin: newMargin });
+                      const margin = parseFloat(newMargin) || 0;
+                      const baseCost = parseFloat(form.costPrice) || 0;
+                      const vat = parseFloat(form.vatRate) || 0;
+                      
+                      setUnits(units.map(u => ({
+                        ...u,
+                        retailPrice: (baseCost * u.conversionFactor * (1 + vat / 100) * (1 + margin / 100)).toFixed(2)
+                      })));
+                    }}
+                    className={`w-full bg-[#201f1f] border rounded-full p-5 text-2xl font-bold text-[#e5e2e1] focus:ring-2 focus:ring-primary/30 transition-all border-white/5`}
                   />
                   <span className="absolute left-8 top-1/2 -translate-y-1/2 font-bold opacity-40">%</span>
                 </div>

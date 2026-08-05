@@ -27,14 +27,18 @@ export default function InventoryMovementsModal({ onClose }: InventoryMovementsM
         let style = "bg-gray-500/10 text-gray-400 border-gray-500/20";
         let qtyPrefix = "";
         
-        if (tx.transaction_type === "Receiving" || tx.transaction_type === "Adjustment") {
-          typeLabel = tx.transaction_type === "Receiving" ? "وارد" : "تسوية";
+        if (tx.transaction_type === "Receiving") {
+          typeLabel = "وارد";
           style = "bg-green-500/10 text-green-400 border-green-500/20";
-          qtyPrefix = "+";
+          qtyPrefix = tx.quantity_changed > 0 ? "+" : "";
         } else if (tx.transaction_type === "Issuing") {
           typeLabel = "صادر";
           style = "bg-red-500/10 text-red-400 border-red-500/20";
-          qtyPrefix = "-";
+          qtyPrefix = tx.quantity_changed > 0 ? "+" : "";
+        } else if (tx.transaction_type === "Adjustment") {
+          typeLabel = "تسوية";
+          style = "bg-[#ffb4ab]/10 text-[#ffb4ab] border-[#ffb4ab]/20";
+          qtyPrefix = tx.quantity_changed > 0 ? "+" : "";
         }
         
         const d = new Date(tx.created_at);
@@ -44,8 +48,8 @@ export default function InventoryMovementsModal({ onClose }: InventoryMovementsM
            type: typeLabel,
            date: `${d.toLocaleDateString('ar-EG')} ${d.toLocaleTimeString('ar-EG', {hour:'2-digit', minute:'2-digit'})}`,
            typeStyle: style,
-           qty: `${qtyPrefix}${tx.quantity}`,
-           qtyColor: style.includes("green") ? "text-green-400" : style.includes("red") ? "text-red-400" : "text-[#e5e2e1]"
+           qty: `${qtyPrefix}${tx.quantity_changed}`,
+           qtyColor: style.includes("green") ? "text-green-400" : style.includes("red") ? "text-red-400" : style.includes("ffb4ab") ? "text-[#ffb4ab]" : "text-[#e5e2e1]"
         };
       });
       setMovements(mapped);

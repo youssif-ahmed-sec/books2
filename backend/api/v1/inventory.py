@@ -111,7 +111,6 @@ async def get_inventory_balances(
 
 @router.get("/stats", response_model=InventoryStatsResponse,
            summary="📊 Inventory dashboard statistics")
-@cache(expire=60)
 async def get_inventory_stats(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -126,23 +125,33 @@ async def get_inventory_stats(
     )
     today_movements = (await db.execute(today_movements_query)).scalar() or 0
 
+    # Subquery to sum inventory balance per product
+    inventory_summary = (
+        select(
+            InventoryBalance.product_id,
+            func.sum(InventoryBalance.current_stock).label("total_stock")
+        )
+        .group_by(InventoryBalance.product_id)
+        .subquery()
+    )
+
     # 2. Low stock and critical stock
-    # Join Product and InventoryBalance to include products with no balance (stock = 0)
+    # Join Product and inventory_summary to include products with no balance (stock = 0)
     # Low stock: stock > 0 AND stock <= min_stock_level
     low_stock_query = select(func.count(Product.id)).outerjoin(
-        InventoryBalance, Product.id == InventoryBalance.product_id
+        inventory_summary, Product.id == inventory_summary.c.product_id
     ).where(
-        (func.coalesce(InventoryBalance.current_stock, 0) > 0) &
-        (func.coalesce(InventoryBalance.current_stock, 0) <= Product.min_stock_level),
+        (func.coalesce(inventory_summary.c.total_stock, 0) > 0) &
+        (func.coalesce(inventory_summary.c.total_stock, 0) <= Product.min_stock_level),
         Product.is_deleted == False
     )
     low_stock = (await db.execute(low_stock_query)).scalar() or 0
     
     # Critical stock: stock <= 0
     critical_stock_query = select(func.count(Product.id)).outerjoin(
-        InventoryBalance, Product.id == InventoryBalance.product_id
+        inventory_summary, Product.id == inventory_summary.c.product_id
     ).where(
-        (func.coalesce(InventoryBalance.current_stock, 0) <= 0),
+        (func.coalesce(inventory_summary.c.total_stock, 0) <= 0),
         Product.is_deleted == False
     )
     critical_stock = (await db.execute(critical_stock_query)).scalar() or 0

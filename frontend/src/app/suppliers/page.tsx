@@ -267,7 +267,12 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess }: { supplierId: str
 
         {/* Balance Cards */}
         {detail && (
-          <div className="grid grid-cols-3 gap-4 p-6 border-b border-white/10">
+          <div className="grid grid-cols-4 gap-4 p-6 border-b border-white/10">
+            <div className="glass rounded-2xl p-4 text-center">
+              <p className="text-[10px] text-[#e2bfb0]/60 mb-1">الرصيد الافتتاحي</p>
+              <p className="text-lg font-bold text-white">{Number(detail.opening_balance || 0).toLocaleString()}</p>
+              <p className="text-[10px] text-[#e2bfb0]/40">ج.م</p>
+            </div>
             <div className="glass rounded-2xl p-4 text-center">
               <p className="text-[10px] text-[#e2bfb0]/60 mb-1">إجمالي المشتريات</p>
               <p className="text-lg font-bold text-white">{Number(detail.total_purchases).toLocaleString()}</p>
@@ -278,10 +283,15 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess }: { supplierId: str
               <p className="text-lg font-bold text-green-400">{Number(detail.total_payments).toLocaleString()}</p>
               <p className="text-[10px] text-[#e2bfb0]/40">ج.م</p>
             </div>
-            <div className="glass rounded-2xl p-4 text-center">
+            <div className={`glass rounded-2xl p-4 text-center ${detail.credit_limit && Number(detail.balance) > Number(detail.credit_limit) ? 'border border-red-500/50 shadow-[0_0_10px_rgba(239,68,68,0.2)]' : ''}`}>
               <p className="text-[10px] text-[#e2bfb0]/60 mb-1">الرصيد المستحق</p>
               <p className={`text-lg font-bold ${Number(detail.balance) > 0 ? "text-[#ffb4ab]" : "text-green-400"}`}>{Number(detail.balance).toLocaleString()}</p>
               <p className="text-[10px] text-[#e2bfb0]/40">ج.م</p>
+              {detail.credit_limit ? (
+                <p className={`text-[9px] mt-1 border-t border-white/5 pt-1 ${Number(detail.balance) > Number(detail.credit_limit) ? 'text-red-400 font-bold' : 'text-[#e2bfb0]/40'}`}>
+                  حد الائتمان: {Number(detail.credit_limit).toLocaleString()}
+                </p>
+              ) : null}
             </div>
           </div>
         )}
