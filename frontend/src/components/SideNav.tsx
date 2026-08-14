@@ -9,7 +9,7 @@ const navItems = [
   { href: "/inventory", icon: "inventory_2", label: "المخزون", filled: true, disabled: false },
   { href: "/suppliers", icon: "local_shipping", label: "الموردين", disabled: false },
   { href: "/categories", icon: "category", label: "التصنيفات", disabled: false },
-  { href: "/pos", icon: "point_of_sale", label: "نقطة البيع", disabled: true },
+  { href: "/pos", icon: "point_of_sale", label: "نقطة البيع", disabled: false },
   { href: "/orders", icon: "shopping_cart", label: "الطلبات", disabled: true },
   { href: "/customers", icon: "group", label: "العملاء", disabled: true },
   { href: "/reports", icon: "analytics", label: "التقارير", disabled: true },

@@ -13,6 +13,8 @@ from api.v1.orders import router as orders_router
 from api.v1.global_units import router as global_units_router
 from api.v1.upload import router as upload_router
 from api.v1.suppliers import router as suppliers_router
+from api.v1.customers import router as customers_router
+from api.v1.pos import router as pos_router
 
 app = FastAPI(
     title="Souod El Shafie Bookstore API",
@@ -70,6 +72,8 @@ app.include_router(orders_router,    prefix="/api/v1")
 app.include_router(global_units_router, prefix="/api/v1")
 app.include_router(upload_router,    prefix="/api/v1")
 app.include_router(suppliers_router, prefix="/api/v1")
+app.include_router(customers_router, prefix="/api/v1")
+app.include_router(pos_router,       prefix="/api/v1")
 
 
 @app.on_event("startup")
@@ -79,6 +83,7 @@ async def on_startup():
     import models.product
     import models.inventory
     import models.order
+    import models.customer
     from models.user import Base
     from sqlalchemy import text
     
