@@ -33,8 +33,15 @@ const productFormSchema = z.object({
   vatRate: z.string().refine(val => !isNaN(parseFloat(val)) && parseFloat(val) >= 0, "الضريبة مطلوبة"),
   minStockLevel: z.string().refine(val => !isNaN(parseFloat(val)) && parseFloat(val) >= 0, "الحد الأدنى مطلوب"),
   maxStockLevel: z.string().refine(val => !isNaN(parseFloat(val)) && parseFloat(val) >= 0, "الحد الأقصى مطلوب"),
+  is_bundle: z.boolean().optional(),
   units: z.array(unitSchema).min(1, "يجب إضافة وحدة واحدة على الأقل"),
 });
+
+interface BundleComponent {
+  id: string; // frontend key
+  component_id: string;
+  quantity: number;
+}
 
 interface ProductUnit {
   id: string;
@@ -82,6 +89,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
     profitMargin: "0",
     minStockLevel: "0",
     maxStockLevel: "0",
+    is_bundle: false,
   });
   
   const [isUploadingImage, setIsUploadingImage] = useState(false);
@@ -89,6 +97,9 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
   const [units, setUnits] = useState<ProductUnit[]>([
     { id: "1", name: "قطعة", conversionFactor: 1, sku: "", isDefault: true, stock: 0, isBase: true, retailPrice: "0", wholesalePrice: "0", vipPrice: "0" },
   ]);
+
+  const [bundleComponents, setBundleComponents] = useState<BundleComponent[]>([]);
+  const [productsList, setProductsList] = useState<any[]>([]);
 
   const [globalUnits, setGlobalUnits] = useState<GlobalUnit[]>([]);
   const [showNewUnitDialog, setShowNewUnitDialog] = useState(false);
@@ -123,6 +134,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
           profitMargin: "0",
           minStockLevel: data.min_stock_level?.toString() || "0",
           maxStockLevel: data.max_stock_level?.toString() || "0",
+          is_bundle: data.is_bundle || false,
         });
         
         if (data.units && data.units.length > 0) {
@@ -145,6 +157,18 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
           });
           setUnits(loadedUnits);
         }
+
+        if (data.is_bundle && data.bundle_components) {
+          setBundleComponents(data.bundle_components.map((c: any) => ({
+            id: c.id || Date.now().toString() + Math.random(),
+            component_id: c.component_id,
+            quantity: c.quantity
+          })));
+        } else {
+          setBundleComponents([]);
+        }
+        setForm(prev => ({ ...prev, is_bundle: data.is_bundle || false }));
+
         setIsLoading(false);
       } catch (err) {
         console.error("Failed to load product", err);
@@ -166,16 +190,18 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
     }
     async function loadDropdowns() {
       try {
-        const [cats, subcats, brnds, supps] = await Promise.all([
+        const [cats, subcats, brnds, supps, prods] = await Promise.all([
           fetchApi("/products/categories"),
           fetchApi("/products/subcategories"),
           fetchApi("/products/brands"),
-          fetchApi("/products/suppliers")
+          fetchApi("/products/suppliers"),
+          fetchApi("/products")
         ]);
         setCategoriesList(cats);
         setSubcategoriesList(subcats);
         setBrandsList(brnds);
         setSuppliersList(supps);
+        setProductsList(prods.data || []);
       } catch (err) {
         console.error("Failed to load dropdowns:", err);
       }
@@ -204,6 +230,25 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
 
   const updateUnit = (id: string, field: keyof ProductUnit, value: any) => {
     setUnits(prev => prev.map(u => u.id === id ? { ...u, [field]: value } : u));
+  };
+
+  const removeUnit = (id: string) => {
+    setUnits(prev => prev.filter(u => u.id !== id));
+  };
+
+  const addBundleComponent = () => {
+    setBundleComponents([
+      ...bundleComponents,
+      { id: Date.now().toString(), component_id: "", quantity: 1 }
+    ]);
+  };
+
+  const updateBundleComponent = (id: string, field: keyof BundleComponent, value: any) => {
+    setBundleComponents(prev => prev.map(c => c.id === id ? { ...c, [field]: value } : c));
+  };
+
+  const removeBundleComponent = (id: string) => {
+    setBundleComponents(prev => prev.filter(c => c.id !== id));
   };
 
   const deleteUnit = (id: string) => {
@@ -319,7 +364,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
       setErrors([]);
       
       setIsSaving(true);
-      const productData = {
+      const payload = {
         sku: form.sku, // Keep existing SKU
         barcode: form.barcode,
         name_en: form.nameEn || form.nameAr,
@@ -332,6 +377,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
         description: form.description,
         image_url: form.imageUrl,
         is_active: form.active,
+        is_bundle: form.is_bundle,
         category_id: form.category_id && form.category_id !== "" ? form.category_id : null,
         subcategory_id: form.subCategory_id && form.subCategory_id !== "" ? form.subCategory_id : null,
         brand_id: form.brand_id && form.brand_id !== "" ? form.brand_id : null,
@@ -340,19 +386,24 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
           unit_name: u.name || "Unknown",
           conversion_factor: u.conversionFactor,
           barcode: u.sku,
+          is_default: u.isDefault,
           prices: [
-            { price_level: "Retail", price: parseFloat(u.retailPrice) || 0 },
-            { price_level: "Wholesale", price: parseFloat(u.wholesalePrice) || 0 },
-            { price_level: "VIP", price: parseFloat(u.vipPrice) || 0 },
+            { price_level: "Retail", price_type: "retail", price: parseFloat(u.retailPrice) || 0 },
+            { price_level: "Wholesale", price_type: "wholesale", price: parseFloat(u.wholesalePrice) || 0 },
+            { price_level: "VIP", price_type: "vip", price: parseFloat(u.vipPrice) || 0 },
           ]
         })),
+        bundle_components: form.is_bundle ? bundleComponents.map(c => ({
+          component_id: c.component_id,
+          quantity: c.quantity
+        })) : [],
         initial_stock: totalBaseStock
       };
 
       await fetchApi(`/products/${productId}`, {
         method: "PUT",
         body: JSON.stringify({
-          ...productData,
+          ...payload,
           total_stock: units.reduce((acc, u) => acc + ((typeof u.stock === "number" ? u.stock : parseFloat(u.stock as unknown as string)) * u.conversionFactor), 0)
         }),
       });
@@ -904,6 +955,78 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
                     <span className="material-symbols-outlined text-lg text-primary">sell</span>
                     توزيع أسعار البيع - شريحة الـ {unit.name || `وحدة مخصصة ${index + 1}`}
                   </p>
+
+                  <div className="flex items-center gap-3 mt-4">
+                    <label className="text-sm font-medium text-zinc-300">هل هذا المنتج عرض مجمع (Bundle)؟</label>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input 
+                        type="checkbox" 
+                        checked={form.is_bundle}
+                        onChange={(e) => setForm({...form, is_bundle: e.target.checked})}
+                        className="sr-only peer" 
+                      />
+                      <div className="w-11 h-6 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:right-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
+                    </label>
+                  </div>
+                  
+                  {form.is_bundle && (
+                    <div className="mt-4 border-t border-zinc-800 pt-4">
+                      <div className="flex justify-between items-center mb-4">
+                        <h4 className="text-sm font-medium text-zinc-300">مكونات العرض (Bundle Components)</h4>
+                        <button
+                          type="button"
+                          onClick={addBundleComponent}
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded text-sm transition-colors"
+                        >
+                          + إضافة مكون
+                        </button>
+                      </div>
+                      
+                      <div className="space-y-3">
+                        {bundleComponents.map((comp) => (
+                          <div key={comp.id} className="flex gap-3 items-end p-3 bg-zinc-800/50 rounded-lg border border-zinc-700/50">
+                            <div className="flex-1">
+                              <label className="block text-xs font-medium text-zinc-400 mb-1">المنتج المكون</label>
+                              <select 
+                                value={comp.component_id} 
+                                onChange={(e) => updateBundleComponent(comp.id, "component_id", e.target.value)}
+                                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500"
+                              >
+                                <option value="">-- اختر المنتج --</option>
+                                {productsList.filter(p => !p.is_bundle && p.id !== productId).map(p => (
+                                  <option key={p.id} value={p.id}>{p.name_ar}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className="w-32">
+                              <label className="block text-xs font-medium text-zinc-400 mb-1">الكمية في العرض</label>
+                              <input 
+                                type="number" 
+                                min="1"
+                                value={comp.quantity}
+                                onChange={(e) => updateBundleComponent(comp.id, "quantity", parseInt(e.target.value))}
+                                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 text-white text-left focus:outline-none focus:border-emerald-500"
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => removeBundleComponent(comp.id)}
+                              className="text-red-500 hover:text-red-400 p-2 bg-red-500/10 rounded-lg transition-colors"
+                            >
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                            </button>
+                          </div>
+                        ))}
+                        {bundleComponents.length === 0 && (
+                          <div className="text-center p-4 text-zinc-500 text-sm bg-zinc-800/30 rounded-lg border border-dashed border-zinc-700">
+                            لا يوجد مكونات مضافة حتى الآن.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="border-t border-zinc-800 mt-6 pt-6"></div>
                   <div className="grid grid-cols-3 gap-6">
                     {[
                       { label: "سعر المستهلك (Retail)", key: "retailPrice" as const, highlight: false },

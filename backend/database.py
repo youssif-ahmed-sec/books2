@@ -11,7 +11,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     DATABASE_URL = "postgresql+asyncpg://postgres:postgres@127.0.0.1:54322/postgres"
 
-connect_args = {}
+connect_args = {"statement_cache_size": 0}
 
 # Detect SSL requirement BEFORE modifying the URL
 needs_ssl = bool(re.search(r"sslmode=(require|verify-ca|verify-full|prefer)", DATABASE_URL))

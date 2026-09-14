@@ -90,6 +90,7 @@ class Product(Base):
     description = Column(String, nullable=True)
     image_url = Column(String, nullable=True)
     
+    is_bundle = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
     is_deleted = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -97,6 +98,12 @@ class Product(Base):
 
     # Relationships
     units = relationship("ProductUnit", back_populates="product", cascade="all, delete-orphan")
+    bundle_components = relationship(
+        "ProductBundleComponent",
+        foreign_keys="ProductBundleComponent.bundle_id",
+        back_populates="bundle",
+        cascade="all, delete-orphan",
+    )
     category = relationship("Category")
     subcategory = relationship("Subcategory")
     brand = relationship("Brand")
@@ -146,3 +153,14 @@ class ProductPrice(Base):
     __table_args__ = (
         UniqueConstraint('product_id', 'unit_id', 'price_level', name='uix_product_unit_pricelevel'),
     )
+
+class ProductBundleComponent(Base):
+    __tablename__ = "product_bundle_components"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    bundle_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
+    component_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
+    quantity = Column(Numeric(10, 2), nullable=False)  # Quantity in the component's base_unit
+    
+    bundle = relationship("Product", foreign_keys=[bundle_id], back_populates="bundle_components")
+    component = relationship("Product", foreign_keys=[component_id])

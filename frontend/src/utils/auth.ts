@@ -1,4 +1,4 @@
-export type UserRole = "Admin" | "Cashier" | "Sales" | "Inventory Controller" | "Sales Assistant";
+export type UserRole = "ADMIN" | "CASHIER_ORDERS" | "SENIOR_SALES" | "INVENTORY_CONTROLLER" | "SALES_ASSISTANT";
 
 export function decodeJwt(token: string) {
   try {
@@ -27,9 +27,9 @@ export function getUserRole(): UserRole | null {
 }
 
 export function canViewCost(role: UserRole | null): boolean {
-  return role === "Admin" || role === "Inventory Controller";
+  return role === "ADMIN" || role === "INVENTORY_CONTROLLER";
 }
 
 export function canEditProduct(role: UserRole | null): boolean {
-  return role === "Admin" || role === "Inventory Controller";
+  return role === "ADMIN" || role === "INVENTORY_CONTROLLER";
 }

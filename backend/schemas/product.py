@@ -48,6 +48,19 @@ class ProductUnitResponse(ProductUnitBase):
 
     model_config = ConfigDict(from_attributes=True)
 
+class ProductBundleComponentBase(BaseModel):
+    component_id: UUID
+    quantity: Decimal
+
+class ProductBundleComponentCreate(ProductBundleComponentBase):
+    pass
+
+class ProductBundleComponentResponse(ProductBundleComponentBase):
+    id: UUID
+    bundle_id: UUID
+
+    model_config = ConfigDict(from_attributes=True)
+
 class ProductBase(BaseModel):
     sku: str
     barcode: Optional[str] = None
@@ -65,10 +78,12 @@ class ProductBase(BaseModel):
     max_stock_level: Decimal = Decimal("0")
     description: Optional[str] = None
     image_url: Optional[str] = None
+    is_bundle: bool = False
     is_active: bool = True
 
 class ProductCreate(ProductBase):
     units: List[ProductUnitCreate] = []
+    bundle_components: List[ProductBundleComponentCreate] = []
     initial_stock: Decimal = Decimal("0")
 
 class ProductUpdate(BaseModel):
@@ -88,9 +103,11 @@ class ProductUpdate(BaseModel):
     max_stock_level: Optional[Decimal] = None
     description: Optional[str] = None
     image_url: Optional[str] = None
+    is_bundle: Optional[bool] = None
     is_active: Optional[bool] = None
     
     units: Optional[List[ProductUnitCreate]] = None
+    bundle_components: Optional[List[ProductBundleComponentCreate]] = None
     total_stock: Optional[Decimal] = None
 
 class CategoryBase(BaseModel):
@@ -205,6 +222,7 @@ class ProductResponse(ProductBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
     units: List[ProductUnitResponse] = []
+    bundle_components: List[ProductBundleComponentResponse] = []
     category: Optional[CategoryResponse] = None
     current_stock: Decimal = Decimal("0")
 

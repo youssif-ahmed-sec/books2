@@ -11,7 +11,7 @@ from models.user import User
 from schemas.inventory import InventoryTransactionCreate, InventoryTransactionResponse, InventoryBalanceResponse, InventoryStatsResponse, InventoryTransactionRecentResponse, PaginatedInventoryTransactionResponse
 from sqlalchemy import func, desc
 from datetime import date
-from core.dependencies import get_current_user
+from core.dependencies import get_current_user, require_inventory_access
 from database import get_db
 from fastapi_cache.decorator import cache
 
@@ -21,7 +21,7 @@ router = APIRouter(prefix="/inventory", tags=["Inventory"])
 async def create_inventory_transaction(
     transaction_in: InventoryTransactionCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_inventory_access),
 ):
     """
     Create a new inventory transaction and update the inventory balance.
@@ -76,7 +76,7 @@ async def create_inventory_transaction(
 async def get_inventory_balances(
     warehouse_id: UUID = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_inventory_access),
 ):
     """
     Get all inventory balances, optionally filtered by warehouse, including product and warehouse names.
@@ -113,7 +113,7 @@ async def get_inventory_balances(
            summary="📊 Inventory dashboard statistics")
 async def get_inventory_stats(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_inventory_access),
 ):
     """
     Get inventory dashboard statistics.
@@ -211,7 +211,7 @@ async def get_inventory_transactions(
 async def get_recent_transactions(
     limit: int = 5,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_inventory_access),
 ):
     """
     Get the most recent inventory transactions.

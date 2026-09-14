@@ -1,0 +1,72 @@
+2026-08-20 03:38:24,104 INFO httpx: HTTP Request: GET http://testserver/api/health "HTTP/1.1 200 OK"
+2026-08-20 03:38:24,112 INFO httpx: HTTP Request: GET http://testserver/api/printers "HTTP/1.1 200 OK"
+2026-08-20 04:02:34,737 INFO httpx: HTTP Request: OPTIONS http://testserver/api/print "HTTP/1.1 400 Bad Request"
+2026-08-20 04:03:03,726 INFO httpx: HTTP Request: OPTIONS http://testserver/api/print "HTTP/1.1 200 OK"
+2026-08-20 04:03:03,729 INFO httpx: HTTP Request: OPTIONS http://testserver/api/print "HTTP/1.1 200 OK"
+2026-08-20 04:03:03,731 INFO httpx: HTTP Request: OPTIONS http://testserver/api/print "HTTP/1.1 200 OK"
+2026-08-20 04:03:03,733 INFO httpx: HTTP Request: OPTIONS http://testserver/api/print "HTTP/1.1 200 OK"
+2026-08-20 04:05:30,277 INFO httpx: HTTP Request: OPTIONS http://testserver/api/print "HTTP/1.1 200 OK"
+2026-08-20 04:05:30,282 INFO httpx: HTTP Request: GET http://testserver/api/health "HTTP/1.1 200 OK"
+2026-08-20 04:05:30,286 INFO httpx: HTTP Request: POST http://testserver/api/print "HTTP/1.1 202 Accepted"
+2026-08-20 04:05:30,289 INFO httpx: HTTP Request: OPTIONS http://testserver/api/print "HTTP/1.1 400 Bad Request"
+2026-08-20 04:11:28,837 INFO httpx: HTTP Request: OPTIONS http://testserver/api/print "HTTP/1.1 200 OK"
+2026-08-20 04:11:28,843 INFO httpx: HTTP Request: GET http://testserver/api/health "HTTP/1.1 200 OK"
+2026-08-20 04:11:28,847 INFO httpx: HTTP Request: POST http://testserver/api/print "HTTP/1.1 202 Accepted"
+2026-08-20 04:11:28,850 INFO httpx: HTTP Request: OPTIONS http://testserver/api/print "HTTP/1.1 400 Bad Request"
+2026-08-20 04:14:02,560 INFO httpx: HTTP Request: OPTIONS http://testserver/api/print "HTTP/1.1 200 OK"
+2026-08-20 04:14:02,564 INFO httpx: HTTP Request: GET http://testserver/api/health "HTTP/1.1 200 OK"
+2026-08-20 04:14:02,569 INFO httpx: HTTP Request: POST http://testserver/api/print "HTTP/1.1 202 Accepted"
+2026-08-20 04:14:02,571 INFO httpx: HTTP Request: OPTIONS http://testserver/api/print "HTTP/1.1 400 Bad Request"
+2026-08-20 04:18:04,245 INFO httpx: HTTP Request: OPTIONS http://testserver/api/print "HTTP/1.1 200 OK"
+2026-08-20 04:18:04,250 INFO httpx: HTTP Request: GET http://testserver/api/health "HTTP/1.1 200 OK"
+2026-08-20 04:18:04,254 INFO httpx: HTTP Request: POST http://testserver/api/print "HTTP/1.1 202 Accepted"
+2026-08-20 04:18:04,257 INFO httpx: HTTP Request: OPTIONS http://testserver/api/print "HTTP/1.1 400 Bad Request"
+2026-09-09 02:22:35,119 INFO uvicorn.error: Started server process [3944]
+2026-09-09 02:22:35,119 INFO uvicorn.error: Waiting for application startup.
+2026-09-09 02:22:35,120 INFO uvicorn.error: ASGI 'lifespan' protocol appears unsupported.
+2026-09-09 02:22:35,120 INFO uvicorn.error: Application startup complete.
+2026-09-09 02:22:35,120 INFO uvicorn.error: Uvicorn running on http://127.0.0.1:8199 (Press CTRL+C to quit)
+2026-09-09 02:38:07,759 INFO uvicorn.error: Started server process [10748]
+2026-09-09 02:38:07,760 INFO uvicorn.error: Waiting for application startup.
+2026-09-09 02:38:07,760 INFO uvicorn.error: ASGI 'lifespan' protocol appears unsupported.
+2026-09-09 02:38:07,760 INFO uvicorn.error: Application startup complete.
+2026-09-09 02:38:07,760 INFO uvicorn.error: Uvicorn running on http://127.0.0.1:8199 (Press CTRL+C to quit)
+2026-09-09 02:50:00,493 ERROR uvicorn.error: Exception in ASGI application
+Traceback (most recent call last):
+  File "C:\Users\JoO\AppData\Local\Programs\Python\Python313\Lib\site-packages\uvicorn\protocols\http\httptools_impl.py", line 416, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        self.scope, self.receive, self.send
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\JoO\AppData\Local\Programs\Python\Python313\Lib\site-packages\uvicorn\middleware\proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\JoO\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\applications.py", line 1135, in __call__
+    await super().__call__(scope, receive, send)
+  File "C:\Users\JoO\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\applications.py", line 106, in __call__
+    self.middleware_stack = self.build_middleware_stack()
+                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\JoO\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\applications.py", line 1043, in build_middleware_stack
+    app = cls(app, *args, **kwargs)
+TypeError: CORSMiddleware.__init__() got an unexpected keyword argument 'allow_private_network'
+2026-09-09 02:51:55,849 INFO uvicorn.error: Started server process [18736]
+2026-09-09 02:51:55,849 INFO uvicorn.error: Waiting for application startup.
+2026-09-09 02:51:55,849 INFO uvicorn.error: Application startup complete.
+2026-09-09 02:51:55,850 INFO uvicorn.error: Uvicorn running on http://127.0.0.1:8199 (Press CTRL+C to quit)
+2026-09-09 02:55:24,484 INFO uvicorn.error: Started server process [28160]
+2026-09-09 02:55:24,485 INFO uvicorn.error: Waiting for application startup.
+2026-09-09 02:55:24,485 INFO uvicorn.error: Application startup complete.
+2026-09-09 02:55:24,486 INFO uvicorn.error: Uvicorn running on http://127.0.0.1:8199 (Press CTRL+C to quit)
+2026-09-09 02:55:50,259 INFO uvicorn.error: Started server process [7272]
+2026-09-09 02:55:50,259 INFO uvicorn.error: Waiting for application startup.
+2026-09-09 02:55:50,260 INFO uvicorn.error: Application startup complete.
+2026-09-09 02:55:50,260 ERROR uvicorn.error: [Errno 10048] error while attempting to bind on address ('127.0.0.1', 8199): [winerror 10048] only one usage of each socket address (protocol/network address/port) is normally permitted
+2026-09-09 02:55:50,260 INFO uvicorn.error: Waiting for application shutdown.
+2026-09-09 02:55:50,261 INFO uvicorn.error: Application shutdown complete.
+2026-09-09 02:56:10,078 INFO topchef_print_agent: Native Python GDI print successful to OneNote (Desktop)
+2026-09-09 02:56:12,830 INFO topchef_print_agent: Native Python GDI print successful to OneNote (Desktop)
+2026-09-09 02:56:28,485 INFO topchef_print_agent: Native Python GDI print successful to OneNote (Desktop)
+2026-09-09 02:56:49,173 INFO topchef_print_agent: Native Python GDI print successful to OneNote (Desktop)
+2026-09-09 03:07:02,683 INFO topchef_print_agent: Native Python GDI print successful to OneNote (Desktop)

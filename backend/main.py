@@ -15,6 +15,10 @@ from api.v1.upload import router as upload_router
 from api.v1.suppliers import router as suppliers_router
 from api.v1.customers import router as customers_router
 from api.v1.pos import router as pos_router
+from api.v1.financials import router as financials_router
+from api.v1.webhooks import router as webhooks_router
+from api.v1.dashboards import router as dashboards_router
+from api.v1.reports import router as reports_router
 
 app = FastAPI(
     title="Souod El Shafie Bookstore API",
@@ -74,6 +78,10 @@ app.include_router(upload_router,    prefix="/api/v1")
 app.include_router(suppliers_router, prefix="/api/v1")
 app.include_router(customers_router, prefix="/api/v1")
 app.include_router(pos_router,       prefix="/api/v1")
+app.include_router(financials_router, prefix="/api/v1")
+app.include_router(webhooks_router,  prefix="/api/v1")
+app.include_router(dashboards_router, prefix="/api/v1")
+app.include_router(reports_router,    prefix="/api/v1")
 
 
 @app.on_event("startup")
@@ -92,6 +100,20 @@ async def on_startup():
     async with engine.begin() as conn:
 
         # ── Step 1: Migrate users table (idempotent) ─────────────────────────
+        # Ensure roleenum exists and has all values
+        await conn.execute(text("""
+            DO $$ BEGIN
+                CREATE TYPE roleenum AS ENUM ('ADMIN', 'CASHIER_ORDERS', 'SENIOR_SALES', 'INVENTORY_CONTROLLER', 'SALES_ASSISTANT');
+            EXCEPTION
+                WHEN duplicate_object THEN NULL;
+            END $$;
+        """))
+        await conn.execute(text("ALTER TYPE roleenum ADD VALUE IF NOT EXISTS 'ADMIN';"))
+        await conn.execute(text("ALTER TYPE roleenum ADD VALUE IF NOT EXISTS 'CASHIER_ORDERS';"))
+        await conn.execute(text("ALTER TYPE roleenum ADD VALUE IF NOT EXISTS 'SENIOR_SALES';"))
+        await conn.execute(text("ALTER TYPE roleenum ADD VALUE IF NOT EXISTS 'INVENTORY_CONTROLLER';"))
+        await conn.execute(text("ALTER TYPE roleenum ADD VALUE IF NOT EXISTS 'SALES_ASSISTANT';"))
+
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text("""
             ALTER TABLE users
@@ -154,8 +176,30 @@ async def on_startup():
         # replace this block with a proper Alembic migration.
         await conn.execute(text("DROP TABLE IF EXISTS order_items CASCADE;"))
         await conn.execute(text("DROP TABLE IF EXISTS orders CASCADE;"))
+        
+        # ── Step 4: Add CRM fields to customers ───────────────────────────────
+        await conn.execute(text("""
+            ALTER TABLE customers
+            ADD COLUMN IF NOT EXISTS whatsapp_number VARCHAR,
+            ADD COLUMN IF NOT EXISTS city VARCHAR,
+            ADD COLUMN IF NOT EXISTS customer_type VARCHAR NOT NULL DEFAULT 'Retail Customer',
+            ADD COLUMN IF NOT EXISTS tags JSONB DEFAULT '[]'::jsonb,
+            ADD COLUMN IF NOT EXISTS notes TEXT,
+            ADD COLUMN IF NOT EXISTS purchase_count INTEGER NOT NULL DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS total_purchases NUMERIC(12,2) NOT NULL DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS average_purchase NUMERIC(12,2) NOT NULL DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS last_purchase_date TIMESTAMPTZ,
+            ADD COLUMN IF NOT EXISTS favorite_categories JSONB DEFAULT '[]'::jsonb;
+        """))
+
+        # ── Step 5: Add bundle fields to products ─────────────────────────────
+        await conn.execute(text("""
+            ALTER TABLE products
+            ADD COLUMN IF NOT EXISTS is_bundle BOOLEAN NOT NULL DEFAULT FALSE;
+        """))
 
         # Re-run create_all so SQLAlchemy creates the tables with the new schema
+        import models.financial
         await conn.run_sync(Base.metadata.create_all)
 
     print("✅ Database tables created/migrated successfully.")

@@ -6,17 +6,36 @@ from sqlalchemy import func, or_
 from typing import List, Optional
 
 from database import get_db
-from models.product import Product, ProductUnit
+from models.product import Product, ProductUnit, PriceLevelEnum
 from models.inventory import InventoryBalance
 from schemas.product import ProductResponse
+from models.user import User
+from core.dependencies import require_pos_orders_access
 
 router = APIRouter(prefix="/pos", tags=["POS"])
+
+@router.get("/price-levels")
+async def get_price_levels(current_user: User = Depends(require_pos_orders_access)):
+    """
+    Returns all active price levels in the system.
+    """
+    mapping = {
+        "Retail": "قطاعي (Retail)",
+        "Semi Wholesale": "نصف جملة (Semi Wholesale)",
+        "Wholesale": "جملة (Wholesale)",
+        "Super Wholesale": "سوبر جملة (Super Wholesale)",
+        "VIP": "خاص (VIP)"
+    }
+    return [{"value": e.value, "label": mapping.get(e.value, e.value)} for e in PriceLevelEnum]
 
 @router.get("/search", response_model=List[ProductResponse])
 async def search_pos_products(
     q: Optional[str] = None,
+    barcode: Optional[str] = None,
+    category_id: Optional[str] = None,
     limit: int = 50,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_pos_orders_access),
 ):
     """
     Fast product search for POS by barcode, SKU, or name.

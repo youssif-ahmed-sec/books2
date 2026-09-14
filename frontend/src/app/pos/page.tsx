@@ -39,6 +39,7 @@ interface CartItem {
   totalPrice: number;
   conversionFactor: number;
   maxStock: number;
+  availableUnits: ProductUnit[];
 }
 
 export default function POSPage() {
@@ -46,7 +47,7 @@ export default function POSPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(false);
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [priceLevel, setPriceLevel] = useState("Retail");
+  const [availablePriceLevels, setAvailablePriceLevels] = useState<{value: string, label: string}[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState("");
   const [discount, setDiscount] = useState(0);
@@ -88,7 +89,7 @@ export default function POSPage() {
     } finally {
       setLoading(false);
     }
-  }, [priceLevel, cart]);
+  }, [cart]);
 
   useEffect(() => {
     const delayDebounceFn = setTimeout(() => {
@@ -98,19 +99,27 @@ export default function POSPage() {
   }, [searchQuery, searchProducts]);
 
   useEffect(() => {
-    const loadCustomers = async () => {
+    const loadData = async () => {
       try {
-        const data = await fetchApi("/customers");
-        if (Array.isArray(data)) {
-          setCustomers(data);
-        } else if (data.data && Array.isArray(data.data)) {
-          setCustomers(data.data);
+        const [customersData, priceLevelsData] = await Promise.all([
+          fetchApi("/customers"),
+          fetchApi("/pos/price-levels")
+        ]);
+
+        if (Array.isArray(customersData)) {
+          setCustomers(customersData);
+        } else if (customersData.data && Array.isArray(customersData.data)) {
+          setCustomers(customersData.data);
+        }
+
+        if (Array.isArray(priceLevelsData) && priceLevelsData.length > 0) {
+          setAvailablePriceLevels(priceLevelsData);
         }
       } catch (err) {
-        console.error("Failed to load customers", err);
+        console.error("Failed to load initial data", err);
       }
     };
-    loadCustomers();
+    loadData();
   }, []);
 
   const getPrice = (unit: ProductUnit, level: string) => {
@@ -125,9 +134,19 @@ export default function POSPage() {
 
     if (!unit) return;
 
-    const unitPrice = getPrice(unit, priceLevel);
+    let targetLevel = unit.prices.find(p => p.price_level === "Retail")?.price_level;
+    if (!targetLevel && unit.prices.length > 0) {
+      targetLevel = unit.prices[0].price_level;
+    }
+
+    if (!targetLevel) {
+      alert("لا يوجد أسعار لهذه الوحدة.");
+      return;
+    }
+
+    const unitPrice = getPrice(unit, targetLevel);
     if (unitPrice === 0) {
-      alert("لا يوجد تسعير لهذا الصنف بهذا المستوى.");
+      alert("السعر صفر لهذه الوحدة.");
       return;
     }
 
@@ -155,14 +174,71 @@ export default function POSPage() {
           unitId: unit.id,
           unitName: unit.unit_name,
           quantity: 1,
-          priceLevel: priceLevel,
+          priceLevel: targetLevel,
           unitPrice: unitPrice,
           totalPrice: unitPrice,
           conversionFactor: unit.conversion_factor,
-          maxStock: product.current_stock
+          maxStock: product.current_stock,
+          availableUnits: product.units
         }];
       }
     });
+  };
+
+  const updateCartItemUnit = (id: string, newUnitId: string) => {
+    setCart(prev => prev.map(item => {
+      if (item.id === id) {
+        const newUnit = item.availableUnits.find(u => u.id === newUnitId);
+        if (!newUnit) return item;
+
+        let targetLevel = item.priceLevel;
+        if (!newUnit.prices.find(p => p.price_level === targetLevel)) {
+          targetLevel = newUnit.prices.find(p => p.price_level === "Retail")?.price_level || (newUnit.prices.length > 0 ? newUnit.prices[0].price_level : "");
+        }
+
+        const unitPrice = getPrice(newUnit, targetLevel);
+        if (unitPrice === 0) {
+          alert("لا يوجد أسعار لهذه الوحدة.");
+          return item;
+        }
+
+        if (item.quantity * newUnit.conversion_factor > item.maxStock) {
+          alert("لا يوجد مخزون كافٍ لهذه الوحدة بالكمية المحددة.");
+          return item;
+        }
+
+        return {
+          ...item,
+          unitId: newUnit.id,
+          unitName: newUnit.unit_name,
+          priceLevel: targetLevel,
+          unitPrice: unitPrice,
+          totalPrice: item.quantity * unitPrice,
+          conversionFactor: newUnit.conversion_factor
+        };
+      }
+      return item;
+    }));
+  };
+
+  const updateCartItemPriceLevel = (id: string, newLevel: string) => {
+    setCart(prev => prev.map(item => {
+      if (item.id === id) {
+        const unit = item.availableUnits.find(u => u.id === item.unitId);
+        if (!unit) return item;
+
+        const unitPrice = getPrice(unit, newLevel);
+        if (unitPrice === 0) return item;
+
+        return {
+          ...item,
+          priceLevel: newLevel,
+          unitPrice: unitPrice,
+          totalPrice: item.quantity * unitPrice
+        };
+      }
+      return item;
+    }));
   };
 
   const updateCartItemQuantity = (id: string, newQty: number) => {
@@ -186,19 +262,6 @@ export default function POSPage() {
     setCart(prev => prev.filter(item => item.id !== id));
   };
 
-  // Recalculate prices when price level changes
-  useEffect(() => {
-    if (cart.length === 0) return;
-    const fetchNewPrices = async () => {
-      if (confirm("تغيير العميل أو مستوى السعر سيؤدي إلى تفريغ السلة، هل أنت متأكد؟")) {
-        setCart([]);
-      } else {
-        setCart([]);
-      }
-    };
-    setCart([]);
-  }, [priceLevel, selectedCustomer]);
-
   const subtotal = cart.reduce((sum, item) => sum + item.totalPrice, 0);
   const totalAmount = Math.max(0, subtotal - discount);
 
@@ -210,6 +273,7 @@ export default function POSPage() {
       const payload: any = {
         warehouse_id: "00000000-0000-0000-0000-000000000000", // Will be overridden or ignored if single warehouse
         status: "Delivered",
+        source: "Walk-In Customer",
         discount_amount: discount,
         payment_method: paymentMethod,
         items: cart.map(item => ({
@@ -224,10 +288,8 @@ export default function POSPage() {
         payload.customer_id = selectedCustomer;
       }
 
-      const balances = await fetchApi("/inventory/balances");
-      if (balances.length > 0) {
-        payload.warehouse_id = balances[0].warehouse_id;
-      }
+      // Let backend auto-resolve the warehouse with sufficient stock
+      payload.warehouse_id = "00000000-0000-0000-0000-000000000000";
 
       const res = await fetchApi("/orders", {
         method: "POST",
@@ -241,9 +303,34 @@ export default function POSPage() {
         totalAmount
       });
 
-      setTimeout(() => {
-        handlePrint();
-      }, 100);
+      // Auto-print to local agent
+      try {
+        await fetch("http://127.0.0.1:8199/api/print", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            order: {
+              id: res.id,
+              order_number: res.id,
+              cashier_name: "الكاشير",
+              subtotal: subtotal,
+              discount_amount: discount,
+              total_amount: totalAmount,
+              cart: cart.map(c => ({
+                qty: c.quantity,
+                price: c.unitPrice,
+                name: c.nameAr || "صنف غير معروف",
+              }))
+            },
+            receipt_type: "customer"
+          })
+        });
+      } catch (printErr) {
+        console.warn("Print agent failed, falling back to browser print", printErr);
+        setTimeout(() => {
+          handlePrint();
+        }, 100);
+      }
 
     } catch (error: any) {
       alert("فشل إتمام الطلب: " + (error.message || "تأكد من المخزون"));
@@ -274,12 +361,7 @@ export default function POSPage() {
                 <select 
                   value={selectedCustomer}
                   onChange={(e) => {
-                    const cid = e.target.value;
-                    setSelectedCustomer(cid);
-                    const cust = customers.find(c => c.id === cid);
-                    if (cust && cust.price_level) {
-                      setPriceLevel(cust.price_level);
-                    }
+                    setSelectedCustomer(e.target.value);
                   }}
                   className="bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none transition-all cursor-pointer text-white"
                 >
@@ -287,21 +369,6 @@ export default function POSPage() {
                   {customers.map(c => (
                     <option key={c.id} value={c.id} className="bg-[#1c1b1b] text-white">{c.name}</option>
                   ))}
-                </select>
-              </div>
-
-              <div className="flex flex-col gap-2">
-                <label className="text-[11px] font-bold text-[#e2bfb0]/60 uppercase">مستوى التسعير</label>
-                <select 
-                  value={priceLevel}
-                  onChange={(e) => setPriceLevel(e.target.value)}
-                  className="bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none transition-all cursor-pointer text-white"
-                >
-                  <option value="Retail" className="bg-[#1c1b1b] text-white">قطاعي (Retail)</option>
-                  <option value="Semi Wholesale" className="bg-[#1c1b1b] text-white">نصف جملة (Semi Wholesale)</option>
-                  <option value="Wholesale" className="bg-[#1c1b1b] text-white">جملة (Wholesale)</option>
-                  <option value="Super Wholesale" className="bg-[#1c1b1b] text-white">سوبر جملة (Super Wholesale)</option>
-                  <option value="VIP" className="bg-[#1c1b1b] text-white">خاص (VIP)</option>
                 </select>
               </div>
             </div>
@@ -328,28 +395,56 @@ export default function POSPage() {
               ) : (
                 <div className="flex flex-col gap-2">
                   {cart.map(item => (
-                    <div key={item.id} className="bg-white/5 p-4 rounded-xl border border-white/5 flex flex-col gap-3">
-                      <div className="flex justify-between items-start">
-                        <div className="flex-1">
-                          <h4 className="font-bold text-sm truncate">{item.nameAr}</h4>
-                          <p className="text-[10px] text-primary">{item.unitName} - {item.unitPrice} ج.م</p>
-                        </div>
-                        <button onClick={() => removeCartItem(item.id)} className="text-[#ffb4ab]/70 hover:text-[#ffb4ab] transition-colors">
-                          <span className="material-symbols-outlined text-lg">delete</span>
+                    <div key={item.id} className="bg-white/5 p-4 rounded-xl border border-white/5 flex flex-col gap-3 shadow-sm">
+                      {/* Top Row: Name and Delete */}
+                      <div className="flex justify-between items-center">
+                        <h4 className="font-bold text-[15px] text-white truncate flex-1 pl-2">{item.nameAr}</h4>
+                        <button onClick={() => removeCartItem(item.id)} className="text-[#ffb4ab]/60 hover:text-[#ffb4ab] bg-[#ffb4ab]/5 hover:bg-[#ffb4ab]/15 rounded-lg p-1.5 transition-colors shrink-0">
+                          <span className="material-symbols-outlined text-[18px]">delete</span>
                         </button>
                       </div>
                       
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3 bg-[#131313] p-1 rounded-lg border border-white/10">
-                          <button onClick={() => updateCartItemQuantity(item.id, item.quantity - 1)} className="w-6 h-6 flex items-center justify-center hover:bg-white/10 rounded-md transition-colors">
+                      {/* Middle Row: Dropdowns */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <select 
+                          value={item.unitId}
+                          onChange={(e) => updateCartItemUnit(item.id, e.target.value)}
+                          className="bg-black/40 border border-white/10 rounded-lg px-3 py-1.5 text-[11.5px] font-medium text-white/90 focus:outline-none focus:ring-1 focus:ring-primary/50 cursor-pointer transition-colors hover:bg-black/60 flex-1 min-w-[80px]"
+                        >
+                          {item.availableUnits.map(u => (
+                            <option key={u.id} value={u.id} className="bg-[#1c1b1b] text-white">
+                              {u.unit_name}
+                            </option>
+                          ))}
+                        </select>
+                        <select 
+                          value={item.priceLevel}
+                          onChange={(e) => updateCartItemPriceLevel(item.id, e.target.value)}
+                          className="bg-black/40 border border-white/10 rounded-lg px-3 py-1.5 text-[11.5px] font-medium text-white/90 focus:outline-none focus:ring-1 focus:ring-primary/50 cursor-pointer transition-colors hover:bg-black/60 flex-1 min-w-[120px]"
+                        >
+                          {item.availableUnits.find(u => u.id === item.unitId)?.prices.map(p => {
+                            const plLabel = availablePriceLevels.find(l => l.value === p.price_level)?.label || p.price_level;
+                            return (
+                              <option key={p.price_level} value={p.price_level} className="bg-[#1c1b1b] text-white">
+                                {plLabel} - {p.price} ج.م
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </div>
+                      
+                      {/* Bottom Row: Quantity & Total */}
+                      <div className="flex items-center justify-between mt-1 pt-3 border-t border-white/5">
+                        <div className="flex items-center gap-3 bg-[#131313] p-1.5 rounded-lg border border-white/10 shadow-inner">
+                          <button onClick={() => updateCartItemQuantity(item.id, item.quantity - 1)} className="w-8 h-8 flex items-center justify-center hover:bg-white/10 text-white/70 hover:text-white rounded-md transition-colors">
                             <span className="material-symbols-outlined text-sm">remove</span>
                           </button>
-                          <span className="text-sm font-bold w-6 text-center">{item.quantity}</span>
-                          <button onClick={() => updateCartItemQuantity(item.id, item.quantity + 1)} className="w-6 h-6 flex items-center justify-center hover:bg-white/10 rounded-md transition-colors">
+                          <span className="text-[15px] font-bold w-6 text-center text-primary">{item.quantity}</span>
+                          <button onClick={() => updateCartItemQuantity(item.id, item.quantity + 1)} className="w-8 h-8 flex items-center justify-center hover:bg-white/10 text-white/70 hover:text-white rounded-md transition-colors">
                             <span className="material-symbols-outlined text-sm">add</span>
                           </button>
                         </div>
-                        <span className="font-bold">{item.totalPrice.toFixed(2)} ج.م</span>
+                        <span className="font-bold text-lg text-white tracking-wide">{item.totalPrice.toFixed(2)} <span className="text-xs text-white/50 font-normal">ج.م</span></span>
                       </div>
                     </div>
                   ))}
@@ -468,7 +563,9 @@ export default function POSPage() {
                     </div>
 
                     <div className="flex items-center justify-between mt-2 pt-2 border-t border-white/5">
-                      <span className="font-bold text-primary">{getPrice(product.units[0], priceLevel)} ج</span>
+                      <span className="font-bold text-primary">
+                        {product.units[0]?.prices.find(p => p.price_level === "Retail")?.price || product.units[0]?.prices[0]?.price || 0} ج
+                      </span>
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${product.current_stock > 0 ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
                         {product.current_stock}
                       </span>

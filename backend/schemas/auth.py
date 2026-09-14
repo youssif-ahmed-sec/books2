@@ -18,14 +18,14 @@ class UserProfileResponse(BaseModel):
 class UserSyncRequest(BaseModel):
     id: UUID  # From Supabase Auth
     email: EmailStr
-    role: RoleEnum = RoleEnum.CASHIER
+    role: RoleEnum = RoleEnum.SALES_ASSISTANT
 
 
 class UserRegisterRequest(BaseModel):
     """Register a new local user (Admin only in production)."""
     email: EmailStr
     password: str
-    role: RoleEnum = RoleEnum.CASHIER
+    role: RoleEnum = RoleEnum.SALES_ASSISTANT
 
 
 class TokenResponse(BaseModel):

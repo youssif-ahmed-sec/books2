@@ -16,7 +16,7 @@ from schemas.product import (
     SupplierResponse, PaginatedProductResponse
 )
 from fastapi_cache.decorator import cache
-from core.dependencies import get_current_user
+from core.dependencies import get_current_user, require_basic_staff_access
 from database import get_db
 
 router = APIRouter(prefix="/products", tags=["Products"])
@@ -33,7 +33,7 @@ async def get_categories(db: AsyncSession = Depends(get_db)):
 async def create_category(
     category_in: CategoryCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_basic_staff_access),
 ):
     new_cat = Category(**category_in.model_dump())
     db.add(new_cat)
@@ -46,7 +46,7 @@ async def update_category(
     category_id: UUID,
     category_in: CategoryUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_basic_staff_access),
 ):
     result = await db.execute(select(Category).where(Category.id == category_id, Category.is_deleted == False))
     cat = result.scalar_one_or_none()
@@ -62,7 +62,7 @@ async def update_category(
 async def delete_category(
     category_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_basic_staff_access),
 ):
     result = await db.execute(select(Category).where(Category.id == category_id, Category.is_deleted == False))
     cat = result.scalar_one_or_none()
@@ -82,7 +82,7 @@ async def get_subcategories(db: AsyncSession = Depends(get_db)):
 async def create_subcategory(
     sub_in: SubcategoryCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_basic_staff_access),
 ):
     new_sub = Subcategory(**sub_in.model_dump())
     db.add(new_sub)
@@ -95,7 +95,7 @@ async def update_subcategory(
     sub_id: UUID,
     sub_in: SubcategoryUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_basic_staff_access),
 ):
     result = await db.execute(select(Subcategory).where(Subcategory.id == sub_id, Subcategory.is_deleted == False))
     sub = result.scalar_one_or_none()
@@ -111,7 +111,7 @@ async def update_subcategory(
 async def delete_subcategory(
     sub_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_basic_staff_access),
 ):
     result = await db.execute(select(Subcategory).where(Subcategory.id == sub_id, Subcategory.is_deleted == False))
     sub = result.scalar_one_or_none()
@@ -131,7 +131,7 @@ async def get_brands(db: AsyncSession = Depends(get_db)):
 async def create_brand(
     brand_in: BrandCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_basic_staff_access),
 ):
     new_brand = Brand(**brand_in.model_dump())
     db.add(new_brand)
@@ -144,7 +144,7 @@ async def update_brand(
     brand_id: UUID,
     brand_in: BrandUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_basic_staff_access),
 ):
     result = await db.execute(select(Brand).where(Brand.id == brand_id, Brand.is_deleted == False))
     brand = result.scalar_one_or_none()
@@ -160,7 +160,7 @@ async def update_brand(
 async def delete_brand(
     brand_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_basic_staff_access),
 ):
     result = await db.execute(select(Brand).where(Brand.id == brand_id, Brand.is_deleted == False))
     brand = result.scalar_one_or_none()
@@ -242,7 +242,8 @@ async def get_products(
     # Get data
     query = base_query.options(
         selectinload(Product.units).selectinload(ProductUnit.prices),
-        selectinload(Product.category)
+        selectinload(Product.category),
+        selectinload(Product.bundle_components)
     ).offset(skip).limit(limit)
     
     result = await db.execute(query)
@@ -257,7 +258,8 @@ async def get_product(product_id: UUID, db: AsyncSession = Depends(get_db)):
     """
     query = select(Product).where(Product.id == product_id, Product.is_deleted == False).options(
         selectinload(Product.units).selectinload(ProductUnit.prices),
-        selectinload(Product.category)
+        selectinload(Product.category),
+        selectinload(Product.bundle_components)
     )
     result = await db.execute(query)
     product = result.scalar_one_or_none()
@@ -275,18 +277,20 @@ async def get_product(product_id: UUID, db: AsyncSession = Depends(get_db)):
     
     return product
 
+from models.product import Product, ProductUnit, ProductPrice, Category, Subcategory, Brand, Supplier, ProductBundleComponent
+
 @router.post("", response_model=ProductResponse, status_code=status.HTTP_201_CREATED)
 async def create_product(
     product_in: ProductCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_basic_staff_access),
 ):
     """
-    Create a new product with multiple units and prices.
+    Create a new product with multiple units, prices, and optionally bundle components.
     """
     try:
         # Create Product
-        product_dict = product_in.model_dump(exclude={"units", "initial_stock"})
+        product_dict = product_in.model_dump(exclude={"units", "initial_stock", "bundle_components"})
         
         if not product_dict.get("barcode"):
             product_dict["barcode"] = None
@@ -300,6 +304,7 @@ async def create_product(
         await db.flush() # To get new_product.id
         
         units_response = []
+        bundle_comps_response = []
         # Create Units and Prices
         for unit_in in product_in.units:
             unit_dict = unit_in.model_dump(exclude={"prices"})
@@ -325,6 +330,18 @@ async def create_product(
             unit_res = new_unit.__dict__.copy()
             unit_res["prices"] = prices_response
             units_response.append(unit_res)
+            
+        # Create Bundle Components
+        if product_in.is_bundle and product_in.bundle_components:
+            for comp_in in product_in.bundle_components:
+                new_comp = ProductBundleComponent(
+                    bundle_id=new_product.id,
+                    component_id=comp_in.component_id,
+                    quantity=comp_in.quantity
+                )
+                db.add(new_comp)
+                await db.flush()
+                bundle_comps_response.append(new_comp.__dict__.copy())
             
         # Audit Log
         audit = AuditLog(
@@ -386,7 +403,7 @@ async def update_product(
     product_id: UUID,
     product_in: ProductUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_basic_staff_access),
 ):
     """
     Update a product. For simplicity, units and prices replacement strategy can be used.
@@ -506,7 +523,7 @@ async def update_product(
 async def delete_product(
     product_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_basic_staff_access),
 ):
     """
     Soft-delete a product.

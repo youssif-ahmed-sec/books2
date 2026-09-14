@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+pydantic
+arabic_reshaper
+python-bidi
+qrcode
+python-barcode
+Pillow
+pywin32

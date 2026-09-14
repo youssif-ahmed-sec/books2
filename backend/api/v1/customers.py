@@ -4,7 +4,7 @@ from sqlalchemy.future import select
 from uuid import UUID
 from typing import List
 
-from core.dependencies import get_current_user
+from core.dependencies import get_current_user, require_basic_staff_access
 from database import get_db
 from models.customer import Customer
 from models.user import User
@@ -25,7 +25,7 @@ async def get_customers(
 async def create_customer(
     customer_in: CustomerCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_basic_staff_access)
 ):
     new_customer = Customer(**customer_in.model_dump())
     db.add(new_customer)
@@ -38,7 +38,7 @@ async def update_customer(
     customer_id: UUID,
     customer_in: CustomerUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_basic_staff_access)
 ):
     result = await db.execute(select(Customer).where(Customer.id == customer_id, Customer.is_deleted == False))
     customer = result.scalar_one_or_none()
@@ -56,7 +56,7 @@ async def update_customer(
 async def delete_customer(
     customer_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_basic_staff_access)
 ):
     result = await db.execute(select(Customer).where(Customer.id == customer_id, Customer.is_deleted == False))
     customer = result.scalar_one_or_none()

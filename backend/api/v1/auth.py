@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Form
+from typing import List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from uuid import UUID
@@ -122,6 +123,26 @@ async def get_current_user_profile(
     Requires a valid JWT Bearer token.
     """
     return current_user
+
+
+# ── List all users (Admin only) ──────────────────────────────────────────────
+
+@router.get(
+    "/users",
+    response_model=List[UserProfileResponse],
+    summary="👥 List all users (Admin only)",
+)
+async def list_all_users(
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """
+    Returns a list of all registered users.
+    Requires Admin role.
+    """
+    query = select(User).where(User.is_deleted == False)
+    result = await db.execute(query)
+    return result.scalars().all()
 
 
 # ── Sync Supabase user ────────────────────────────────────────────────────────

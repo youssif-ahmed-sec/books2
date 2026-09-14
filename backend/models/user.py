@@ -8,9 +8,11 @@ import uuid
 Base = declarative_base()
 
 class RoleEnum(str, enum.Enum):
-    ADMIN = "Admin"
-    INVENTORY_CONTROLLER = "Inventory Controller"
-    CASHIER = "Cashier/Sales"
+    ADMIN = "ADMIN"
+    CASHIER_ORDERS = "CASHIER_ORDERS"
+    SENIOR_SALES = "SENIOR_SALES"
+    INVENTORY_CONTROLLER = "INVENTORY_CONTROLLER"
+    SALES_ASSISTANT = "SALES_ASSISTANT"
 
 class User(Base):
     __tablename__ = "users"
