@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from typing import List, Optional
 from uuid import UUID
 from datetime import datetime
@@ -7,7 +7,7 @@ from models.product import PriceLevelEnum
 
 class ProductPriceBase(BaseModel):
     price_level: PriceLevelEnum
-    price: Decimal
+    price: Decimal = Field(ge=0, allow_inf_nan=False)
 
 class ProductPriceCreate(ProductPriceBase):
     pass
@@ -21,7 +21,7 @@ class ProductPriceResponse(ProductPriceBase):
 
 class GlobalUnitBase(BaseModel):
     name: str
-    conversion_factor: Decimal
+    conversion_factor: Decimal = Field(gt=0, allow_inf_nan=False)
 
 class GlobalUnitCreate(GlobalUnitBase):
     pass
@@ -35,10 +35,11 @@ class GlobalUnitResponse(GlobalUnitBase):
 
 class ProductUnitBase(BaseModel):
     unit_name: str
-    conversion_factor: Decimal
+    conversion_factor: Decimal = Field(gt=0, allow_inf_nan=False)
     barcode: Optional[str] = None
 
 class ProductUnitCreate(ProductUnitBase):
+    id: Optional[UUID] = None
     prices: List[ProductPriceCreate] = []
 
 class ProductUnitResponse(ProductUnitBase):
@@ -50,7 +51,7 @@ class ProductUnitResponse(ProductUnitBase):
 
 class ProductBundleComponentBase(BaseModel):
     component_id: UUID
-    quantity: Decimal
+    quantity: Decimal = Field(gt=0, allow_inf_nan=False)
 
 class ProductBundleComponentCreate(ProductBundleComponentBase):
     pass
@@ -72,7 +73,7 @@ class ProductBase(BaseModel):
     supplier_id: Optional[UUID] = None
     
     base_unit: str
-    cost: Decimal = Decimal("0")
+    cost: Decimal = Field(default=Decimal("0"), ge=0, allow_inf_nan=False)
     tax_rate: Decimal = Decimal("0")
     min_stock_level: Decimal = Decimal("0")
     max_stock_level: Decimal = Decimal("0")
@@ -84,7 +85,7 @@ class ProductBase(BaseModel):
 class ProductCreate(ProductBase):
     units: List[ProductUnitCreate] = []
     bundle_components: List[ProductBundleComponentCreate] = []
-    initial_stock: Decimal = Decimal("0")
+    initial_stock: Decimal = Field(default=Decimal("0"), ge=0, allow_inf_nan=False)
 
 class ProductUpdate(BaseModel):
     sku: Optional[str] = None
@@ -108,7 +109,7 @@ class ProductUpdate(BaseModel):
     
     units: Optional[List[ProductUnitCreate]] = None
     bundle_components: Optional[List[ProductBundleComponentCreate]] = None
-    total_stock: Optional[Decimal] = None
+    total_stock: Optional[Decimal] = Field(default=None, ge=0, allow_inf_nan=False)
 
 class CategoryBase(BaseModel):
     name_en: str
@@ -185,11 +186,12 @@ class SupplierUpdate(BaseModel):
     notes: Optional[str] = None
 
 class SupplierResponse(SupplierBase):
+    opening_balance: Optional[Decimal] = None
     id: UUID
     model_config = ConfigDict(from_attributes=True)
 
 class SupplierPaymentCreate(BaseModel):
-    amount: Decimal
+    amount: Decimal = Field(gt=0, allow_inf_nan=False)
     payment_method: str = "Cash"
     reference_number: Optional[str] = None
     notes: Optional[str] = None
@@ -204,11 +206,10 @@ class SupplierPaymentResponse(BaseModel):
     payment_date: datetime
     model_config = ConfigDict(from_attributes=True)
 
-class SupplierDetailResponse(SupplierBase):
-    id: UUID
-    total_purchases: Decimal = Decimal("0")
-    total_payments: Decimal = Decimal("0")
-    balance: Decimal = Decimal("0")
+class SupplierDetailResponse(SupplierResponse):
+    total_purchases: Optional[Decimal] = None
+    total_payments: Optional[Decimal] = None
+    balance: Optional[Decimal] = None
     payments: List[SupplierPaymentResponse] = []
     model_config = ConfigDict(from_attributes=True)
 
@@ -217,6 +218,7 @@ class PaginatedSupplierResponse(BaseModel):
     total: int
 
 class ProductResponse(ProductBase):
+    cost: Optional[Decimal] = Field(default=None, ge=0, allow_inf_nan=False)
     id: UUID
     is_deleted: bool
     created_at: datetime

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, List
 from uuid import UUID
 from datetime import datetime
@@ -16,7 +16,7 @@ class InventoryTransactionBase(BaseModel):
     product_id: UUID
     warehouse_id: UUID
     transaction_type: TransactionTypeEnum
-    quantity_changed: Decimal
+    quantity_changed: Decimal = Field(allow_inf_nan=False)
     reference_document: Optional[str] = None
     notes: Optional[str] = None
 

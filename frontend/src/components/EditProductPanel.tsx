@@ -383,6 +383,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
         brand_id: form.brand_id && form.brand_id !== "" ? form.brand_id : null,
         supplier_id: form.supplier_id && form.supplier_id !== "" ? form.supplier_id : null,
         units: units.map(u => ({
+          ...( /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(u.id) ? { id: u.id } : {} ),
           unit_name: u.name || "Unknown",
           conversion_factor: u.conversionFactor,
           barcode: u.sku,

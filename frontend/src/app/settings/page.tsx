@@ -3,9 +3,14 @@
 import { useState, useEffect } from "react";
 import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
+import AdminGate from "@/components/AdminGate";
 import { fetchApi } from "@/lib/api";
 
 export default function SettingsPage() {
+  return <AdminGate><SettingsContent /></AdminGate>;
+}
+
+function SettingsContent() {
   const [activeTab, setActiveTab] = useState<"users">("users");
   const [users, setUsers] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -94,11 +99,13 @@ export default function SettingsPage() {
                       <input 
                         type="password" 
                         required
+                        minLength={12}
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
                         className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-primary"
                         dir="ltr"
                       />
+                      <p className="mt-1 text-xs text-zinc-500">12 حرفًا على الأقل، وبحد أقصى 72 بايت.</p>
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-zinc-400 mb-1">الصلاحية (Role)</label>

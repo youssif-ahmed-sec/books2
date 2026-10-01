@@ -14,11 +14,12 @@ from schemas.product import (
     SupplierDetailResponse, SupplierPaymentCreate, SupplierPaymentResponse,
     PaginatedSupplierResponse
 )
-from core.dependencies import get_current_user
-from models.user import User
+from core.dependencies import require_admin, require_inventory_access
+from core.supplier_access import visible_supplier, visible_supplier_detail
+from models.user import User, RoleEnum
 from database import get_db
 
-router = APIRouter(prefix="/suppliers", tags=["Suppliers"])
+router = APIRouter(prefix="/suppliers", tags=["Suppliers"], dependencies=[Depends(require_inventory_access)])
 
 
 @router.get("", response_model=PaginatedSupplierResponse)
@@ -26,7 +27,8 @@ async def get_suppliers(
     search: Optional[str] = None,
     skip: int = 0,
     limit: int = 50,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_inventory_access),
 ):
     """Get all active suppliers with pagination."""
     base_query = select(Supplier).where(Supplier.is_deleted == False)
@@ -37,16 +39,20 @@ async def get_suppliers(
             Supplier.phone.ilike(pattern) |
             Supplier.email.ilike(pattern)
         )
-    count_query = select(func.count(Supplier.id)).select_from(base_query.subquery())
+    count_query = select(func.count()).select_from(base_query.subquery())
     total = (await db.execute(count_query)).scalar() or 0
 
     result = await db.execute(base_query.offset(skip).limit(limit))
     suppliers = result.scalars().all()
-    return {"data": suppliers, "total": total}
+    return {"data": [visible_supplier(supplier, current_user.role) for supplier in suppliers], "total": total}
 
 
 @router.get("/{supplier_id}", response_model=SupplierDetailResponse)
-async def get_supplier_detail(supplier_id: UUID, db: AsyncSession = Depends(get_db)):
+async def get_supplier_detail(
+    supplier_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_inventory_access),
+):
     """Get supplier detail with statement (purchases, payments, balance)."""
     result = await db.execute(
         select(Supplier).where(Supplier.id == supplier_id, Supplier.is_deleted == False)
@@ -54,6 +60,9 @@ async def get_supplier_detail(supplier_id: UUID, db: AsyncSession = Depends(get_
     supplier = result.scalar_one_or_none()
     if not supplier:
         raise HTTPException(status_code=404, detail="Supplier not found")
+
+    if current_user.role != RoleEnum.ADMIN:
+        return visible_supplier_detail(supplier.__dict__, current_user.role)
 
     # Calculate total purchases from inventory transactions (stock-in from this supplier)
     purchases_query = select(func.sum(InventoryTransaction.quantity_changed * Product.cost)).join(
@@ -89,21 +98,23 @@ async def get_supplier_detail(supplier_id: UUID, db: AsyncSession = Depends(get_
     supplier_data["balance"] = balance
     supplier_data["payments"] = payments
 
-    return supplier_data
+    return visible_supplier_detail(supplier_data, current_user.role)
 
 
 @router.post("", response_model=SupplierResponse, status_code=status.HTTP_201_CREATED)
 async def create_supplier(
     supplier_in: SupplierCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_inventory_access),
 ):
     """Create a new supplier."""
+    if current_user.role != RoleEnum.ADMIN and {"opening_balance", "credit_limit"} & supplier_in.model_fields_set:
+        raise HTTPException(status_code=403, detail="Admin access required for supplier financial fields")
     new_supplier = Supplier(**supplier_in.model_dump())
     db.add(new_supplier)
     await db.commit()
     await db.refresh(new_supplier)
-    return new_supplier
+    return visible_supplier(new_supplier, current_user.role)
 
 
 @router.put("/{supplier_id}", response_model=SupplierResponse)
@@ -111,7 +122,7 @@ async def update_supplier(
     supplier_id: UUID,
     supplier_in: SupplierUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_inventory_access),
 ):
     """Update an existing supplier."""
     result = await db.execute(
@@ -122,19 +133,21 @@ async def update_supplier(
         raise HTTPException(status_code=404, detail="Supplier not found")
 
     update_data = supplier_in.model_dump(exclude_unset=True)
+    if current_user.role != RoleEnum.ADMIN and {"opening_balance", "credit_limit"} & update_data.keys():
+        raise HTTPException(status_code=403, detail="Admin access required for supplier financial fields")
     for key, value in update_data.items():
         setattr(supplier, key, value)
 
     await db.commit()
     await db.refresh(supplier)
-    return supplier
+    return visible_supplier(supplier, current_user.role)
 
 
 @router.delete("/{supplier_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_supplier(
     supplier_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_inventory_access),
 ):
     """Soft delete a supplier."""
     result = await db.execute(
@@ -153,7 +166,7 @@ async def add_payment(
     supplier_id: UUID,
     payment_in: SupplierPaymentCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
 ):
     """Record a payment to a supplier."""
     result = await db.execute(

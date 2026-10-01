@@ -1,12 +1,12 @@
 import logging
+import os
 import sys
 import threading
 import webbrowser
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
@@ -65,10 +65,24 @@ app = FastAPI(title="Saud El Shafie Print Agent", version="1.0.0", lifespan=life
 
 @app.middleware("http")
 async def custom_cors_middleware(request: Request, call_next):
-    origin = request.headers.get("origin", "*")
+    origin = request.headers.get("origin")
+    allowed_origins = {
+        f"http://127.0.0.1:{config.local_port}",
+        f"http://localhost:{config.local_port}",
+        "http://127.0.0.1:3000",
+        "http://localhost:3000",
+    }
+    allowed_origins.update(
+        value.strip().rstrip("/")
+        for value in os.getenv("PRINT_AGENT_ALLOWED_ORIGINS", "").split(",")
+        if value.strip()
+    )
+    if origin and origin not in allowed_origins:
+        return Response(status_code=403)
     if request.method == "OPTIONS":
         response = Response(content="OK", status_code=200)
-        response.headers["Access-Control-Allow-Origin"] = origin
+        if origin:
+            response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
         response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept"
         response.headers["Access-Control-Allow-Private-Network"] = "true"
@@ -76,7 +90,8 @@ async def custom_cors_middleware(request: Request, call_next):
         return response
     
     response = await call_next(request)
-    response.headers["Access-Control-Allow-Origin"] = origin
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
     response.headers["Access-Control-Allow-Private-Network"] = "true"
     return response
 
@@ -85,7 +100,7 @@ async def custom_cors_middleware(request: Request, call_next):
 async def local_only(request: Request, call_next):
     client_host = request.client.host if request.client else ""
     if client_host not in {"127.0.0.1", "::1", "localhost", "testclient"}:
-        raise HTTPException(status_code=403, detail="Local access only")
+        return Response(status_code=403)
     return await call_next(request)
 
 

@@ -8,7 +8,7 @@ import { AddProductPanel } from "@/components/AddProductPanel";
 import { EditProductPanel } from "@/components/EditProductPanel";
 import InventoryMovementsModal from "@/components/InventoryMovementsModal";
 import { fetchApi } from "@/lib/api";
-import { getUserRole, canViewCost, UserRole } from "@/utils/auth";
+import { getUserRole, canViewCost, canEditProduct, UserRole } from "@/utils/auth";
 
 export default function InventoryPage() {
   const [showAddPanel, setShowAddPanel] = useState(false);
@@ -237,13 +237,15 @@ export default function InventoryPage() {
               <span className="material-symbols-outlined text-sm">download</span>
               تصدير البيانات
             </button>
-            <button
-              onClick={() => setShowAddPanel(true)}
-              className="flex items-center gap-3 px-8 py-3.5 bg-primary text-white rounded-full shadow-lg shadow-primary/30 hover:-translate-y-0.5 transition-all font-bold text-sm"
-            >
-              <span className="material-symbols-outlined text-sm">add_circle</span>
-              إضافة منتج جديد
-            </button>
+            {canEditProduct(userRole) && (
+              <button
+                onClick={() => setShowAddPanel(true)}
+                className="flex items-center gap-3 px-8 py-3.5 bg-primary text-white rounded-full shadow-lg shadow-primary/30 hover:-translate-y-0.5 transition-all font-bold text-sm"
+              >
+                <span className="material-symbols-outlined text-sm">add_circle</span>
+                إضافة منتج جديد
+              </button>
+            )}
           </div>
         </div>
 

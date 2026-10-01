@@ -66,7 +66,7 @@ interface Payment {
 }
 
 // ─── Add Supplier Panel ───────────────────────────────────────────────────────
-function AddSupplierPanel({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
+function AddSupplierPanel({ onClose, onSuccess, isAdmin }: { onClose: () => void; onSuccess: () => void; isAdmin: boolean }) {
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<SupplierFormValues>({
     resolver: zodResolver(supplierSchema),
     defaultValues: { opening_balance: "0", payment_method: "COD" } as any,
@@ -74,12 +74,15 @@ function AddSupplierPanel({ onClose, onSuccess }: { onClose: () => void; onSucce
 
   const onSubmit = async (data: SupplierFormValues) => {
     try {
+      const { opening_balance, credit_limit, ...supplierInfo } = data;
       await fetchApi("/suppliers", {
         method: "POST",
         body: JSON.stringify({
-          ...data,
-          opening_balance: parseFloat(data.opening_balance || "0"),
-          credit_limit: data.credit_limit ? parseFloat(data.credit_limit) : null,
+          ...supplierInfo,
+          ...(isAdmin ? {
+            opening_balance: parseFloat(opening_balance || "0"),
+            credit_limit: credit_limit ? parseFloat(credit_limit) : null,
+          } : {}),
         }),
       });
       onSuccess();
@@ -153,7 +156,7 @@ function AddSupplierPanel({ onClose, onSuccess }: { onClose: () => void; onSucce
                   </select>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              {isAdmin && <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-xs text-[#e2bfb0]/60 mb-1 block">الرصيد الافتتاحي (ج.م)</label>
                   <input {...register("opening_balance")} type="number" step="0.01" defaultValue="0" className={`w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border ${errors.opening_balance ? "border-red-500/50" : "border-white/10"} focus:outline-none focus:border-primary/50`} />
@@ -162,7 +165,7 @@ function AddSupplierPanel({ onClose, onSuccess }: { onClose: () => void; onSucce
                   <label className="text-xs text-[#e2bfb0]/60 mb-1 block">حد الائتمان (ج.م)</label>
                   <input {...register("credit_limit")} type="number" step="0.01" placeholder="بدون حد" className="w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border border-white/10 focus:outline-none focus:border-primary/50" />
                 </div>
-              </div>
+              </div>}
             </div>
           </div>
 
@@ -185,7 +188,7 @@ function AddSupplierPanel({ onClose, onSuccess }: { onClose: () => void; onSucce
 }
 
 // ─── Edit / Detail Panel ──────────────────────────────────────────────────────
-function EditSupplierPanel({ supplierId, onClose, onSuccess }: { supplierId: string; onClose: () => void; onSuccess: () => void }) {
+function EditSupplierPanel({ supplierId, onClose, onSuccess, isAdmin }: { supplierId: string; onClose: () => void; onSuccess: () => void; isAdmin: boolean }) {
   const [detail, setDetail] = useState<SupplierDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"info" | "statement" | "payment">("info");
@@ -222,12 +225,15 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess }: { supplierId: str
 
   const onSubmit = async (data: SupplierFormValues) => {
     try {
+      const { opening_balance, credit_limit, ...supplierInfo } = data;
       await fetchApi(`/suppliers/${supplierId}`, {
         method: "PUT",
         body: JSON.stringify({
-          ...data,
-          opening_balance: parseFloat(data.opening_balance || "0"),
-          credit_limit: data.credit_limit ? parseFloat(data.credit_limit) : null,
+          ...supplierInfo,
+          ...(isAdmin ? {
+            opening_balance: parseFloat(opening_balance || "0"),
+            credit_limit: credit_limit ? parseFloat(credit_limit) : null,
+          } : {}),
         }),
       });
       onSuccess();
@@ -258,7 +264,7 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess }: { supplierId: str
         <div className="flex items-center justify-between p-8 border-b border-white/10 flex-shrink-0">
           <div>
             <h2 className="text-xl font-bold text-white">{loading ? "..." : detail?.name}</h2>
-            <p className="text-sm text-[#e2bfb0]/60 mt-1">تفاصيل وكشف حساب المورد</p>
+            <p className="text-sm text-[#e2bfb0]/60 mt-1">{isAdmin ? "تفاصيل وكشف حساب المورد" : "تفاصيل المورد"}</p>
           </div>
           <button onClick={onClose} className="w-9 h-9 rounded-full glass flex items-center justify-center text-[#e2bfb0]/60 hover:text-white">
             <span className="material-symbols-outlined text-[20px]">close</span>
@@ -266,7 +272,7 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess }: { supplierId: str
         </div>
 
         {/* Balance Cards */}
-        {detail && (
+        {isAdmin && detail && (
           <div className="grid grid-cols-4 gap-4 p-6 border-b border-white/10">
             <div className="glass rounded-2xl p-4 text-center">
               <p className="text-[10px] text-[#e2bfb0]/60 mb-1">الرصيد الافتتاحي</p>
@@ -298,7 +304,7 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess }: { supplierId: str
 
         {/* Tabs */}
         <div className="flex border-b border-white/10 px-6">
-          {[{ key: "info", label: "البيانات", icon: "person" }, { key: "statement", label: "كشف الحساب", icon: "receipt_long" }, { key: "payment", label: "تسجيل دفعة", icon: "payments" }].map(tab => (
+          {[{ key: "info", label: "البيانات", icon: "person" }, ...(isAdmin ? [{ key: "statement", label: "كشف الحساب", icon: "receipt_long" }, { key: "payment", label: "تسجيل دفعة", icon: "payments" }] : [])].map(tab => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key as any)}
               className={`flex items-center gap-2 px-4 py-4 text-xs font-bold transition-all border-b-2 ${activeTab === tab.key ? "border-primary text-primary" : "border-transparent text-[#e2bfb0]/60 hover:text-white"}`}>
               <span className="material-symbols-outlined text-[16px]">{tab.icon}</span>
@@ -347,7 +353,7 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess }: { supplierId: str
                   </select>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              {isAdmin && <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-xs text-[#e2bfb0]/60 mb-1 block">الرصيد الافتتاحي (ج.م)</label>
                   <input {...register("opening_balance")} type="number" step="0.01" className="w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border border-white/10 focus:outline-none focus:border-primary/50" />
@@ -356,7 +362,7 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess }: { supplierId: str
                   <label className="text-xs text-[#e2bfb0]/60 mb-1 block">حد الائتمان (ج.م)</label>
                   <input {...register("credit_limit")} type="number" step="0.01" placeholder="بدون حد" className="w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border border-white/10 focus:outline-none focus:border-primary/50" />
                 </div>
-              </div>
+              </div>}
               <div>
                 <label className="text-xs text-[#e2bfb0]/60 mb-1 block">ملاحظات</label>
                 <textarea {...register("notes")} rows={3} className="w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border border-white/10 focus:outline-none focus:border-primary/50 resize-none" />
@@ -438,6 +444,7 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess }: { supplierId: str
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function SuppliersPage() {
+  const [role, setRole] = useState<string | null>(null);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -454,7 +461,10 @@ export default function SuppliersPage() {
     } catch { } finally { setLoading(false); }
   };
 
-  useEffect(() => { loadSuppliers(); }, []);
+  useEffect(() => {
+    fetchApi("/auth/me").then(user => setRole(user.role)).catch(() => setRole(null));
+    loadSuppliers();
+  }, []);
 
   const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearch(e.target.value);
@@ -483,7 +493,7 @@ export default function SuppliersPage() {
         <div className="flex items-center justify-between mb-8">
           <div>
             <h1 className="text-3xl font-bold text-white">إدارة الموردين</h1>
-            <p className="text-[#e2bfb0]/60 mt-1 text-sm">إدارة سجلات الموردين وكشوفات الحساب</p>
+            <p className="text-[#e2bfb0]/60 mt-1 text-sm">{role === "ADMIN" ? "إدارة سجلات الموردين وكشوفات الحساب" : "إدارة بيانات الموردين"}</p>
           </div>
           <button onClick={() => setShowAddPanel(true)} className="flex items-center gap-2 bg-primary text-white font-bold px-6 py-3 rounded-full hover:brightness-110 active:scale-95 transition-all shadow-lg shadow-primary/20">
             <span className="material-symbols-outlined text-[20px]">add</span>
@@ -586,11 +596,12 @@ export default function SuppliersPage() {
       </main>
 
       {/* Add Panel */}
-      {showAddPanel && <AddSupplierPanel onClose={() => setShowAddPanel(false)} onSuccess={() => loadSuppliers(search)} />}
+      {showAddPanel && role && <AddSupplierPanel isAdmin={role === "ADMIN"} onClose={() => setShowAddPanel(false)} onSuccess={() => loadSuppliers(search)} />}
 
       {/* Edit Panel */}
-      {selectedSupplierId && (
+      {selectedSupplierId && role && (
         <EditSupplierPanel
+          isAdmin={role === "ADMIN"}
           supplierId={selectedSupplierId}
           onClose={() => setSelectedSupplierId(null)}
           onSuccess={() => loadSuppliers(search)}

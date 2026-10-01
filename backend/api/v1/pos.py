@@ -11,6 +11,7 @@ from models.inventory import InventoryBalance
 from schemas.product import ProductResponse
 from models.user import User
 from core.dependencies import require_pos_orders_access
+from core.product_access import visible_product
 
 router = APIRouter(prefix="/pos", tags=["POS"])
 
@@ -63,8 +64,9 @@ async def search_pos_products(
         )
         
     query = base_query.options(
-        selectinload(Product.units).selectinload(ProductUnit.prices),
-        selectinload(Product.category)
+        selectinload(Product.units.and_(ProductUnit.is_deleted == False)).selectinload(ProductUnit.prices),
+        selectinload(Product.category),
+        selectinload(Product.bundle_components),
     ).limit(limit)
     
     result = await db.execute(query)
@@ -86,4 +88,4 @@ async def search_pos_products(
     for p in products:
         setattr(p, "current_stock", stock_map.get(p.id, 0))
         
-    return products
+    return [visible_product(product, current_user.role) for product in products]

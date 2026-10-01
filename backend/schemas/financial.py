@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional
 from uuid import UUID
 from datetime import datetime
@@ -6,7 +6,7 @@ from decimal import Decimal
 
 class ExpenseBase(BaseModel):
     category: str
-    amount: Decimal
+    amount: Decimal = Field(gt=0, allow_inf_nan=False)
     description: Optional[str] = None
 
 class ExpenseCreate(ExpenseBase):
@@ -20,7 +20,7 @@ class ExpenseResponse(ExpenseBase):
 
 class IncomeBase(BaseModel):
     source: str
-    amount: Decimal
+    amount: Decimal = Field(gt=0, allow_inf_nan=False)
     description: Optional[str] = None
 
 class IncomeCreate(IncomeBase):

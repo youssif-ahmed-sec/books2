@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { roleHome } from "@/lib/roleHome";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -37,7 +38,7 @@ export default function LoginPage() {
 
       const data = await res.json();
       localStorage.setItem("access_token", data.access_token);
-      window.location.href = "/inventory";
+      window.location.href = roleHome(data.user?.role);
     } catch (err: any) {
       setError(err.message);
     } finally {

@@ -4,8 +4,10 @@ import { useState, useEffect } from "react";
 import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
 import { fetchApi } from "@/lib/api";
+import { roleHome } from "@/lib/roleHome";
 
 export default function ReportsPage() {
+  const [role, setRole] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"sales" | "inventory">("sales");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -15,8 +17,20 @@ export default function ReportsPage() {
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
+    fetchApi("/auth/me").then(user => {
+      if (["ADMIN", "SENIOR_SALES", "INVENTORY_CONTROLLER"].includes(user.role)) setRole(user.role);
+      else window.location.href = roleHome(user.role);
+    }).catch(() => setRole(null));
+  }, []);
+
+  useEffect(() => {
+    if (!role) return;
+    if (role === "INVENTORY_CONTROLLER" && activeTab !== "inventory") {
+      setActiveTab("inventory");
+      return;
+    }
     loadData();
-  }, [activeTab, startDate, endDate]);
+  }, [role, activeTab, startDate, endDate]);
 
   const loadData = async () => {
     setIsLoading(true);
@@ -38,6 +52,8 @@ export default function ReportsPage() {
       setIsLoading(false);
     }
   };
+
+  if (!role) return null;
 
   return (
     <div className="min-h-screen" dir="rtl">
@@ -73,7 +89,7 @@ export default function ReportsPage() {
           </div>
 
           <div className="flex space-x-4 border-b border-zinc-800 rtl:space-x-reverse">
-            <button
+            {role !== "INVENTORY_CONTROLLER" && <button
               onClick={() => setActiveTab("sales")}
               className={`pb-4 px-2 text-sm font-medium transition-colors border-b-2 ${
                 activeTab === "sales"
@@ -82,8 +98,8 @@ export default function ReportsPage() {
               }`}
             >
               تقرير المبيعات
-            </button>
-            <button
+            </button>}
+            {role !== "SENIOR_SALES" && <button
               onClick={() => setActiveTab("inventory")}
               className={`pb-4 px-2 text-sm font-medium transition-colors border-b-2 ${
                 activeTab === "inventory"
@@ -92,7 +108,7 @@ export default function ReportsPage() {
               }`}
             >
               حركات المخزون
-            </button>
+            </button>}
           </div>
 
           {isLoading ? (
@@ -165,15 +181,15 @@ export default function ReportsPage() {
                     <tr key={tx.id} className="hover:bg-zinc-800/30 transition-colors">
                       <td className="px-6 py-4">
                         <span className={`px-2.5 py-1 rounded-full text-xs ${
-                          tx.type === "in" || tx.type === "return" ? "bg-emerald-500/10 text-emerald-400" : "bg-red-500/10 text-red-400"
+                          tx.quantity_changed > 0 ? "bg-emerald-500/10 text-emerald-400" : "bg-red-500/10 text-red-400"
                         }`}>
-                          {tx.type}
+                          {tx.transaction_type}
                         </span>
                       </td>
                       <td className="px-6 py-4 font-bold" dir="ltr">
-                        {tx.quantity_change > 0 ? `+${tx.quantity_change}` : tx.quantity_change}
+                        {tx.quantity_changed > 0 ? `+${tx.quantity_changed}` : tx.quantity_changed}
                       </td>
-                      <td className="px-6 py-4">{tx.reference_type}</td>
+                      <td className="px-6 py-4">{tx.reference_document || "-"}</td>
                       <td className="px-6 py-4">{tx.notes || "-"}</td>
                       <td className="px-6 py-4">{new Date(tx.created_at).toLocaleString("ar-EG")}</td>
                     </tr>

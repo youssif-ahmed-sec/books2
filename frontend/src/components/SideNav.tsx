@@ -61,6 +61,25 @@ export default function SideNav() {
     return email.substring(0, 2).toUpperCase();
   };
 
+  const visibleNavItems = navItems.filter((item) => {
+    const role = user?.role;
+    if (!role) return false;
+    if (item.href === "/dashboard") {
+      return role === "ADMIN" || role === "SENIOR_SALES";
+    }
+    if (item.href === "/reports") {
+      return role === "ADMIN" || role === "SENIOR_SALES" || role === "INVENTORY_CONTROLLER";
+    }
+    if (["/inventory", "/suppliers", "/categories"].includes(item.href)) {
+      return role === "ADMIN" || role === "INVENTORY_CONTROLLER";
+    }
+    if (["/pos", "/orders", "/inbox"].includes(item.href)) {
+      return role === "ADMIN" || role === "CASHIER_ORDERS";
+    }
+    if (item.href === "/financials") return role === "ADMIN";
+    return true;
+  });
+
   return (
     <aside className="fixed top-8 right-8 bottom-8 w-80 rounded-2xl glass shadow-xl z-50 overflow-hidden">
       <div className="h-full w-full overflow-y-auto overflow-x-hidden custom-scrollbar" dir="ltr">
@@ -88,7 +107,7 @@ export default function SideNav() {
 
           {/* Navigation */}
           <nav className="flex-1 flex flex-col gap-y-2">
-            {navItems.map((item) => {
+            {visibleNavItems.map((item) => {
               const isActive = pathname === item.href;
               const Wrapper = item.disabled ? "div" : Link;
               return (

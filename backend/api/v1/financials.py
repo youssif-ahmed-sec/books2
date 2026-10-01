@@ -6,10 +6,14 @@ from typing import List
 from uuid import UUID
 
 from database import get_db
+from core.dependencies import require_financial_access
 from models.financial import Expense, Income
 from schemas.financial import ExpenseCreate, ExpenseResponse, IncomeCreate, IncomeResponse
 
-router = APIRouter(prefix="/financials", tags=["Financials"])
+router = APIRouter(
+    prefix="/financials", tags=["Financials"],
+    dependencies=[Depends(require_financial_access)],
+)
 
 @router.get("/expenses", response_model=List[ExpenseResponse])
 async def get_expenses(db: AsyncSession = Depends(get_db)):

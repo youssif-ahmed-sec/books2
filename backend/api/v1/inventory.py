@@ -11,11 +11,20 @@ from models.user import User
 from schemas.inventory import InventoryTransactionCreate, InventoryTransactionResponse, InventoryBalanceResponse, InventoryStatsResponse, InventoryTransactionRecentResponse, PaginatedInventoryTransactionResponse
 from sqlalchemy import func, desc
 from datetime import date
-from core.dependencies import get_current_user, require_inventory_access
+from core.dependencies import get_current_user, require_inventory_access, require_warehouse_access
 from database import get_db
 from fastapi_cache.decorator import cache
 
 router = APIRouter(prefix="/inventory", tags=["Inventory"])
+
+
+@router.get("/warehouses")
+async def get_active_warehouses(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_warehouse_access),
+):
+    result = await db.execute(select(Warehouse).where(Warehouse.is_active == True).order_by(Warehouse.name))
+    return [{"id": warehouse.id, "name": warehouse.name} for warehouse in result.scalars().all()]
 
 @router.post("/transactions", response_model=InventoryTransactionResponse, status_code=status.HTTP_201_CREATED)
 async def create_inventory_transaction(
@@ -26,14 +35,41 @@ async def create_inventory_transaction(
     """
     Create a new inventory transaction and update the inventory balance.
     """
-    # 1. Fetch current balance
+    quantity = transaction_in.quantity_changed
+    if quantity == 0:
+        raise HTTPException(status_code=400, detail="Quantity change must not be zero")
+    if transaction_in.transaction_type == "Receiving" and quantity < 0:
+        raise HTTPException(status_code=400, detail="Receiving quantity must be positive")
+    if transaction_in.transaction_type == "Issuing" and quantity > 0:
+        raise HTTPException(status_code=400, detail="Issuing quantity must be negative")
+
+    # Serializes first-time balance creation within a warehouse.
+    warehouse_query = select(Warehouse).where(
+        Warehouse.id == transaction_in.warehouse_id,
+        Warehouse.is_active == True,
+    ).with_for_update()
+    warehouse = (await db.execute(warehouse_query)).scalar_one_or_none()
+    if warehouse is None:
+        raise HTTPException(status_code=404, detail="Active warehouse not found")
+
+    product_query = select(Product.id).where(
+        Product.id == transaction_in.product_id,
+        Product.is_deleted == False,
+    )
+    if (await db.execute(product_query)).scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    # Lock existing balance before checking and updating stock.
     balance_query = select(InventoryBalance).where(
         InventoryBalance.product_id == transaction_in.product_id,
         InventoryBalance.warehouse_id == transaction_in.warehouse_id
-    )
+    ).with_for_update()
     result = await db.execute(balance_query)
     balance = result.scalar_one_or_none()
     
+    if not balance and quantity < 0:
+        raise HTTPException(status_code=400, detail="Insufficient stock")
+
     if not balance:
         # Create a new balance record if it doesn't exist
         balance = InventoryBalance(
@@ -44,12 +80,9 @@ async def create_inventory_transaction(
         db.add(balance)
         await db.flush()
 
-    # 2. Update stock based on transaction type
-    # (Simplified logic, usually RECEIVING adds, ISSUING subtracts)
-    if transaction_in.transaction_type in ["Issuing", "Adjustment"]:
-        balance.current_stock += transaction_in.quantity_changed
-    else:
-        balance.current_stock += transaction_in.quantity_changed
+    if balance.current_stock + quantity < 0:
+        raise HTTPException(status_code=400, detail="Insufficient stock")
+    balance.current_stock += quantity
         
     # 3. Record transaction
     new_transaction = InventoryTransaction(
@@ -178,7 +211,8 @@ async def get_inventory_stats(
 async def get_inventory_transactions(
     page: int = 1,
     limit: int = 20,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_inventory_access),
 ):
     offset = (page - 1) * limit
     

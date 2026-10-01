@@ -1,15 +1,15 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from typing import List, Optional
+from typing import Optional
 from datetime import datetime
-from sqlalchemy import func
 
 from database import get_db
 from models.order import Order, OrderStatusEnum
 from models.inventory import InventoryTransaction
+from models.customer import Customer
 from models.user import User
-from core.dependencies import get_current_user, require_sales_reports_access
+from core.dependencies import require_inventory_access, require_sales_reports_access
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
 
@@ -23,7 +23,7 @@ async def get_sales_report(
     """
     Get aggregated sales report (orders).
     """
-    query = select(Order).where(Order.is_deleted == False)
+    query = select(Order, Customer.name).outerjoin(Customer, Order.customer_id == Customer.id)
     
     if start_date:
         query = query.where(Order.created_at >= start_date)
@@ -33,28 +33,28 @@ async def get_sales_report(
     query = query.order_by(Order.created_at.desc())
     
     result = await db.execute(query)
-    orders = result.scalars().all()
+    rows = result.all()
     
-    total_revenue = sum(float(order.final_total) for order in orders if order.status == OrderStatusEnum.CLOSED.value)
-    completed_orders = sum(1 for order in orders if order.status == OrderStatusEnum.CLOSED.value)
+    completed_statuses = {OrderStatusEnum.DELIVERED.value, OrderStatusEnum.CLOSED.value}
+    total_revenue = sum(float(order.total_amount) for order, _ in rows if order.status in completed_statuses)
+    completed_orders = sum(1 for order, _ in rows if order.status in completed_statuses)
     
     # Return raw orders and aggregation
     return {
         "metrics": {
             "total_revenue": total_revenue,
-            "total_orders": len(orders),
+            "total_orders": len(rows),
             "completed_orders": completed_orders
         },
         "data": [
             {
                 "id": order.id,
                 "created_at": order.created_at,
-                "status": order.status.value,
-                "customer_name": order.customer_name,
+                "status": order.status,
+                "customer_name": customer_name,
                 "source": order.source,
-                "final_total": order.final_total,
-                "payment_status": order.payment_status.value if order.payment_status else None
-            } for order in orders
+                "final_total": float(order.total_amount),
+            } for order, customer_name in rows
         ]
     }
 
@@ -63,7 +63,7 @@ async def get_inventory_report(
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_sales_reports_access),
+    current_user: User = Depends(require_inventory_access),
 ):
     """
     Get inventory movements (transactions).
@@ -81,14 +81,13 @@ async def get_inventory_report(
     return [
         {
             "id": tx.id,
-            "type": tx.type.value,
+            "transaction_type": tx.transaction_type.value if hasattr(tx.transaction_type, "value") else tx.transaction_type,
             "product_id": tx.product_id,
-            "unit_id": tx.unit_id,
-            "quantity_change": tx.quantity_change,
-            "reference_type": tx.reference_type,
-            "reference_id": tx.reference_id,
+            "warehouse_id": tx.warehouse_id,
+            "quantity_changed": float(tx.quantity_changed),
+            "reference_document": tx.reference_document,
             "created_at": tx.created_at,
-            "created_by_id": tx.created_by_id,
+            "user_id": tx.user_id,
             "notes": tx.notes
         } for tx in transactions
     ]

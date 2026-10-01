@@ -1,7 +1,8 @@
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import List, Optional
 from uuid import UUID
 from datetime import datetime
+from decimal import Decimal
 
 from models.order import OrderStatusEnum, OrderSourceEnum
 from models.product import PriceLevelEnum
@@ -16,7 +17,7 @@ class OrderItemCreate(BaseModel):
     """
     product_id:  UUID
     unit_id:     UUID                           # required — needed for unit conversion
-    quantity:    float                          # qty in the selling unit (e.g., 2 boxes)
+    quantity:    Decimal = Field(gt=0, allow_inf_nan=False)
     price_level: PriceLevelEnum = PriceLevelEnum.RETAIL  # which price tier to apply
 
 
@@ -26,7 +27,7 @@ class OrderCreate(BaseModel):
     warehouse_id:    UUID                       # required — determines which stock to deduct
     status:          OrderStatusEnum = OrderStatusEnum.CLOSED
     source:          Optional[str] = "Walk-In Customer"
-    discount_amount: float = 0.0
+    discount_amount: Decimal = Field(default=Decimal("0"), ge=0, allow_inf_nan=False)
     payment_method:  str = "Cash"
     notes:           Optional[str] = None
     items:           List[OrderItemCreate]
@@ -38,13 +39,20 @@ class OrderCreate(BaseModel):
             raise ValueError("Order must have at least one item")
         return v
 
+    @field_validator("status")
+    @classmethod
+    def pos_status_must_be_fulfilled(cls, value: OrderStatusEnum) -> OrderStatusEnum:
+        if value not in (OrderStatusEnum.DELIVERED, OrderStatusEnum.CLOSED):
+            raise ValueError("POS orders must be delivered or closed because stock is deducted immediately")
+        return value
+
 class OrderDraftCreate(BaseModel):
     """ Used by OMS. Creates an order without instant deduction. """
     customer_id:     Optional[UUID] = None
     source:          OrderSourceEnum = OrderSourceEnum.MANUAL
     status:          OrderStatusEnum = OrderStatusEnum.DRAFT
-    discount_amount: float = 0.0
-    shipping_cost:   float = 0.0
+    discount_amount: Decimal = Field(default=Decimal("0"), ge=0, allow_inf_nan=False)
+    shipping_cost:   Decimal = Field(default=Decimal("0"), ge=0, allow_inf_nan=False)
     payment_method:  str = "Cash"
     notes:           Optional[str] = None
     assigned_to_id:  Optional[UUID] = None
@@ -56,6 +64,13 @@ class OrderDraftCreate(BaseModel):
         if not v:
             raise ValueError("Order must have at least one item")
         return v
+
+    @field_validator("status")
+    @classmethod
+    def draft_status_must_remain_draft(cls, value: OrderStatusEnum) -> OrderStatusEnum:
+        if value != OrderStatusEnum.DRAFT:
+            raise ValueError("Draft orders must start in Draft Order status")
+        return value
 
 class OrderStatusUpdate(BaseModel):
     status: OrderStatusEnum

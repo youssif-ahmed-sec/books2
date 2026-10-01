@@ -3,11 +3,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_db
 from core.automations import handle_new_lead_automation, send_auto_reply
 import logging
+import hashlib
+import hmac
+import os
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
-
-VERIFY_TOKEN = "SAUD_EL_SHAFIE_SECURE_TOKEN"
 
 @router.get("/whatsapp")
 async def verify_whatsapp_webhook(
@@ -17,9 +18,14 @@ async def verify_whatsapp_webhook(
     mode = request.query_params.get("hub.mode")
     token = request.query_params.get("hub.verify_token")
     challenge = request.query_params.get("hub.challenge")
+    verify_token = os.getenv("WHATSAPP_VERIFY_TOKEN")
 
-    if mode and token:
-        if mode == "subscribe" and token == VERIFY_TOKEN:
+    if not verify_token:
+        logger.error("WhatsApp webhook verification token is not configured")
+        return Response(status_code=503)
+
+    if mode and token and challenge:
+        if mode == "subscribe" and hmac.compare_digest(token, verify_token):
             logger.info("WEBHOOK_VERIFIED")
             return Response(content=challenge, status_code=200)
         else:
@@ -33,6 +39,19 @@ async def receive_whatsapp_message(
     db: AsyncSession = Depends(get_db)
 ):
     """Receive messages from WhatsApp Cloud API"""
+    app_secret = os.getenv("WHATSAPP_APP_SECRET")
+    if not app_secret:
+        logger.error("WhatsApp webhook app secret is not configured")
+        return Response(status_code=503)
+
+    raw_body = await request.body()
+    received_signature = request.headers.get("x-hub-signature-256", "")
+    expected_signature = "sha256=" + hmac.new(
+        app_secret.encode("utf-8"), raw_body, hashlib.sha256
+    ).hexdigest()
+    if not hmac.compare_digest(received_signature, expected_signature):
+        return Response(status_code=403)
+
     body = await request.json()
     
     if body.get("object"):

@@ -7,6 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
+import AdminGate from "@/components/AdminGate";
 
 const transactionSchema = z.object({
   type: z.enum(["expense", "income"]),
@@ -18,6 +19,10 @@ const transactionSchema = z.object({
 type TransactionFormValues = z.infer<typeof transactionSchema>;
 
 export default function FinancialsPage() {
+  return <AdminGate><FinancialsContent /></AdminGate>;
+}
+
+function FinancialsContent() {
   const [expenses, setExpenses] = useState<any[]>([]);
   const [incomes, setIncomes] = useState<any[]>([]);
   const [isSlideoverOpen, setIsSlideoverOpen] = useState(false);

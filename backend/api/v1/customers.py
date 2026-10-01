@@ -15,7 +15,7 @@ router = APIRouter(prefix="/customers", tags=["Customers"])
 @router.get("", response_model=List[CustomerResponse])
 async def get_customers(
     db: AsyncSession = Depends(get_db),
-    # current_user: User = Depends(get_current_user) # Optional for POS access speed
+    current_user: User = Depends(require_basic_staff_access),
 ):
     query = select(Customer).where(Customer.is_deleted == False).order_by(Customer.name)
     result = await db.execute(query)

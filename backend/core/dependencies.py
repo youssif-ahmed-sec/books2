@@ -41,8 +41,13 @@ async def get_current_user(
     except jwt.InvalidTokenError:
         raise credentials_exception
 
+    try:
+        parsed_user_id = UUID(user_id)
+    except (ValueError, TypeError, AttributeError):
+        raise credentials_exception
+
     query = select(User).where(
-        User.id == UUID(user_id),
+        User.id == parsed_user_id,
         User.is_active == True,
         User.is_deleted == False,
     )
@@ -82,6 +87,17 @@ async def require_inventory_access(
     return current_user
 
 
+async def require_financial_access(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    if current_user.role != RoleEnum.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required for financial records",
+        )
+    return current_user
+
+
 async def require_pos_orders_access(
     current_user: User = Depends(get_current_user),
 ) -> User:
@@ -89,6 +105,21 @@ async def require_pos_orders_access(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Cashier or Admin access required",
+        )
+    return current_user
+
+
+async def require_warehouse_access(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    if current_user.role not in (
+        RoleEnum.ADMIN,
+        RoleEnum.INVENTORY_CONTROLLER,
+        RoleEnum.CASHIER_ORDERS,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Warehouse access required",
         )
     return current_user
 

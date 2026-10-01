@@ -350,7 +350,7 @@ export default function OrdersPage() {
     let warehouse_id = null;
     if (newStatus === "Delivered" || newStatus === "Closed") {
       try {
-        const wData = await fetchApi("/warehouses");
+        const wData = await fetchApi("/inventory/warehouses");
         if (wData.length > 0) {
           warehouse_id = wData[0].id;
         } else {

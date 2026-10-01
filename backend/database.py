@@ -31,9 +31,8 @@ elif DATABASE_URL.startswith("postgresql://"):
 
 # Set SSL via connect_args (the correct way for asyncpg)
 if needs_ssl:
-    ssl_context = ssl.create_default_context()
-    ssl_context.check_hostname = False
-    ssl_context.verify_mode = ssl.CERT_NONE
+    ca_cert_path = os.getenv("DATABASE_SSL_CA_CERT")
+    ssl_context = ssl.create_default_context(cafile=ca_cert_path or None)
     connect_args["ssl"] = ssl_context
 
 engine = create_async_engine(DATABASE_URL, echo=False, connect_args=connect_args)

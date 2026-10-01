@@ -4,7 +4,7 @@ from sqlalchemy.future import select
 from sqlalchemy import func
 from typing import Dict, Any
 
-from core.dependencies import get_current_user
+from core.dependencies import get_current_user, require_sales_reports_access
 from database import get_db
 from models.order import Order, OrderStatusEnum
 from models.product import Product
@@ -15,7 +15,7 @@ router = APIRouter(prefix="/dashboards", tags=["Dashboards"])
 @router.get("/management", response_model=Dict[str, Any])
 async def get_management_dashboard(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_sales_reports_access)
 ):
     """
     Management Dashboard Metrics:

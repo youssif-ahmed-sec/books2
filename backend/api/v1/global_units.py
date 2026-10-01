@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy.exc import IntegrityError
 from typing import List
 from uuid import UUID
 
@@ -8,7 +9,7 @@ from database import get_db
 from models.user import User
 from models.product import GlobalUnit
 from schemas.product import GlobalUnitCreate, GlobalUnitResponse
-from core.dependencies import get_current_user
+from core.dependencies import get_current_user, require_inventory_access
 
 router = APIRouter(
     prefix="/global-units",
@@ -29,7 +30,7 @@ async def list_global_units(
 async def create_global_unit(
     unit_in: GlobalUnitCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_inventory_access)
 ):
     # Check if a unit with the same name already exists
     query = select(GlobalUnit).where(
@@ -50,12 +51,15 @@ async def create_global_unit(
     
     try:
         await db.commit()
-    except Exception as e:
+    except IntegrityError:
         await db.rollback()
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Database error: {str(e)}"
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A unit with this name already exists."
         )
+    except Exception:
+        await db.rollback()
+        raise
         
     await db.refresh(new_unit)
     return new_unit

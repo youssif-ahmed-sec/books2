@@ -155,11 +155,11 @@ async def list_all_users(
 async def sync_user_profile(
     user_data: UserSyncRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    _admin: User = Depends(require_admin),
 ):
     """
     Sync a Supabase authenticated user with our local User profile table.
-    If the user doesn't exist, they are created.
+    If the user doesn't exist, they are created. Requires Admin role.
     """
     query = select(User).where(User.id == user_data.id)
     result = await db.execute(query)
