@@ -122,7 +122,7 @@ class ProductService:
                         product_id=new_product.id,
                         warehouse_id=first_warehouse.id,
                         user_id=user_id,
-                        transaction_type=TransactionTypeEnum.RECEIVING,
+                        transaction_type=TransactionTypeEnum.ADJUSTMENT,
                         quantity_changed=product_in.initial_stock,
                         notes="Initial stock from product creation"
                     )

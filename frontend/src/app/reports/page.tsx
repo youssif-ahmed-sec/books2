@@ -18,7 +18,7 @@ export default function ReportsPage() {
 
   useEffect(() => {
     fetchApi("/auth/me").then(user => {
-      if (["ADMIN", "SENIOR_SALES", "INVENTORY_CONTROLLER"].includes(user.role)) setRole(user.role);
+      if (["ADMIN", "INVENTORY_CONTROLLER"].includes(user.role)) setRole(user.role);
       else window.location.href = roleHome(user.role);
     }).catch(() => setRole(null));
   }, []);
@@ -89,7 +89,7 @@ export default function ReportsPage() {
           </div>
 
           <div className="flex space-x-4 border-b border-zinc-800 rtl:space-x-reverse">
-            {role !== "INVENTORY_CONTROLLER" && <button
+            {role === "ADMIN" && <button
               onClick={() => setActiveTab("sales")}
               className={`pb-4 px-2 text-sm font-medium transition-colors border-b-2 ${
                 activeTab === "sales"
@@ -99,7 +99,7 @@ export default function ReportsPage() {
             >
               تقرير المبيعات
             </button>}
-            {role !== "SENIOR_SALES" && <button
+            <button
               onClick={() => setActiveTab("inventory")}
               className={`pb-4 px-2 text-sm font-medium transition-colors border-b-2 ${
                 activeTab === "inventory"
@@ -108,7 +108,7 @@ export default function ReportsPage() {
               }`}
             >
               حركات المخزون
-            </button>}
+            </button>
           </div>
 
           {isLoading ? (

@@ -210,6 +210,9 @@ class SupplierDetailResponse(SupplierResponse):
     total_purchases: Optional[Decimal] = None
     total_payments: Optional[Decimal] = None
     balance: Optional[Decimal] = None
+    statement_incomplete: bool = False
+    unpriced_receipts: int = 0
+    unattributed_receipts: int = 0
     payments: List[SupplierPaymentResponse] = []
     model_config = ConfigDict(from_attributes=True)
 

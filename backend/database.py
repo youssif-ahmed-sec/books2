@@ -33,6 +33,11 @@ elif DATABASE_URL.startswith("postgresql://"):
 if needs_ssl:
     ca_cert_path = os.getenv("DATABASE_SSL_CA_CERT")
     ssl_context = ssl.create_default_context(cafile=ca_cert_path or None)
+    # Supabase Root 2021 CA lacks a key-usage extension, which Python 3.13's
+    # strict X.509 flag requires. Opt in only for that legacy provider CA;
+    # certificate-chain and hostname verification remain enabled.
+    if ca_cert_path and os.getenv("DATABASE_SSL_ALLOW_LEGACY_CA") == "1":
+        ssl_context.verify_flags &= ~ssl.VERIFY_X509_STRICT
     connect_args["ssl"] = ssl_context
 
 engine = create_async_engine(DATABASE_URL, echo=False, connect_args=connect_args)

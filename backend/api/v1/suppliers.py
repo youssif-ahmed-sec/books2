@@ -1,13 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func, update
+from sqlalchemy import func, or_, update
 from uuid import UUID
 from typing import Optional
 from decimal import Decimal
 
 from models.product import Supplier, SupplierPayment
-from models.product import Product
 from models.inventory import InventoryTransaction
 from schemas.product import (
     SupplierCreate, SupplierUpdate, SupplierResponse,
@@ -64,15 +63,22 @@ async def get_supplier_detail(
     if current_user.role != RoleEnum.ADMIN:
         return visible_supplier_detail(supplier.__dict__, current_user.role)
 
-    # Calculate total purchases from inventory transactions (stock-in from this supplier)
-    purchases_query = select(func.sum(InventoryTransaction.quantity_changed * Product.cost)).join(
-        Product, InventoryTransaction.product_id == Product.id
+    # Only priced receipts can contribute to the statement. Old receipts lack
+    # both the historical supplier and price, so they cannot be reconstructed.
+    receipts = await db.execute(select(
+        func.coalesce(func.sum(InventoryTransaction.quantity_changed * InventoryTransaction.unit_cost), 0),
+        func.count(InventoryTransaction.id).filter(InventoryTransaction.unit_cost.is_(None)),
     ).where(
-        Product.supplier_id == supplier_id,
-        InventoryTransaction.transaction_type == "Receiving"
-    )
-    purchases_result = await db.execute(purchases_query)
-    total_purchases = purchases_result.scalar() or Decimal("0")
+        InventoryTransaction.supplier_id == supplier_id,
+        InventoryTransaction.transaction_type == "Receiving",
+    ))
+    total_purchases, unpriced_receipts = receipts.one()
+    unattributed_receipts = (await db.execute(select(func.count(InventoryTransaction.id)).where(
+        InventoryTransaction.supplier_id.is_(None),
+        InventoryTransaction.transaction_type == "Receiving",
+        or_(InventoryTransaction.notes.is_(None), InventoryTransaction.notes != "Initial stock from product creation"),
+    ))).scalar_one()
+    statement_incomplete = bool(unpriced_receipts or unattributed_receipts)
 
     # Calculate total payments
     payments_query = select(func.sum(SupplierPayment.amount)).where(
@@ -89,13 +95,16 @@ async def get_supplier_detail(
     payments = payments_list_result.scalars().all()
 
     opening_balance = supplier.opening_balance or Decimal("0")
-    balance = opening_balance + Decimal(str(total_purchases)) - Decimal(str(total_payments))
+    balance = None if statement_incomplete else opening_balance + Decimal(str(total_purchases)) - Decimal(str(total_payments))
 
     supplier_data = supplier.__dict__.copy()
     supplier_data.pop("_sa_instance_state", None)
     supplier_data["total_purchases"] = total_purchases
     supplier_data["total_payments"] = total_payments
     supplier_data["balance"] = balance
+    supplier_data["statement_incomplete"] = statement_incomplete
+    supplier_data["unpriced_receipts"] = unpriced_receipts
+    supplier_data["unattributed_receipts"] = unattributed_receipts
     supplier_data["payments"] = payments
 
     return visible_supplier_detail(supplier_data, current_user.role)

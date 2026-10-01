@@ -52,7 +52,10 @@ interface Supplier {
 interface SupplierDetail extends Supplier {
   total_purchases: number;
   total_payments: number;
-  balance: number;
+  balance: number | null;
+  statement_incomplete: boolean;
+  unpriced_receipts: number;
+  unattributed_receipts: number;
   payments: Payment[];
 }
 
@@ -282,24 +285,29 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess, isAdmin }: { suppli
             <div className="glass rounded-2xl p-4 text-center">
               <p className="text-[10px] text-[#e2bfb0]/60 mb-1">إجمالي المشتريات</p>
               <p className="text-lg font-bold text-white">{Number(detail.total_purchases).toLocaleString()}</p>
-              <p className="text-[10px] text-[#e2bfb0]/40">ج.م</p>
+              <p className="text-[10px] text-[#e2bfb0]/40">{detail.statement_incomplete ? "مشتريات موثقة فقط" : "ج.م"}</p>
             </div>
             <div className="glass rounded-2xl p-4 text-center">
               <p className="text-[10px] text-[#e2bfb0]/60 mb-1">إجمالي المدفوعات</p>
               <p className="text-lg font-bold text-green-400">{Number(detail.total_payments).toLocaleString()}</p>
               <p className="text-[10px] text-[#e2bfb0]/40">ج.م</p>
             </div>
-            <div className={`glass rounded-2xl p-4 text-center ${detail.credit_limit && Number(detail.balance) > Number(detail.credit_limit) ? 'border border-red-500/50 shadow-[0_0_10px_rgba(239,68,68,0.2)]' : ''}`}>
+            <div className={`glass rounded-2xl p-4 text-center ${detail.balance !== null && detail.credit_limit && Number(detail.balance) > Number(detail.credit_limit) ? 'border border-red-500/50 shadow-[0_0_10px_rgba(239,68,68,0.2)]' : ''}`}>
               <p className="text-[10px] text-[#e2bfb0]/60 mb-1">الرصيد المستحق</p>
-              <p className={`text-lg font-bold ${Number(detail.balance) > 0 ? "text-[#ffb4ab]" : "text-green-400"}`}>{Number(detail.balance).toLocaleString()}</p>
-              <p className="text-[10px] text-[#e2bfb0]/40">ج.م</p>
+              <p className={`text-lg font-bold ${detail.balance !== null && detail.balance > 0 ? "text-[#ffb4ab]" : "text-green-400"}`}>{detail.balance === null ? "غير معروف" : Number(detail.balance).toLocaleString()}</p>
+              <p className="text-[10px] text-[#e2bfb0]/40">{detail.balance === null ? "يلزم تسوية الحركات القديمة" : "ج.م"}</p>
               {detail.credit_limit ? (
-                <p className={`text-[9px] mt-1 border-t border-white/5 pt-1 ${Number(detail.balance) > Number(detail.credit_limit) ? 'text-red-400 font-bold' : 'text-[#e2bfb0]/40'}`}>
+                <p className={`text-[9px] mt-1 border-t border-white/5 pt-1 ${detail.balance !== null && Number(detail.balance) > Number(detail.credit_limit) ? 'text-red-400 font-bold' : 'text-[#e2bfb0]/40'}`}>
                   حد الائتمان: {Number(detail.credit_limit).toLocaleString()}
                 </p>
               ) : null}
             </div>
           </div>
+        )}
+        {isAdmin && detail?.statement_incomplete && (
+          <p className="px-6 py-3 text-xs text-amber-300 border-b border-amber-500/20">
+            كشف الحساب غير مكتمل: {detail.unpriced_receipts} استلامات بلا تكلفة، و{detail.unattributed_receipts} استلامات قديمة بلا مورد موثق. لا يمكن حساب الرصيد بدقة قبل التسوية.
+          </p>
         )}
 
         {/* Tabs */}

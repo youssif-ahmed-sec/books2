@@ -7,6 +7,7 @@ import { InventoryTableRow } from "@/components/InventoryTableRow";
 import { AddProductPanel } from "@/components/AddProductPanel";
 import { EditProductPanel } from "@/components/EditProductPanel";
 import InventoryMovementsModal from "@/components/InventoryMovementsModal";
+import ReceiveStockPanel from "@/components/ReceiveStockPanel";
 import { fetchApi } from "@/lib/api";
 import { getUserRole, canViewCost, canEditProduct, UserRole } from "@/utils/auth";
 
@@ -14,6 +15,7 @@ export default function InventoryPage() {
   const [showAddPanel, setShowAddPanel] = useState(false);
   const [showEditPanel, setShowEditPanel] = useState(false);
   const [showMovementsModal, setShowMovementsModal] = useState(false);
+  const [showReceivePanel, setShowReceivePanel] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any>(null);
 
   const [inventoryItems, setInventoryItems] = useState<any[]>([]);
@@ -238,13 +240,22 @@ export default function InventoryPage() {
               تصدير البيانات
             </button>
             {canEditProduct(userRole) && (
-              <button
-                onClick={() => setShowAddPanel(true)}
-                className="flex items-center gap-3 px-8 py-3.5 bg-primary text-white rounded-full shadow-lg shadow-primary/30 hover:-translate-y-0.5 transition-all font-bold text-sm"
-              >
-                <span className="material-symbols-outlined text-sm">add_circle</span>
-                إضافة منتج جديد
-              </button>
+              <>
+                <button
+                  onClick={() => setShowReceivePanel(true)}
+                  className="flex items-center gap-3 px-6 py-3.5 glass text-[#e5e2e1] rounded-full hover:bg-white/10 transition-all font-bold text-sm"
+                >
+                  <span className="material-symbols-outlined text-sm">move_to_inbox</span>
+                  استلام مخزون
+                </button>
+                <button
+                  onClick={() => setShowAddPanel(true)}
+                  className="flex items-center gap-3 px-8 py-3.5 bg-primary text-white rounded-full shadow-lg shadow-primary/30 hover:-translate-y-0.5 transition-all font-bold text-sm"
+                >
+                  <span className="material-symbols-outlined text-sm">add_circle</span>
+                  إضافة منتج جديد
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -543,6 +554,7 @@ export default function InventoryPage() {
       )}
       {/* Modals */}
       {showMovementsModal && <InventoryMovementsModal onClose={() => setShowMovementsModal(false)} />}
+      {showReceivePanel && <ReceiveStockPanel onClose={() => setShowReceivePanel(false)} onSaved={() => window.location.reload()} />}
     </div>
   );
 }

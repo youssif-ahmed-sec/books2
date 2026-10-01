@@ -74,6 +74,9 @@ def test_cashier_cannot_read_inventory_transaction_history():
     "role,path",
     [
         (RoleEnum.INVENTORY_CONTROLLER, "/api/v1/reports/sales"),
+        (RoleEnum.SENIOR_SALES, "/api/v1/reports/sales"),
+        (RoleEnum.SENIOR_SALES, "/api/v1/dashboards/management"),
+        (RoleEnum.INVENTORY_CONTROLLER, "/api/v1/dashboards/management"),
         (RoleEnum.SENIOR_SALES, "/api/v1/reports/inventory"),
     ],
 )

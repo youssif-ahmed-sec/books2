@@ -4,8 +4,13 @@ import { useEffect, useState } from "react";
 import { fetchApi } from "@/lib/api";
 import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
+import AdminGate from "@/components/AdminGate";
 
 export default function DashboardPage() {
+  return <AdminGate><DashboardContent /></AdminGate>;
+}
+
+function DashboardContent() {
   const [data, setData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
 

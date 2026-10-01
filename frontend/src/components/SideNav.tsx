@@ -65,10 +65,10 @@ export default function SideNav() {
     const role = user?.role;
     if (!role) return false;
     if (item.href === "/dashboard") {
-      return role === "ADMIN" || role === "SENIOR_SALES";
+      return role === "ADMIN";
     }
     if (item.href === "/reports") {
-      return role === "ADMIN" || role === "SENIOR_SALES" || role === "INVENTORY_CONTROLLER";
+      return role === "ADMIN" || role === "INVENTORY_CONTROLLER";
     }
     if (["/inventory", "/suppliers", "/categories"].includes(item.href)) {
       return role === "ADMIN" || role === "INVENTORY_CONTROLLER";

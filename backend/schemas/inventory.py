@@ -21,12 +21,14 @@ class InventoryTransactionBase(BaseModel):
     notes: Optional[str] = None
 
 class InventoryTransactionCreate(InventoryTransactionBase):
-    pass
+    supplier_id: Optional[UUID] = None
+    unit_cost: Optional[Decimal] = Field(default=None, ge=0, allow_inf_nan=False)
 
 class InventoryTransactionResponse(InventoryTransactionBase):
     id: UUID
     user_id: UUID
     created_at: datetime
+    supplier_id: Optional[UUID] = None
 
     model_config = ConfigDict(from_attributes=True)
 

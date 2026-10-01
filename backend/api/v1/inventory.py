@@ -6,7 +6,7 @@ from uuid import UUID
 from typing import List
 
 from models.inventory import InventoryTransaction, InventoryBalance, Warehouse
-from models.product import Product, ProductUnit, ProductPrice
+from models.product import Product, ProductUnit, ProductPrice, Supplier
 from models.user import User
 from schemas.inventory import InventoryTransactionCreate, InventoryTransactionResponse, InventoryBalanceResponse, InventoryStatsResponse, InventoryTransactionRecentResponse, PaginatedInventoryTransactionResponse
 from sqlalchemy import func, desc
@@ -42,6 +42,11 @@ async def create_inventory_transaction(
         raise HTTPException(status_code=400, detail="Receiving quantity must be positive")
     if transaction_in.transaction_type == "Issuing" and quantity > 0:
         raise HTTPException(status_code=400, detail="Issuing quantity must be negative")
+    is_receipt = transaction_in.transaction_type == "Receiving"
+    if is_receipt and (transaction_in.supplier_id is None or transaction_in.unit_cost is None):
+        raise HTTPException(status_code=422, detail="Receiving requires supplier_id and unit_cost")
+    if not is_receipt and (transaction_in.supplier_id is not None or transaction_in.unit_cost is not None):
+        raise HTTPException(status_code=422, detail="Supplier and cost are only valid for Receiving")
 
     # Serializes first-time balance creation within a warehouse.
     warehouse_query = select(Warehouse).where(
@@ -58,6 +63,13 @@ async def create_inventory_transaction(
     )
     if (await db.execute(product_query)).scalar_one_or_none() is None:
         raise HTTPException(status_code=404, detail="Product not found")
+    if is_receipt:
+        supplier_query = select(Supplier.id).where(
+            Supplier.id == transaction_in.supplier_id,
+            Supplier.is_deleted == False,
+        )
+        if (await db.execute(supplier_query)).scalar_one_or_none() is None:
+            raise HTTPException(status_code=404, detail="Supplier not found")
 
     # Lock existing balance before checking and updating stock.
     balance_query = select(InventoryBalance).where(
@@ -91,6 +103,8 @@ async def create_inventory_transaction(
         user_id=current_user.id,
         transaction_type=transaction_in.transaction_type,
         quantity_changed=transaction_in.quantity_changed,
+        supplier_id=transaction_in.supplier_id,
+        unit_cost=transaction_in.unit_cost,
         reference_document=transaction_in.reference_document,
         notes=transaction_in.notes
     )

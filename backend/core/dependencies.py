@@ -124,17 +124,6 @@ async def require_warehouse_access(
     return current_user
 
 
-async def require_sales_reports_access(
-    current_user: User = Depends(get_current_user),
-) -> User:
-    if current_user.role not in (RoleEnum.ADMIN, RoleEnum.SENIOR_SALES):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Senior Sales or Admin access required",
-        )
-    return current_user
-
-
 async def require_basic_staff_access(
     current_user: User = Depends(get_current_user),
 ) -> User:

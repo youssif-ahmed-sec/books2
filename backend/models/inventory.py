@@ -39,6 +39,9 @@ class InventoryTransaction(Base):
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     transaction_type = Column(Enum(TransactionTypeEnum), nullable=False)
     quantity_changed = Column(Numeric(18, 2), nullable=False)
+    # Receipt facts must remain stable when the product's current cost or supplier changes.
+    supplier_id = Column(UUID(as_uuid=True), ForeignKey("suppliers.id"), nullable=True)
+    unit_cost = Column(Numeric(18, 2), nullable=True)
     reference_document = Column(String, nullable=True)
     notes = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
