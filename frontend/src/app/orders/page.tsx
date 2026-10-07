@@ -1,11 +1,13 @@
 "use client";
 import React, { useState, useEffect, useRef } from "react";
 import Head from "next/head";
-import Link from "next/link";
 import SideNav from "@/components/SideNav";
+import TopNav from "@/components/TopNav";
 import { fetchApi } from "@/lib/api";
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
+import { errorMessage } from "@/lib/errors";
+import { orderSourceLabels, orderStatusLabels } from "@/lib/orderLabels";
 
 // ── Types ─────────────────────────────────────────────────────────────
 interface Product {
@@ -57,6 +59,7 @@ interface Order {
   user_id: string | null;
   assigned_to_id: string | null;
   status: string;
+  allowed_next_statuses: string[];
   source: string;
   total_amount: number;
   tax_amount: number;
@@ -84,42 +87,14 @@ interface CartItem {
   maxStock?: number;
 }
 
-const ORDER_STATUSES = [
-  "New Lead", "Draft Order", "Waiting Quotation", "Quotation Sent", 
-  "Waiting Customer Approval", "Approved", "Preparing", "Ready", 
-  "Delivered", "Closed", "Cancelled", "Lost", "Returned"
-];
-
 const ORDER_SOURCES = [
-  "WhatsApp", "Messenger", "Phone Call", "Walk-In Customer", "Manual Entry"
+  "Messenger", "Phone Call", "Walk-In Customer", "Manual Entry"
 ];
 
 const STATUS_TABS = ["All", "Draft Order", "Waiting Quotation", "Approved", "Preparing", "Ready", "Delivered", "Closed", "Cancelled"];
 
-const STATUS_MAP: Record<string, string> = {
-  "All": "الكل",
-  "New Lead": "عميل جديد",
-  "Draft Order": "مسودة طلب",
-  "Waiting Quotation": "في انتظار التسعير",
-  "Quotation Sent": "تم إرسال عرض السعر",
-  "Waiting Customer Approval": "بانتظار موافقة العميل",
-  "Approved": "موافق عليه",
-  "Preparing": "قيد التجهيز",
-  "Ready": "جاهز",
-  "Delivered": "تم التوصيل",
-  "Closed": "مغلق",
-  "Cancelled": "ملغي",
-  "Lost": "مفقود",
-  "Returned": "مسترجع"
-};
-
-const SOURCE_MAP: Record<string, string> = {
-  "Walk-In Customer": "عميل مباشر",
-  "WhatsApp": "واتساب",
-  "Messenger": "ماسنجر",
-  "Phone Call": "مكالمة هاتفية",
-  "Manual Entry": "إدخال يدوي"
-};
+const STATUS_MAP = orderStatusLabels;
+const SOURCE_MAP = orderSourceLabels;
 
 export default function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -142,9 +117,15 @@ export default function OrdersPage() {
   const [availablePriceLevels, setAvailablePriceLevels] = useState<{value: string, label: string}[]>([]);
 
   useEffect(() => {
-    fetchOrders();
-    fetchCustomers();
-    fetchPriceLevels();
+    fetchApi("/orders").then(setOrders).catch(console.error).finally(() => setLoading(false));
+    fetchApi("/customers").then(setCustomers).catch(console.error);
+    fetchApi("/pos/price-levels").then(setAvailablePriceLevels).catch(() => {
+      setAvailablePriceLevels([
+        { value: "Retail", label: "قطاعي" },
+        { value: "Semi Wholesale", label: "نصف جملة" },
+        { value: "Wholesale", label: "جملة" }
+      ]);
+    });
   }, []);
 
   const fetchOrders = async () => {
@@ -159,50 +140,27 @@ export default function OrdersPage() {
     }
   };
 
-  const fetchCustomers = async () => {
-    try {
-      const data = await fetchApi("/customers");
-      setCustomers(data);
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const fetchPriceLevels = async () => {
-    try {
-      const data = await fetchApi("/pos/price-levels");
-      setAvailablePriceLevels(data);
-    } catch (err) {
-      setAvailablePriceLevels([
-        { value: "Retail", label: "قطاعي (Retail)" },
-        { value: "Semi Wholesale", label: "نصف جملة (Semi Wholesale)" },
-        { value: "Wholesale", label: "جملة (Wholesale)" }
-      ]);
-    }
-  };
-
   // ── Search Logic ────────────────────────────────────────────────────────
   useEffect(() => {
     if (!searchQuery.trim()) {
-      setSearchResults([]);
-      setIsSearching(false);
       return;
     }
+    let active = true;
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
     
-    setIsSearching(true);
     searchTimeoutRef.current = setTimeout(async () => {
       try {
         const data = await fetchApi("/pos/search?q=" + encodeURIComponent(searchQuery));
-        setSearchResults(data);
+        if (active) setSearchResults(data);
       } catch (err) {
         console.error(err);
       } finally {
-        setIsSearching(false);
+        if (active) setIsSearching(false);
       }
     }, 300);
 
     return () => {
+      active = false;
       if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
     };
   }, [searchQuery]);
@@ -341,8 +299,8 @@ export default function OrdersPage() {
       setNotes("");
       setShippingCost(0);
       fetchOrders();
-    } catch (err: any) {
-      toast.error(err.message || "حدث خطأ أثناء إنشاء الطلب");
+    } catch (err: unknown) {
+      toast.error(errorMessage(err, "حدث خطأ أثناء إنشاء الطلب"));
     }
   };
 
@@ -357,7 +315,7 @@ export default function OrdersPage() {
           toast.error("لا يوجد مخازن متاحة لصرف المخزون");
           return;
         }
-      } catch (err) {
+      } catch {
         toast.error("Error fetching warehouses");
         return;
       }
@@ -374,8 +332,8 @@ export default function OrdersPage() {
 
       toast.success("تم تحديث حالة الطلب");
       fetchOrders();
-    } catch (err: any) {
-      toast.error(err.message || "حدث خطأ");
+    } catch (err: unknown) {
+      toast.error(errorMessage(err, "حدث خطأ"));
     }
   };
 
@@ -406,20 +364,21 @@ export default function OrdersPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#131313] text-[#e5e2e1] overflow-hidden selection:bg-primary/30 flex" dir="rtl">
+    <div className="min-h-screen bg-[#131313] text-[#e5e2e1] overflow-x-hidden selection:bg-primary/30 flex" dir="rtl">
       <Head>
         <title>إدارة الطلبات | نظام المكتبة</title>
       </Head>
       <ToastContainer position="top-right" theme="dark" rtl={true} />
 
       <SideNav />
+      <TopNav title="إدارة الطلبات" />
 
-      <main className="flex-1 mr-[364px] ml-8 my-8 flex flex-col gap-6 h-[calc(100vh-64px)]">
+      <main className="mx-4 mb-8 mt-28 flex min-w-0 flex-1 flex-col gap-6 lg:ml-8 lg:mr-[364px] lg:mt-36 lg:h-[calc(100vh-176px)]">
         
         {/* Header */}
-        <header className="glass rounded-2xl hi-fi-shadow border border-white/5 h-[80px] shrink-0 flex items-center justify-between px-8">
+        <header className="glass rounded-2xl hi-fi-shadow border border-white/5 min-h-[80px] shrink-0 flex flex-wrap items-center justify-between gap-4 px-8 py-4">
           <div className="flex items-center gap-4">
-            <h1 className="text-2xl font-black bg-gradient-to-l from-white to-white/50 bg-clip-text text-transparent">
+            <h1 className="text-2xl font-bold text-white">
               إدارة الطلبات
             </h1>
             <span className="px-3 py-1 bg-white/5 rounded-full text-xs text-white/50 border border-white/5">
@@ -428,7 +387,7 @@ export default function OrdersPage() {
           </div>
           <button 
             onClick={() => setIsSlideOverOpen(true)}
-            className="h-11 px-6 bg-primary hover:bg-primary/90 text-black font-bold rounded-xl flex items-center gap-2 transition-all shadow-[0_0_20px_rgba(255,180,171,0.2)] hover:shadow-[0_0_25px_rgba(255,180,171,0.4)]"
+            className="app-primary-button"
           >
             <span className="material-symbols-outlined text-xl">add</span>
             إنشاء طلب جديد
@@ -442,7 +401,7 @@ export default function OrdersPage() {
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
-                className={`px-5 py-2.5 rounded-xl text-sm font-semibold whitespace-nowrap transition-colors ${activeTab === tab ? 'bg-primary text-black' : 'hover:bg-white/10 text-[#e2bfb0]/60 bg-white/5 border border-white/5'}`}
+                className={`px-5 py-2.5 rounded-full text-sm font-semibold whitespace-nowrap transition-colors ${activeTab === tab ? 'bg-primary text-white' : 'hover:bg-white/10 text-[#e2bfb0]/60 bg-white/5 border border-white/5'}`}
               >
                 {STATUS_MAP[tab] || tab}
               </button>
@@ -503,10 +462,11 @@ export default function OrdersPage() {
                         <select
                           className="bg-[#131313] border border-white/10 rounded-lg text-xs px-2 py-1.5 text-white focus:outline-none focus:border-primary transition-colors cursor-pointer"
                           value={order.status}
+                          disabled={!order.allowed_next_statuses?.length}
                           onChange={(e) => handleStatusChange(order.id, e.target.value)}
                         >
-                          <option value="" disabled>تغيير الحالة</option>
-                          {ORDER_STATUSES.map(s => (
+                          <option value={order.status}>{STATUS_MAP[order.status] || order.status}</option>
+                          {order.allowed_next_statuses?.map(s => (
                             <option key={s} value={s}>{STATUS_MAP[s] || s}</option>
                           ))}
                         </select>
@@ -571,9 +531,14 @@ export default function OrdersPage() {
                 <input
                   type="text"
                   placeholder="ابحث عن منتج (الاسم، الباركود)..."
-                  className="w-full h-12 bg-[#131313] border border-white/10 rounded-xl pr-12 pl-4 text-sm text-white placeholder-white/30 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/50 transition-all"
+                  className="app-search-focus w-full h-12 bg-[#131313] border border-white/10 rounded-xl pr-12 pl-4 text-sm text-white placeholder-white/30 transition-all"
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onChange={(e) => {
+                    const query = e.target.value;
+                    setSearchQuery(query);
+                    setIsSearching(Boolean(query.trim()));
+                    if (!query.trim()) setSearchResults([]);
+                  }}
                 />
                 
                 {searchResults.length > 0 && (

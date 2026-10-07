@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.dependencies import require_pos_orders_access
+from core.idempotency import IdempotencyConflict
 from database import get_db
 from models.user import User
 from schemas.order import OrderCreate, OrderDraftCreate, OrderResponse, OrderStatusUpdate
@@ -29,6 +30,8 @@ async def create_order(
 ):
     try:
         return await OrderService.create_order(db, order_in, current_user.id)
+    except IdempotencyConflict as e:
+        raise HTTPException(status_code=409, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

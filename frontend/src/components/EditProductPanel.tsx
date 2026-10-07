@@ -62,6 +62,19 @@ interface GlobalUnit {
   conversion_factor: number;
 }
 
+interface CatalogOption { id: string; name_ar: string; name_en: string; category_id?: string }
+interface SupplierOption { id: string; name: string }
+interface BundleProductOption { id: string; name_ar: string; is_bundle: boolean }
+interface SavedPrice { price_level: string; price: number }
+interface SavedUnit {
+  id: string;
+  unit_name: string;
+  conversion_factor: number;
+  barcode?: string | null;
+  prices?: SavedPrice[];
+}
+interface SavedBundleComponent { id: string; component_id: string; quantity: number }
+
 interface EditProductPanelProps {
   productId: string;
   onClose: () => void;
@@ -99,16 +112,16 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
   ]);
 
   const [bundleComponents, setBundleComponents] = useState<BundleComponent[]>([]);
-  const [productsList, setProductsList] = useState<any[]>([]);
+  const [productsList, setProductsList] = useState<BundleProductOption[]>([]);
 
   const [globalUnits, setGlobalUnits] = useState<GlobalUnit[]>([]);
   const [showNewUnitDialog, setShowNewUnitDialog] = useState(false);
   const [newGlobalUnit, setNewGlobalUnit] = useState({ name: "", conversion_factor: 1 });
 
-  const [categoriesList, setCategoriesList] = useState<any[]>([]);
-  const [subcategoriesList, setSubcategoriesList] = useState<any[]>([]);
-  const [brandsList, setBrandsList] = useState<any[]>([]);
-  const [suppliersList, setSuppliersList] = useState<any[]>([]);
+  const [categoriesList, setCategoriesList] = useState<CatalogOption[]>([]);
+  const [subcategoriesList, setSubcategoriesList] = useState<CatalogOption[]>([]);
+  const [brandsList, setBrandsList] = useState<CatalogOption[]>([]);
+  const [suppliersList, setSuppliersList] = useState<SupplierOption[]>([]);
 
   const [isLoading, setIsLoading] = useState(true);
 
@@ -138,10 +151,10 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
         });
         
         if (data.units && data.units.length > 0) {
-          const loadedUnits = data.units.map((u: any) => {
-            const retail = u.prices?.find((p: any) => p.price_level === "Retail")?.price || 0;
-            const wholesale = u.prices?.find((p: any) => p.price_level === "Wholesale")?.price || 0;
-            const vip = u.prices?.find((p: any) => p.price_level === "VIP")?.price || 0;
+          const loadedUnits = data.units.map((u: SavedUnit) => {
+            const retail = u.prices?.find((p) => p.price_level === "Retail")?.price || 0;
+            const wholesale = u.prices?.find((p) => p.price_level === "Wholesale")?.price || 0;
+            const vip = u.prices?.find((p) => p.price_level === "VIP")?.price || 0;
             return {
               id: u.id,
               name: u.unit_name,
@@ -159,7 +172,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
         }
 
         if (data.is_bundle && data.bundle_components) {
-          setBundleComponents(data.bundle_components.map((c: any) => ({
+          setBundleComponents(data.bundle_components.map((c: SavedBundleComponent) => ({
             id: c.id || Date.now().toString() + Math.random(),
             component_id: c.component_id,
             quantity: c.quantity
@@ -228,12 +241,8 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
     ]);
   };
 
-  const updateUnit = (id: string, field: keyof ProductUnit, value: any) => {
+  const updateUnit = (id: string, field: keyof ProductUnit, value: ProductUnit[keyof ProductUnit]) => {
     setUnits(prev => prev.map(u => u.id === id ? { ...u, [field]: value } : u));
-  };
-
-  const removeUnit = (id: string) => {
-    setUnits(prev => prev.filter(u => u.id !== id));
   };
 
   const addBundleComponent = () => {
@@ -243,7 +252,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
     ]);
   };
 
-  const updateBundleComponent = (id: string, field: keyof BundleComponent, value: any) => {
+  const updateBundleComponent = (id: string, field: keyof BundleComponent, value: BundleComponent[keyof BundleComponent]) => {
     setBundleComponents(prev => prev.map(c => c.id === id ? { ...c, [field]: value } : c));
   };
 
@@ -350,9 +359,9 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
       });
 
       if (!validationResult.success) {
-        const fieldErrors = validationResult.error.issues.map((err: any) => {
+        const fieldErrors = validationResult.error.issues.map((err) => {
            if (err.path[0] === 'units') {
-             return `${err.path[err.path.length - 1]}_${units[err.path[1] as number]?.id}`;
+             return `${String(err.path[err.path.length - 1])}_${units[err.path[1] as number]?.id}`;
            }
            return err.path[0].toString();
         });
@@ -367,7 +376,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
       const payload = {
         sku: form.sku, // Keep existing SKU
         barcode: form.barcode,
-        name_en: form.nameEn || form.nameAr,
+        name_en: form.nameEn.trim(),
         name_ar: form.nameAr,
         base_unit: units.find(u => u.isBase)?.name || "Piece",
         cost: parseFloat(form.costPrice) || 0,
@@ -409,9 +418,9 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
         }),
       });
 
-      // Close panel and trigger a refresh on the parent
+      // Close panel and trigger the parent's refresh.
       onClose();
-      window.location.reload();
+      onSuccess();
     } catch (err) {
       console.error("Failed to save product:", err);
       alert("Failed to save product");
@@ -480,7 +489,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
                 <div className="relative">
                   <input
                     type="text"
-                    placeholder="6220000000000"
+                    placeholder="امسح الباركود أو أدخله"
                     value={form.barcode}
                     onChange={(e) => {
                       setForm({ ...form, barcode: e.target.value });
@@ -499,7 +508,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">اسم المنتج باللغة العربية</label>
                 <input
                   type="text"
-                  placeholder="مثال: كتاب الفيزياء الحديثة - الطبعة السادسة"
+                  placeholder="اسم المنتج بالعربية"
                   value={form.nameAr}
                   onChange={(e) => {
                     setForm({ ...form, nameAr: e.target.value });
@@ -513,11 +522,11 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
 
               {/* English Name */}
               <div className="col-span-2 space-y-5">
-                <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">اسم المنتج باللغة الإنجليزية</label>
+                <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">اسم المنتج بالإنجليزية · اختياري</label>
                 <input
                   dir="ltr"
                   type="text"
-                  placeholder="Modern Physics - 6th Edition"
+                  placeholder="اسم المنتج بالإنجليزية"
                   value={form.nameEn}
                   onChange={(e) => {
                     setForm({ ...form, nameEn: e.target.value });
@@ -958,7 +967,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
                   </p>
 
                   <div className="flex items-center gap-3 mt-4">
-                    <label className="text-sm font-medium text-zinc-300">هل هذا المنتج عرض مجمع (Bundle)؟</label>
+                    <label className="text-sm font-medium text-[#e2bfb0]">هل هذا المنتج عرض مجمع؟</label>
                     <label className="relative inline-flex items-center cursor-pointer">
                       <input 
                         type="checkbox" 
@@ -966,18 +975,18 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
                         onChange={(e) => setForm({...form, is_bundle: e.target.checked})}
                         className="sr-only peer" 
                       />
-                      <div className="w-11 h-6 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:right-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
+                      <div className="w-11 h-6 bg-[#353534] peer-focus:outline-none rounded-full peer peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:right-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
                     </label>
                   </div>
                   
                   {form.is_bundle && (
-                    <div className="mt-4 border-t border-zinc-800 pt-4">
+                    <div className="mt-4 border-t border-white/10 pt-4">
                       <div className="flex justify-between items-center mb-4">
-                        <h4 className="text-sm font-medium text-zinc-300">مكونات العرض (Bundle Components)</h4>
+                        <h4 className="text-sm font-medium text-[#e2bfb0]">مكونات العرض</h4>
                         <button
                           type="button"
                           onClick={addBundleComponent}
-                          className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded text-sm transition-colors"
+                          className="app-secondary-button"
                         >
                           + إضافة مكون
                         </button>
@@ -985,13 +994,13 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
                       
                       <div className="space-y-3">
                         {bundleComponents.map((comp) => (
-                          <div key={comp.id} className="flex gap-3 items-end p-3 bg-zinc-800/50 rounded-lg border border-zinc-700/50">
+                          <div key={comp.id} className="flex gap-3 items-end p-3 bg-white/5 rounded-2xl border border-white/5">
                             <div className="flex-1">
-                              <label className="block text-xs font-medium text-zinc-400 mb-1">المنتج المكون</label>
+                              <label className="app-muted block text-xs font-medium mb-1">المنتج المكون</label>
                               <select 
                                 value={comp.component_id} 
                                 onChange={(e) => updateBundleComponent(comp.id, "component_id", e.target.value)}
-                                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500"
+                                className="app-field"
                               >
                                 <option value="">-- اختر المنتج --</option>
                                 {productsList.filter(p => !p.is_bundle && p.id !== productId).map(p => (
@@ -1000,13 +1009,13 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
                               </select>
                             </div>
                             <div className="w-32">
-                              <label className="block text-xs font-medium text-zinc-400 mb-1">الكمية في العرض</label>
+                              <label className="app-muted block text-xs font-medium mb-1">الكمية في العرض</label>
                               <input 
                                 type="number" 
                                 min="1"
                                 value={comp.quantity}
                                 onChange={(e) => updateBundleComponent(comp.id, "quantity", parseInt(e.target.value))}
-                                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 text-white text-left focus:outline-none focus:border-emerald-500"
+                                className="app-field text-left"
                               />
                             </div>
                             <button
@@ -1019,7 +1028,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
                           </div>
                         ))}
                         {bundleComponents.length === 0 && (
-                          <div className="text-center p-4 text-zinc-500 text-sm bg-zinc-800/30 rounded-lg border border-dashed border-zinc-700">
+                          <div className="app-muted text-center p-4 text-sm bg-white/5 rounded-2xl border border-dashed border-white/10">
                             لا يوجد مكونات مضافة حتى الآن.
                           </div>
                         )}
@@ -1027,12 +1036,12 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
                     </div>
                   )}
 
-                  <div className="border-t border-zinc-800 mt-6 pt-6"></div>
+                  <div className="border-t border-white/10 mt-6 pt-6"></div>
                   <div className="grid grid-cols-3 gap-6">
                     {[
-                      { label: "سعر المستهلك (Retail)", key: "retailPrice" as const, highlight: false },
-                      { label: "سعر الجملة (Wholesale)", key: "wholesalePrice" as const, highlight: false },
-                      { label: "سعر كبار العملاء (VIP)", key: "vipPrice" as const, highlight: true },
+                      { label: "سعر المستهلك", key: "retailPrice" as const, highlight: false },
+                      { label: "سعر الجملة", key: "wholesalePrice" as const, highlight: false },
+                      { label: "سعر كبار العملاء", key: "vipPrice" as const, highlight: true },
                     ].map((tier) => {
                       const salePrice = parseFloat(unit[tier.key]) || 0;
                       const baseCostPrice = parseFloat(form.costPrice) || 0;
@@ -1094,8 +1103,8 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
         <footer className="px-16 py-8 bg-[#0e0e0e]/80 backdrop-blur-xl border-t border-white/5 flex items-center gap-6 sticky bottom-0">
           <button 
             onClick={handleSave}
-            disabled={isSaving}
-            className={`flex-[2] ${isSaving ? 'bg-primary/50 cursor-not-allowed' : 'bg-primary hover:shadow-[0_12px_32px_rgba(255,107,0,0.3)] hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.99]'} text-white font-bold text-lg py-5 rounded-full shadow-[0_12px_24px_rgba(255,107,0,0.2)] transition-all flex items-center justify-center gap-3`}
+            disabled={isSaving || isLoading}
+            className={`flex-[2] ${isSaving || isLoading ? 'bg-primary/50 cursor-not-allowed' : 'bg-primary hover:shadow-[0_12px_32px_rgba(255,107,0,0.3)] hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.99]'} text-white font-bold text-lg py-5 rounded-full shadow-[0_12px_24px_rgba(255,107,0,0.2)] transition-all flex items-center justify-center gap-3`}
           >
             <span className="material-symbols-outlined font-bold">
               {isSaving ? "sync" : "check_circle"}
@@ -1132,7 +1141,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
                   type="text"
                   value={newGlobalUnit.name}
                   onChange={(e) => setNewGlobalUnit({ ...newGlobalUnit, name: e.target.value })}
-                  placeholder="مثال: كرتونة"
+                  placeholder="اسم الوحدة"
                   className="w-full bg-[#201f1f] border border-white/10 rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/50 transition-all text-right"
                 />
               </div>
@@ -1142,7 +1151,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
                   type="number"
                   value={newGlobalUnit.conversion_factor || ""}
                   onChange={(e) => setNewGlobalUnit({ ...newGlobalUnit, conversion_factor: parseFloat(e.target.value) || 1 })}
-                  placeholder="مثال: 24"
+                  placeholder="عدد القطع"
                   className="w-full bg-[#201f1f] border border-white/10 rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/50 transition-all text-right"
                 />
               </div>

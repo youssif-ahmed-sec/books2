@@ -2,19 +2,25 @@
 
 import React, { useState, useEffect } from "react";
 import { fetchApi } from "@/lib/api";
+import { errorMessage } from "@/lib/errors";
+
+interface Brand { id: string; name_ar: string; name_en: string }
 
 export default function BrandsManagement() {
-  const [brands, setBrands] = useState<any[]>([]);
+  const [brands, setBrands] = useState<Brand[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [editingBrand, setEditingBrand] = useState<any>(null);
+  const [editingBrand, setEditingBrand] = useState<Brand | null>(null);
   const [nameAr, setNameAr] = useState("");
   const [nameEn, setNameEn] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    loadBrands();
+    fetchApi("/products/brands")
+      .then(setBrands)
+      .catch((err) => console.error("Failed to load brands:", err))
+      .finally(() => setLoading(false));
   }, []);
 
   const loadBrands = async () => {
@@ -37,7 +43,7 @@ export default function BrandsManagement() {
     setShowForm(true);
   };
 
-  const openEdit = (b: any) => {
+  const openEdit = (b: Brand) => {
     setEditingBrand(b);
     setNameAr(b.name_ar);
     setNameEn(b.name_en);
@@ -51,8 +57,8 @@ export default function BrandsManagement() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!nameAr.trim() || !nameEn.trim()) {
-      setError("يرجى إدخال الاسم باللغتين العربية والإنجليزية");
+    if (!nameAr.trim()) {
+      setError("يرجى إدخال الاسم بالعربية");
       return;
     }
     setSubmitting(true);
@@ -71,8 +77,8 @@ export default function BrandsManagement() {
       }
       closeForm();
       loadBrands();
-    } catch (err: any) {
-      setError(err.message || "حدث خطأ أثناء الحفظ");
+    } catch (err) {
+      setError(errorMessage(err, "حدث خطأ أثناء الحفظ"));
     } finally {
       setSubmitting(false);
     }
@@ -145,7 +151,7 @@ export default function BrandsManagement() {
                       <p className="font-bold text-white text-sm">{b.name_ar}</p>
                     </td>
                     <td className="px-8 py-5">
-                      <p className="text-sm text-[#e2bfb0]/80" dir="ltr" style={{ textAlign: "right" }}>{b.name_en}</p>
+                      {b.name_en && <p className="text-sm text-[#e2bfb0]/80" dir="ltr" style={{ textAlign: "right" }}>{b.name_en}</p>}
                     </td>
                     <td className="px-8 py-5">
                       <div className="flex items-center justify-center gap-2">
@@ -204,7 +210,7 @@ export default function BrandsManagement() {
                   type="text"
                   value={nameAr}
                   onChange={(e) => setNameAr(e.target.value)}
-                  placeholder="مثال: أكسفورد"
+                  placeholder="اسم العلامة بالعربية"
                   className="w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border border-white/10 focus:outline-none focus:border-primary/50 transition-all"
                   autoFocus
                 />
@@ -212,13 +218,13 @@ export default function BrandsManagement() {
 
               <div>
                 <label className="text-xs font-bold text-[#e2bfb0]/60 uppercase tracking-widest mb-2 block">
-                  الاسم بالإنجليزية *
+                  الاسم بالإنجليزية · اختياري
                 </label>
                 <input
                   type="text"
                   value={nameEn}
                   onChange={(e) => setNameEn(e.target.value)}
-                  placeholder="Example: Oxford"
+                  placeholder="اسم العلامة بالإنجليزية"
                   dir="ltr"
                   className="w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border border-white/10 focus:outline-none focus:border-primary/50 transition-all text-left"
                 />

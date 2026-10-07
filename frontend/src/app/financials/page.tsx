@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { fetchApi } from "@/lib/api";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import SideNav from "@/components/SideNav";
@@ -17,24 +17,26 @@ const transactionSchema = z.object({
 });
 
 type TransactionFormValues = z.infer<typeof transactionSchema>;
+type TransactionFormInput = z.input<typeof transactionSchema>;
+interface Expense { id: string; expense_date: string; category: string; description?: string; amount: number }
+interface Income { id: string; income_date: string; source: string; description?: string; amount: number }
 
 export default function FinancialsPage() {
   return <AdminGate><FinancialsContent /></AdminGate>;
 }
 
 function FinancialsContent() {
-  const [expenses, setExpenses] = useState<any[]>([]);
-  const [incomes, setIncomes] = useState<any[]>([]);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [incomes, setIncomes] = useState<Income[]>([]);
   const [isSlideoverOpen, setIsSlideoverOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"expense" | "income">("expense");
 
-  const { register, handleSubmit, reset, watch, setValue, formState: { errors, isSubmitting } } = useForm<TransactionFormValues>({
-    // @ts-ignore
+  const { register, handleSubmit, reset, control, formState: { errors, isSubmitting } } = useForm<TransactionFormInput, unknown, TransactionFormValues>({
     resolver: zodResolver(transactionSchema),
     defaultValues: { type: "expense" }
   });
 
-  const watchType = watch("type");
+  const watchType = useWatch({ control, name: "type" });
 
   const loadData = async () => {
     try {
@@ -50,7 +52,12 @@ function FinancialsContent() {
   };
 
   useEffect(() => {
-    loadData();
+    Promise.all([fetchApi("/financials/expenses"), fetchApi("/financials/incomes")])
+      .then(([expData, incData]) => {
+        setExpenses(expData);
+        setIncomes(incData);
+      })
+      .catch(err => console.error("Failed to load financials:", err));
   }, []);
 
   const openAdd = (type: "expense" | "income") => {
@@ -63,7 +70,7 @@ function FinancialsContent() {
     setIsSlideoverOpen(true);
   };
 
-  const onSubmit = async (data: any) => {
+  const onSubmit = async (data: TransactionFormValues) => {
     try {
       if (data.type === "expense") {
         await fetchApi("/financials/expenses", {
@@ -96,34 +103,34 @@ function FinancialsContent() {
     <div className="min-h-screen" dir="rtl">
       <SideNav />
       <TopNav title="المالية" />
-      <main className="mr-[352px] pt-28 pb-8 px-8">
+      <main className="app-main">
         <div className="space-y-6">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
-              <h1 className="text-2xl font-bold tracking-tight text-white">المالية (Financials)</h1>
-              <p className="text-sm text-zinc-400 mt-1">إدارة المصروفات والإيرادات الأخرى</p>
+              <h1 className="app-heading">المالية</h1>
+              <p className="app-subtitle">المصروفات والإيرادات الأخرى</p>
             </div>
             <div className="flex gap-2">
               <button
                 onClick={() => openAdd("expense")}
-                className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                className="app-secondary-button"
               >
                 + إضافة مصروف
               </button>
               <button
                 onClick={() => openAdd("income")}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                className="app-primary-button"
               >
                 + إضافة إيراد
               </button>
             </div>
           </div>
 
-      <div className="flex space-x-4 border-b border-zinc-800 rtl:space-x-reverse">
+      <div className="flex gap-4 border-b border-white/10">
         <button
           onClick={() => setActiveTab("expense")}
           className={`pb-3 px-2 text-sm font-medium border-b-2 transition-colors ${
-            activeTab === "expense" ? "border-red-500 text-red-400" : "border-transparent text-zinc-400 hover:text-zinc-300"
+            activeTab === "expense" ? "border-primary text-primary" : "border-transparent app-muted hover:text-white"
           }`}
         >
           المصروفات
@@ -131,17 +138,17 @@ function FinancialsContent() {
         <button
           onClick={() => setActiveTab("income")}
           className={`pb-3 px-2 text-sm font-medium border-b-2 transition-colors ${
-            activeTab === "income" ? "border-emerald-500 text-emerald-400" : "border-transparent text-zinc-400 hover:text-zinc-300"
+            activeTab === "income" ? "border-primary text-primary" : "border-transparent app-muted hover:text-white"
           }`}
         >
           الإيرادات
         </button>
       </div>
 
-      <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden shadow-sm">
+      <div className="app-panel overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-right text-sm">
-            <thead className="bg-zinc-800/50 border-b border-zinc-800 text-zinc-400">
+            <thead className="app-table-head border-b border-white/5">
               <tr>
                 <th className="px-4 py-3 font-medium">التاريخ</th>
                 <th className="px-4 py-3 font-medium">{activeTab === "expense" ? "التصنيف" : "المصدر"}</th>
@@ -149,32 +156,32 @@ function FinancialsContent() {
                 <th className="px-4 py-3 font-medium">المبلغ</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-800 text-zinc-300">
+            <tbody className="text-[#e5e2e1]">
               {activeTab === "expense" && expenses.map((e) => (
-                <tr key={e.id} className="hover:bg-zinc-800/30 transition-colors">
+                <tr key={e.id} className="app-table-row">
                   <td className="px-4 py-3" dir="ltr">{new Date(e.expense_date).toLocaleDateString()}</td>
                   <td className="px-4 py-3 font-medium text-white">{e.category}</td>
                   <td className="px-4 py-3">{e.description || "-"}</td>
-                  <td className="px-4 py-3 text-red-400 font-bold">{e.amount} ر.س</td>
+                  <td className="px-4 py-3 text-[#ffb4ab] font-bold">{Number(e.amount).toLocaleString("ar-EG")} ج.م</td>
                 </tr>
               ))}
               {activeTab === "income" && incomes.map((i) => (
-                <tr key={i.id} className="hover:bg-zinc-800/30 transition-colors">
+                <tr key={i.id} className="app-table-row">
                   <td className="px-4 py-3" dir="ltr">{new Date(i.income_date).toLocaleDateString()}</td>
                   <td className="px-4 py-3 font-medium text-white">{i.source}</td>
                   <td className="px-4 py-3">{i.description || "-"}</td>
-                  <td className="px-4 py-3 text-emerald-400 font-bold">{i.amount} ر.س</td>
+                  <td className="px-4 py-3 text-primary font-bold">{Number(i.amount).toLocaleString("ar-EG")} ج.م</td>
                 </tr>
               ))}
               
               {activeTab === "expense" && expenses.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="px-4 py-8 text-center text-zinc-500">لا يوجد مصروفات</td>
+                  <td colSpan={4} className="app-muted px-4 py-8 text-center">لا توجد مصروفات</td>
                 </tr>
               )}
               {activeTab === "income" && incomes.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="px-4 py-8 text-center text-zinc-500">لا يوجد إيرادات</td>
+                  <td colSpan={4} className="app-muted px-4 py-8 text-center">لا توجد إيرادات</td>
                 </tr>
               )}
             </tbody>
@@ -185,38 +192,38 @@ function FinancialsContent() {
       {isSlideoverOpen && (
         <div className="fixed inset-0 z-50 flex justify-end">
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsSlideoverOpen(false)}></div>
-          <div className="relative w-full max-w-md bg-zinc-900 h-full shadow-2xl border-r border-zinc-800 flex flex-col animate-slide-in-right">
-            <div className="flex items-center justify-between p-6 border-b border-zinc-800">
+          <div className="relative w-full max-w-md bg-[#1c1b1b] h-full shadow-2xl border-r border-white/10 flex flex-col animate-slide-in-right">
+            <div className="flex items-center justify-between p-6 border-b border-white/10">
               <h2 className="text-xl font-bold text-white">
                 {watchType === "expense" ? "إضافة مصروف" : "إضافة إيراد"}
               </h2>
-              <button onClick={() => setIsSlideoverOpen(false)} className="text-zinc-400 hover:text-white transition-colors">✕</button>
+              <button type="button" aria-label="إغلاق" onClick={() => setIsSlideoverOpen(false)} className="app-muted hover:text-white transition-colors">✕</button>
             </div>
             
             <form onSubmit={handleSubmit(onSubmit)} className="flex-1 overflow-y-auto p-6 space-y-4">
               <input type="hidden" {...register("type")} />
 
               <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-1">
+                <label className="block text-sm font-medium text-[#e2bfb0] mb-1">
                   {watchType === "expense" ? "تصنيف المصروف" : "مصدر الإيراد"} <span className="text-red-500">*</span>
                 </label>
-                <input {...register("category")} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500" />
+                <input {...register("category")} className="app-field" />
                 {errors.category && <p className="text-red-500 text-xs mt-1">{errors.category.message}</p>}
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-1">المبلغ <span className="text-red-500">*</span></label>
-                <input type="number" step="0.01" {...register("amount")} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500" />
+                <label className="block text-sm font-medium text-[#e2bfb0] mb-1">المبلغ <span className="text-red-500">*</span></label>
+                <input type="number" step="0.01" {...register("amount")} className="app-field" />
                 {errors.amount && <p className="text-red-500 text-xs mt-1">{errors.amount.message}</p>}
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-1">الوصف</label>
-                <textarea {...register("description")} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500" rows={3}></textarea>
+                <label className="block text-sm font-medium text-[#e2bfb0] mb-1">الوصف</label>
+                <textarea {...register("description")} className="app-field" rows={3}></textarea>
               </div>
 
-              <div className="pt-4 border-t border-zinc-800 mt-6">
-                <button type="submit" disabled={isSubmitting} className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-medium py-3 rounded-lg transition-colors">
+              <div className="pt-4 border-t border-white/10 mt-6">
+                <button type="submit" disabled={isSubmitting} className="app-primary-button w-full">
                   {isSubmitting ? "جاري الحفظ..." : "حفظ"}
                 </button>
               </div>

@@ -1,8 +1,19 @@
 import React, { forwardRef } from 'react';
 
 interface ReceiptPrintProps {
-  order: any;
-  items: any[];
+  order: {
+    id?: string;
+    customerName?: string;
+    subtotal?: number;
+    discount?: number;
+    totalAmount?: number;
+  } | null;
+  items: Array<{
+    nameAr: string;
+    unitName: string;
+    quantity: number;
+    unitPrice: number;
+  }>;
 }
 
 export const ReceiptPrint = forwardRef<HTMLDivElement, ReceiptPrintProps>(({ order, items }, ref) => {
@@ -58,7 +69,7 @@ export const ReceiptPrint = forwardRef<HTMLDivElement, ReceiptPrintProps>(({ ord
           <span>{order?.subtotal?.toFixed(2)} ج.م</span>
         </div>
         
-        {order?.discount > 0 && (
+        {order?.discount != null && order.discount > 0 && (
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
             <span>الخصم:</span>
             <span>-{order?.discount?.toFixed(2)} ج.م</span>

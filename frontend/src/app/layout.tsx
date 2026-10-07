@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "مكتبة سعود الشافعي | نظام الإدارة المتكامل",
+  title: "مكتبة سعود الشافعي | إدارة المكتبة",
   description:
-    "نظام إدارة متكامل لمكتبة سعود الشافعي - إدارة المخزون، المبيعات، والعملاء",
+    "إدارة المخزون والمبيعات والعملاء في مكتبة سعود الشافعي",
 };
 
 export default function RootLayout({
@@ -13,8 +13,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ar" dir="rtl" className="dark">
+    <html lang="ar" dir="rtl" suppressHydrationWarning>
       <head>
+        <script dangerouslySetInnerHTML={{ __html: `try{document.documentElement.dataset.theme=localStorage.getItem('books2-theme')==='light'?'light':'dark'}catch(e){document.documentElement.dataset.theme='dark'}` }} />
         <link
           rel="preconnect"
           href="https://fonts.googleapis.com"
@@ -33,7 +34,7 @@ export default function RootLayout({
           rel="stylesheet"
         />
       </head>
-      <body className="bg-[#131313] text-[#e5e2e1] overflow-x-hidden antialiased">
+      <body className="overflow-x-hidden antialiased">
         {children}
       </body>
     </html>

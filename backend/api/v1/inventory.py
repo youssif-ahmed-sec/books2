@@ -2,17 +2,20 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import update
+from sqlalchemy.exc import IntegrityError
 from uuid import UUID
 from typing import List
 
 from models.inventory import InventoryTransaction, InventoryBalance, Warehouse
 from models.product import Product, ProductUnit, ProductPrice, Supplier
-from models.user import User
+from models.user import User, RoleEnum
 from schemas.inventory import InventoryTransactionCreate, InventoryTransactionResponse, InventoryBalanceResponse, InventoryStatsResponse, InventoryTransactionRecentResponse, PaginatedInventoryTransactionResponse
 from sqlalchemy import func, desc
 from datetime import date
-from core.dependencies import get_current_user, require_inventory_access, require_warehouse_access
+from core.dependencies import get_current_user, require_admin, require_inventory_access, require_warehouse_access
+from core.idempotency import request_fingerprint
 from database import get_db
+from services.inventory_service import InventoryService
 from fastapi_cache.decorator import cache
 
 router = APIRouter(prefix="/inventory", tags=["Inventory"])
@@ -47,6 +50,15 @@ async def create_inventory_transaction(
         raise HTTPException(status_code=422, detail="Receiving requires supplier_id and unit_cost")
     if not is_receipt and (transaction_in.supplier_id is not None or transaction_in.unit_cost is not None):
         raise HTTPException(status_code=422, detail="Supplier and cost are only valid for Receiving")
+
+    fingerprint = request_fingerprint(transaction_in)
+    existing = (await db.execute(select(InventoryTransaction).where(
+        InventoryTransaction.request_id == transaction_in.request_id
+    ))).scalar_one_or_none()
+    if existing is not None:
+        if existing.user_id != current_user.id or existing.request_fingerprint != fingerprint:
+            raise HTTPException(status_code=409, detail="Request ID was already used for a different movement")
+        return existing
 
     # Serializes first-time balance creation within a warehouse.
     warehouse_query = select(Warehouse).where(
@@ -94,26 +106,30 @@ async def create_inventory_transaction(
 
     if balance.current_stock + quantity < 0:
         raise HTTPException(status_code=400, detail="Insufficient stock")
-    balance.current_stock += quantity
-        
-    # 3. Record transaction
-    new_transaction = InventoryTransaction(
-        product_id=transaction_in.product_id,
-        warehouse_id=transaction_in.warehouse_id,
-        user_id=current_user.id,
-        transaction_type=transaction_in.transaction_type,
-        quantity_changed=transaction_in.quantity_changed,
+    new_transaction = InventoryService.record_movement(
+        db, balance, quantity, current_user.id, transaction_in.transaction_type,
         supplier_id=transaction_in.supplier_id,
         unit_cost=transaction_in.unit_cost,
         reference_document=transaction_in.reference_document,
-        notes=transaction_in.notes
+        notes=transaction_in.notes,
+        request_id=transaction_in.request_id,
+        request_fingerprint=fingerprint,
     )
-    
-    db.add(new_transaction)
     
     # In a real scenario, AuditLog would also be created here
     
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        existing = (await db.execute(select(InventoryTransaction).where(
+            InventoryTransaction.request_id == transaction_in.request_id
+        ))).scalar_one_or_none()
+        if existing is None:
+            raise
+        if existing.user_id != current_user.id or existing.request_fingerprint != fingerprint:
+            raise HTTPException(status_code=409, detail="Request ID was already used for a different movement")
+        return existing
     await db.refresh(new_transaction)
     
     return new_transaction
@@ -167,10 +183,12 @@ async def get_inventory_stats(
     """
     # 1. Today's transactions
     today = date.today()
-    today_movements_query = select(func.count(InventoryTransaction.id)).where(
-        func.date(InventoryTransaction.created_at) == today
-    )
-    today_movements = (await db.execute(today_movements_query)).scalar() or 0
+    today_movements = None
+    if current_user.role == RoleEnum.ADMIN:
+        today_movements_query = select(func.count(InventoryTransaction.id)).where(
+            func.date(InventoryTransaction.created_at) == today
+        )
+        today_movements = (await db.execute(today_movements_query)).scalar() or 0
 
     # Subquery to sum inventory balance per product
     inventory_summary = (
@@ -226,7 +244,7 @@ async def get_inventory_transactions(
     page: int = 1,
     limit: int = 20,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_inventory_access),
+    current_user: User = Depends(require_admin),
 ):
     offset = (page - 1) * limit
     
@@ -259,7 +277,7 @@ async def get_inventory_transactions(
 async def get_recent_transactions(
     limit: int = 5,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_inventory_access),
+    current_user: User = Depends(require_admin),
 ):
     """
     Get the most recent inventory transactions.

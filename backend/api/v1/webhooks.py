@@ -1,7 +1,4 @@
-from fastapi import APIRouter, Request, Response, BackgroundTasks, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
-from database import get_db
-from core.automations import handle_new_lead_automation, send_auto_reply
+from fastapi import APIRouter, Request, Response
 import logging
 import hashlib
 import hmac
@@ -15,6 +12,8 @@ async def verify_whatsapp_webhook(
     request: Request,
 ):
     """Verify webhook for WhatsApp Cloud API"""
+    if os.getenv("WHATSAPP_ENABLED") != "1":
+        return Response(status_code=404)
     mode = request.query_params.get("hub.mode")
     token = request.query_params.get("hub.verify_token")
     challenge = request.query_params.get("hub.challenge")
@@ -35,10 +34,10 @@ async def verify_whatsapp_webhook(
 @router.post("/whatsapp")
 async def receive_whatsapp_message(
     request: Request,
-    background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db)
 ):
     """Receive messages from WhatsApp Cloud API"""
+    if os.getenv("WHATSAPP_ENABLED") != "1":
+        return Response(status_code=404)
     app_secret = os.getenv("WHATSAPP_APP_SECRET")
     if not app_secret:
         logger.error("WhatsApp webhook app secret is not configured")
@@ -58,24 +57,9 @@ async def receive_whatsapp_message(
         for entry in body.get("entry", []):
             for change in entry.get("changes", []):
                 value = change.get("value", {})
-                if "messages" in value:
-                    for message in value["messages"]:
-                        phone_number = message.get("from")
-                        text = message.get("text", {}).get("body", "")
-                        
-                        # Background task: create lead and send auto reply
-                        background_tasks.add_task(
-                            handle_new_lead_automation,
-                            phone_number=phone_number,
-                            source="WhatsApp",
-                            message=text,
-                            db=db
-                        )
-                        background_tasks.add_task(
-                            send_auto_reply,
-                            phone_number=phone_number,
-                            message="Thank you for contacting Saud El Shafie Bookstore. Your request has been received. One of our representatives will contact you shortly."
-                        )
+                if value.get("messages"):
+                    # Do not acknowledge messages before they are durably stored and handled.
+                    return Response(status_code=503)
 
         return Response(content="EVENT_RECEIVED", status_code=200)
     return Response(status_code=404)

@@ -4,11 +4,15 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy.exc import IntegrityError
 
+from core.idempotency import IdempotencyConflict, request_fingerprint
 from models.inventory import InventoryBalance, InventoryTransaction, TransactionTypeEnum
 from models.order import Order, OrderItem, OrderStatusEnum, OrderSourceEnum
 from models.product import Product, ProductPrice, ProductUnit, ProductBundleComponent
 from schemas.order import OrderCreate, OrderDraftCreate, OrderStatusUpdate
+from services.inventory_service import InventoryService
+from services.order_workflow import allowed_next_statuses
 
 
 class OrderService:
@@ -20,6 +24,7 @@ class OrderService:
             "user_id":         order.user_id,
             "assigned_to_id":  order.assigned_to_id,
             "status":          order.status.value if hasattr(order.status, "value") else order.status,
+            "allowed_next_statuses": allowed_next_statuses(order.status.value if hasattr(order.status, "value") else order.status),
             "source":          (order.source.value if hasattr(order.source, "value") else order.source) if order.source else "Walk-In Customer",
             "total_amount":    float(order.total_amount),
             "tax_amount":      float(order.tax_amount),
@@ -49,6 +54,28 @@ class OrderService:
 
     @staticmethod
     async def create_order(db: AsyncSession, order_in: OrderCreate, current_user_id: UUID) -> dict:
+        fingerprint = request_fingerprint(order_in)
+        existing = (await db.execute(select(Order).where(Order.request_id == order_in.request_id))).scalar_one_or_none()
+        if existing is not None:
+            return await OrderService._replay_order(db, existing, fingerprint, current_user_id)
+        try:
+            return await OrderService._create_order_once(db, order_in, current_user_id, fingerprint)
+        except IntegrityError:
+            await db.rollback()
+            existing = (await db.execute(select(Order).where(Order.request_id == order_in.request_id))).scalar_one_or_none()
+            if existing is None:
+                raise
+            return await OrderService._replay_order(db, existing, fingerprint, current_user_id)
+
+    @staticmethod
+    async def _replay_order(db: AsyncSession, order: Order, fingerprint: str, current_user_id: UUID) -> dict:
+        if order.user_id != current_user_id or order.request_fingerprint != fingerprint:
+            raise IdempotencyConflict("Request ID was already used for a different checkout.")
+        items = (await db.execute(select(OrderItem).where(OrderItem.order_id == order.id))).scalars().all()
+        return OrderService._build_order_dict(order, items)
+
+    @staticmethod
+    async def _create_order_once(db: AsyncSession, order_in: OrderCreate, current_user_id: UUID, fingerprint: str) -> dict:
         order = Order(
             customer_id=order_in.customer_id,
             user_id=current_user_id,
@@ -58,6 +85,8 @@ class OrderService:
             shipping_cost=Decimal("0"),
             payment_method=order_in.payment_method,
             notes=order_in.notes,
+            request_id=order_in.request_id,
+            request_fingerprint=fingerprint,
             total_amount=Decimal("0"),
             tax_amount=Decimal("0"),
         )
@@ -154,16 +183,11 @@ class OrderService:
                     await db.rollback()
                     raise ValueError(f"Insufficient stock for product/component {c_prod_id}.")
 
-                balance.current_stock = Decimal(str(balance.current_stock)) - c_qty
-                db.add(InventoryTransaction(
-                    product_id=c_prod_id,
-                    warehouse_id=balance.warehouse_id,
-                    user_id=current_user_id,
-                    transaction_type=TransactionTypeEnum.ISSUING,
-                    quantity_changed=-c_qty,
+                InventoryService.record_movement(
+                    db, balance, -c_qty, current_user_id, TransactionTypeEnum.ISSUING,
                     reference_document=str(order.id),
                     notes=f"POS Order #{order.id}",
-                ))
+                )
 
             order_item = OrderItem(
                 order_id=order.id,
@@ -252,6 +276,22 @@ class OrderService:
             unit_price = Decimal(str(price_record.price))
             item_total = unit_price * qty_requested
 
+            product_q = await db.execute(select(Product).where(Product.id == item_in.product_id))
+            product = product_q.scalar_one_or_none()
+            bundle_snapshot = []
+            if product.is_bundle:
+                components_q = await db.execute(
+                    select(ProductBundleComponent).where(ProductBundleComponent.bundle_id == product.id)
+                )
+                components = components_q.scalars().all()
+                if not components:
+                    await db.rollback()
+                    raise ValueError("Bundle has no components.")
+                bundle_snapshot = [
+                    {"product_id": str(component.component_id), "quantity": str(component.quantity)}
+                    for component in components
+                ]
+
             order_item = OrderItem(
                 order_id=order.id,
                 product_id=item_in.product_id,
@@ -262,6 +302,7 @@ class OrderService:
                 price_level=item_in.price_level.value,
                 unit_price=unit_price,
                 total_price=item_total,
+                bundle_components_snapshot=bundle_snapshot,
             )
             db.add(order_item)
             await db.flush()
@@ -290,6 +331,8 @@ class OrderService:
         fulfilled = {OrderStatusEnum.DELIVERED.value, OrderStatusEnum.CLOSED.value}
         if old_status in fulfilled and new_status not in fulfilled:
             raise ValueError("A fulfilled order needs a separate return or refund workflow before changing status.")
+        if new_status != old_status and new_status not in allowed_next_statuses(old_status):
+            raise ValueError(f"Transition from {old_status} to {new_status} is not allowed.")
 
         if new_status in fulfilled:
             if old_status not in fulfilled:
@@ -318,6 +361,9 @@ class OrderService:
 
         items_q = await db.execute(select(OrderItem).where(OrderItem.order_id == order.id))
         items = items_q.scalars().all()
+        if not items:
+            await db.rollback()
+            raise ValueError("Cannot deliver an order without items.")
 
         for item in items:
             prod_q = await db.execute(select(Product).where(Product.id == item.product_id))
@@ -327,16 +373,14 @@ class OrderService:
                 raise ValueError("Order product is no longer available for delivery.")
 
             components_to_deduct = []
-            if product.is_bundle:
-                bundle_comps_q = await db.execute(select(ProductBundleComponent).where(ProductBundleComponent.bundle_id == product.id))
-                bundle_comps = bundle_comps_q.scalars().all()
-                if not bundle_comps:
-                    await db.rollback()
-                    raise ValueError("Bundle has no components.")
-                for comp in bundle_comps:
+            if item.bundle_components_snapshot is None:
+                await db.rollback()
+                raise ValueError("Legacy order needs component review before delivery.")
+            if item.bundle_components_snapshot:
+                for comp in item.bundle_components_snapshot:
                     components_to_deduct.append({
-                        "product_id": comp.component_id,
-                        "qty": Decimal(str(item.quantity_actual)) * Decimal(str(comp.quantity))
+                        "product_id": UUID(comp["product_id"]),
+                        "qty": Decimal(str(item.quantity_actual)) * Decimal(comp["quantity"])
                     })
             else:
                 components_to_deduct.append({
@@ -361,16 +405,11 @@ class OrderService:
                     await db.rollback()
                     raise ValueError(f"Insufficient stock for delivery of component {c_prod_id}.")
 
-                balance.current_stock = Decimal(str(balance.current_stock)) - c_qty
-                db.add(InventoryTransaction(
-                    product_id=c_prod_id,
-                    warehouse_id=warehouse_id,
-                    user_id=current_user_id,
-                    transaction_type=TransactionTypeEnum.ISSUING,
-                    quantity_changed=-c_qty,
+                InventoryService.record_movement(
+                    db, balance, -c_qty, current_user_id, TransactionTypeEnum.ISSUING,
                     reference_document=str(order.id),
                     notes=f"Order {order.id} Delivered",
-                ))
+                )
 
 
     @staticmethod
@@ -385,16 +424,13 @@ class OrderService:
 
         orders_q = await db.execute(query)
         orders = orders_q.scalars().all()
-
-        results = []
-        for order in orders:
-            items_q = await db.execute(
-                select(OrderItem).where(OrderItem.order_id == order.id)
-            )
-            items = items_q.scalars().all()
-            results.append(OrderService._build_order_dict(order, items))
-
-        return results
+        if not orders:
+            return []
+        items_q = await db.execute(select(OrderItem).where(OrderItem.order_id.in_([order.id for order in orders])))
+        items_by_order = {order.id: [] for order in orders}
+        for item in items_q.scalars().all():
+            items_by_order[item.order_id].append(item)
+        return [OrderService._build_order_dict(order, items_by_order[order.id]) for order in orders]
 
     @staticmethod
     async def get_order(db: AsyncSession, order_id: UUID) -> Optional[dict]:

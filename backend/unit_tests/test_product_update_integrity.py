@@ -140,6 +140,12 @@ async def test_draft_delivery_is_idempotent_for_stock():
             user_id,
         )
         assert (await db.execute(select(InventoryBalance.current_stock))).scalar_one() == 2
+        for status in (
+            OrderStatusEnum.WAITING_QUOTATION, OrderStatusEnum.QUOTATION_SENT,
+            OrderStatusEnum.WAITING_APPROVAL, OrderStatusEnum.APPROVED,
+            OrderStatusEnum.PREPARING, OrderStatusEnum.READY,
+        ):
+            await OrderService.update_order_status(db, draft["id"], OrderStatusUpdate(status=status), user_id)
         await OrderService.update_order_status(
             db, draft["id"], OrderStatusUpdate(status=OrderStatusEnum.DELIVERED, warehouse_id=warehouse_id), user_id,
         )
@@ -176,7 +182,7 @@ async def test_checkout_deducts_stock_once_and_rejects_insufficient_stock():
         db.add(ProductPrice(product_id=product_id, unit_id=unit_id, price_level="Retail", price=10))
         await db.commit()
 
-        payload = OrderCreate(warehouse_id=warehouse_id, items=[{
+        payload = OrderCreate(request_id=uuid4(), warehouse_id=warehouse_id, items=[{
             "product_id": product_id, "unit_id": unit_id, "quantity": 1,
         }])
         order = await OrderService.create_order(db, payload, user_id)
@@ -187,7 +193,7 @@ async def test_checkout_deducts_stock_once_and_rejects_insufficient_stock():
         with pytest.raises(ValueError, match="Insufficient stock"):
             await OrderService.create_order(
                 db,
-                OrderCreate(warehouse_id=warehouse_id, items=[{
+                OrderCreate(request_id=uuid4(), warehouse_id=warehouse_id, items=[{
                     "product_id": product_id, "unit_id": unit_id, "quantity": 2,
                 }]),
                 user_id,

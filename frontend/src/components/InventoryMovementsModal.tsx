@@ -7,22 +7,35 @@ interface InventoryMovementsModalProps {
   onClose: () => void;
 }
 
+interface InventoryTransaction {
+  id: string;
+  product_name?: string | null;
+  transaction_type: string;
+  quantity_changed: number;
+  created_at: string;
+}
+
+interface MovementRow {
+  id: string;
+  product: string;
+  type: string;
+  date: string;
+  typeStyle: string;
+  qty: string;
+  qtyColor: string;
+}
+
 export default function InventoryMovementsModal({ onClose }: InventoryMovementsModalProps) {
-  const [movements, setMovements] = useState<any[]>([]);
+  const [movements, setMovements] = useState<MovementRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
   const limit = 20;
 
   useEffect(() => {
-    loadMovements();
-  }, [page]);
-
-  const loadMovements = async () => {
-    setLoading(true);
-    try {
-      const data = await fetchApi(`/inventory/transactions?page=${page}&limit=${limit}`);
-      const mapped = data.data.map((tx: any) => {
+    let active = true;
+    fetchApi(`/inventory/transactions?page=${page}&limit=${limit}`).then((data: { data: InventoryTransaction[]; total: number }) => {
+      const mapped = data.data.map((tx) => {
         let typeLabel = "غير معروف";
         let style = "bg-gray-500/10 text-gray-400 border-gray-500/20";
         let qtyPrefix = "";
@@ -52,14 +65,14 @@ export default function InventoryMovementsModal({ onClose }: InventoryMovementsM
            qtyColor: style.includes("green") ? "text-green-400" : style.includes("red") ? "text-red-400" : style.includes("ffb4ab") ? "text-[#ffb4ab]" : "text-[#e5e2e1]"
         };
       });
-      setMovements(mapped);
-      setTotalItems(data.total);
-    } catch (err) {
-      console.error("Failed to load movements:", err);
-    } finally {
-      setLoading(false);
-    }
-  };
+      if (active) {
+        setMovements(mapped);
+        setTotalItems(data.total);
+      }
+    }).catch((err) => console.error("Failed to load movements:", err))
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [page]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" dir="rtl">
@@ -157,7 +170,7 @@ export default function InventoryMovementsModal({ onClose }: InventoryMovementsM
           <div className="flex gap-2">
             <button 
               disabled={page >= Math.ceil(totalItems / limit) || loading}
-              onClick={() => setPage(page + 1)}
+              onClick={() => { setLoading(true); setPage(page + 1); }}
               className="w-10 h-10 flex items-center justify-center glass rounded-full hover:bg-white/10 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <span className="material-symbols-outlined text-[20px]">chevron_right</span>
@@ -175,7 +188,7 @@ export default function InventoryMovementsModal({ onClose }: InventoryMovementsM
                return (
                 <button
                   key={i}
-                  onClick={() => setPage(i + 1)}
+                  onClick={() => { setLoading(true); setPage(i + 1); }}
                   className={`w-10 h-10 flex items-center justify-center rounded-full font-bold text-sm transition-all ${
                     page === i + 1 
                       ? "bg-primary text-white shadow-[0_0_10px_rgba(255,107,0,0.3)]"
@@ -189,7 +202,7 @@ export default function InventoryMovementsModal({ onClose }: InventoryMovementsM
             
             <button 
               disabled={page <= 1 || loading}
-              onClick={() => setPage(page - 1)}
+              onClick={() => { setLoading(true); setPage(page - 1); }}
               className="w-10 h-10 flex items-center justify-center glass rounded-full hover:bg-white/10 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <span className="material-symbols-outlined text-[20px]">chevron_left</span>

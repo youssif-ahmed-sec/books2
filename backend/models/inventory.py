@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Enum, Numeric
+from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Enum, Numeric, UniqueConstraint, CheckConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 import enum
@@ -16,6 +16,10 @@ class Warehouse(Base):
 
 class InventoryBalance(Base):
     __tablename__ = "inventory_balances"
+    __table_args__ = (
+        UniqueConstraint("product_id", "warehouse_id", name="uq_inventory_balance_product_warehouse"),
+        CheckConstraint("current_stock >= 0", name="ck_inventory_balance_nonnegative"),
+    )
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     product_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
@@ -32,6 +36,7 @@ class TransactionTypeEnum(str, enum.Enum):
 
 class InventoryTransaction(Base):
     __tablename__ = "inventory_transactions"
+    __table_args__ = (UniqueConstraint("request_id", name="uq_inventory_transactions_request_id"),)
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     product_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
@@ -44,4 +49,6 @@ class InventoryTransaction(Base):
     unit_cost = Column(Numeric(18, 2), nullable=True)
     reference_document = Column(String, nullable=True)
     notes = Column(String, nullable=True)
+    request_id = Column(UUID(as_uuid=True), nullable=True)
+    request_fingerprint = Column(String(64), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

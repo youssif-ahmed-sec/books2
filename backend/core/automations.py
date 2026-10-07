@@ -10,7 +10,7 @@ async def handle_new_lead_automation(phone_number: str, source: str, message: st
     Called when a new WhatsApp/Messenger message arrives.
     If the customer does not exist, creates a Customer and an Order in NEW_LEAD status.
     """
-    logger.info(f"Automation: Handling new lead from {phone_number} via {source}")
+    logger.info("Automation: Handling new lead via %s", source)
     # We will implement DB logic here when required.
     pass
 
@@ -18,7 +18,7 @@ async def send_auto_reply(phone_number: str, message: str):
     """
     Sends an auto-reply using WhatsApp Cloud API / Messenger API.
     """
-    logger.info(f"Automation: Sending auto reply to {phone_number}: {message}")
+    logger.info("Automation: Sending auto reply")
     # In a real app, this would hit the WhatsApp/Meta API
     await asyncio.sleep(1)
 

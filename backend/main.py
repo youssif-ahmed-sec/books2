@@ -106,17 +106,28 @@ async def root():
     return {"message": "Welcome to Souod El Shafie Bookstore API", "docs": "/docs"}
 
 # ── SPA / Static Files Serving ───────────────────────────────────────────────
-static_dir = os.path.join(os.path.dirname(__file__), "static")
+def select_static_dir(*candidates: Path) -> Path | None:
+    """Serve only a complete export, preferring the packaged build."""
+    return next((path for path in candidates if (path / "index.html").is_file()), None)
+
+
+backend_root = Path(__file__).resolve().parent
+static_dir = select_static_dir(
+    backend_root / "static",
+    backend_root.parent / "frontend" / "out",
+)
 
 
 def safe_static_file(relative_path: str) -> Path | None:
+    if static_dir is None:
+        return None
     static_root = Path(static_dir).resolve()
     candidate = (static_root / relative_path).resolve()
     if candidate.is_relative_to(static_root) and candidate.is_file():
         return candidate
     return None
 
-if os.path.exists(static_dir):
+if static_dir is not None:
     # Serve Next.js static assets
     app.mount("/", StaticFiles(directory=static_dir, html=False), name="static")
 

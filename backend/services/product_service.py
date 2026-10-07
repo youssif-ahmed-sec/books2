@@ -11,7 +11,8 @@ from sqlalchemy.orm import selectinload
 from models.product import Product, ProductUnit, ProductPrice, ProductBundleComponent
 from models.user import AuditLog
 from schemas.product import ProductCreate, ProductUpdate
-from models.inventory import Warehouse, InventoryBalance, InventoryTransaction, TransactionTypeEnum
+from models.inventory import Warehouse, InventoryBalance, TransactionTypeEnum
+from services.inventory_service import InventoryService
 
 
 class ProductService:
@@ -114,19 +115,13 @@ class ProductService:
                     balance = InventoryBalance(
                         product_id=new_product.id,
                         warehouse_id=first_warehouse.id,
-                        current_stock=product_in.initial_stock
+                        current_stock=Decimal("0")
                     )
                     db.add(balance)
-                    
-                    transaction = InventoryTransaction(
-                        product_id=new_product.id,
-                        warehouse_id=first_warehouse.id,
-                        user_id=user_id,
-                        transaction_type=TransactionTypeEnum.ADJUSTMENT,
-                        quantity_changed=product_in.initial_stock,
+                    InventoryService.record_movement(
+                        db, balance, product_in.initial_stock, user_id, TransactionTypeEnum.ADJUSTMENT,
                         notes="Initial stock from product creation"
                     )
-                    db.add(transaction)
 
             await db.commit()
         except IntegrityError as e:
@@ -241,17 +236,10 @@ class ProductService:
                 if main_balance.current_stock + diff < 0:
                     await db.rollback()
                     raise ValueError("Stock reduction exceeds the main warehouse balance.")
-                main_balance.current_stock = main_balance.current_stock + diff
-                
-                tx = InventoryTransaction(
-                    product_id=product_id,
-                    warehouse_id=main_wh.id,
-                    user_id=user_id,
-                    transaction_type=TransactionTypeEnum.ADJUSTMENT,
-                    quantity_changed=diff,
+                InventoryService.record_movement(
+                    db, main_balance, diff, user_id, TransactionTypeEnum.ADJUSTMENT,
                     notes="Manual adjustment from product edit screen"
                 )
-                db.add(tx)
 
         audit = AuditLog(
             user_id=user_id,

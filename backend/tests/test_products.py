@@ -24,7 +24,8 @@ async def async_client():
 
 @pytest.mark.asyncio
 async def test_read_products_empty(async_client):
-    response = await async_client.get("/api/v1/products")
+    import uuid
+    response = await async_client.get(f"/api/v1/products?search=missing-{uuid.uuid4().hex}")
     assert response.status_code == 200
     data = response.json()
     assert data["total"] == 0
@@ -79,6 +80,7 @@ async def test_receipt_keeps_supplier_purchase_value_after_product_cost_changes(
     warehouse_id = warehouses_response.json()[0]["id"]
 
     receipt_response = await async_client.post("/api/v1/inventory/transactions", json={
+        "request_id": str(uuid.uuid4()),
         "product_id": product_id,
         "warehouse_id": warehouse_id,
         "supplier_id": supplier_id,

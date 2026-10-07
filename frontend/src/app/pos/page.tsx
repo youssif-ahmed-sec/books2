@@ -1,11 +1,26 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback } from "react";
+import Image from "next/image";
 import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
 import { fetchApi } from "@/lib/api";
 import { ReceiptPrint } from "@/components/pos/ReceiptPrint";
 import { useReactToPrint } from "react-to-print";
+import { errorMessage } from "@/lib/errors";
+
+interface CheckoutPayload {
+  warehouse_id: string;
+  status: string;
+  source: string;
+  discount_amount: number;
+  payment_method: string;
+  items: { product_id: string; unit_id: string; quantity: number; price_level: string }[];
+  customer_id?: string;
+  request_id?: string;
+}
+
+interface PrintedOrder { id: string; subtotal: number; discount: number; totalAmount: number }
 
 interface ProductUnit {
   id: string;
@@ -48,7 +63,7 @@ export default function POSPage() {
   const [loading, setLoading] = useState(false);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [availablePriceLevels, setAvailablePriceLevels] = useState<{value: string, label: string}[]>([]);
-  const [customers, setCustomers] = useState<any[]>([]);
+  const [customers, setCustomers] = useState<{ id: string; name: string }[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState("");
   const [discount, setDiscount] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState("Cash");
@@ -56,7 +71,8 @@ export default function POSPage() {
 
   // For printing
   const printRef = useRef<HTMLDivElement>(null);
-  const [lastOrder, setLastOrder] = useState<any>(null);
+  const checkoutRequest = useRef<{ fingerprint: string; id: string } | null>(null);
+  const [lastOrder, setLastOrder] = useState<PrintedOrder | null>(null);
 
   const handlePrint = useReactToPrint({
     contentRef: printRef,
@@ -64,39 +80,9 @@ export default function POSPage() {
       setCart([]);
       setDiscount(0);
       setLastOrder(null);
+      checkoutRequest.current = null;
     }
   });
-
-  const searchProducts = useCallback(async (query: string) => {
-    if (!query) {
-      setProducts([]);
-      return;
-    }
-    setLoading(true);
-    try {
-      const res = await fetchApi(`/pos/search?q=${encodeURIComponent(query)}&limit=20`);
-      setProducts(res.data || res || []);
-      
-      // Auto-add if exact match for barcode
-      const dataArr = res.data || res;
-      if (dataArr?.length === 1 && (dataArr[0].barcode === query || dataArr[0].sku === query)) {
-        addToCart(dataArr[0]);
-        setSearchQuery("");
-        setProducts([]);
-      }
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setLoading(false);
-    }
-  }, [cart]);
-
-  useEffect(() => {
-    const delayDebounceFn = setTimeout(() => {
-      if (searchQuery) searchProducts(searchQuery);
-    }, 300);
-    return () => clearTimeout(delayDebounceFn);
-  }, [searchQuery, searchProducts]);
 
   useEffect(() => {
     const loadData = async () => {
@@ -122,12 +108,12 @@ export default function POSPage() {
     loadData();
   }, []);
 
-  const getPrice = (unit: ProductUnit, level: string) => {
+  const getPrice = useCallback((unit: ProductUnit, level: string) => {
     const p = unit.prices.find(pr => pr.price_level === level);
     return p ? Number(p.price) : 0;
-  };
+  }, []);
 
-  const addToCart = (product: Product, selectedUnitId?: string) => {
+  const addToCart = useCallback((product: Product, selectedUnitId?: string) => {
     const unit = selectedUnitId 
       ? product.units.find(u => u.id === selectedUnitId) || product.units[0] 
       : product.units[0];
@@ -183,7 +169,36 @@ export default function POSPage() {
         }];
       }
     });
-  };
+  }, [getPrice]);
+
+  const searchProducts = useCallback(async (query: string) => {
+    if (!query) {
+      setProducts([]);
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetchApi(`/pos/search?q=${encodeURIComponent(query)}&limit=20`);
+      const dataArr: Product[] = res.data || res || [];
+      setProducts(dataArr);
+      if (dataArr.length === 1 && (dataArr[0].barcode === query || dataArr[0].sku === query)) {
+        addToCart(dataArr[0]);
+        setSearchQuery("");
+        setProducts([]);
+      }
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  }, [addToCart]);
+
+  useEffect(() => {
+    const delayDebounceFn = setTimeout(() => {
+      if (searchQuery) searchProducts(searchQuery);
+    }, 300);
+    return () => clearTimeout(delayDebounceFn);
+  }, [searchQuery, searchProducts]);
 
   const updateCartItemUnit = (id: string, newUnitId: string) => {
     setCart(prev => prev.map(item => {
@@ -270,7 +285,7 @@ export default function POSPage() {
     try {
       setIsProcessing(true);
       
-      const payload: any = {
+      const payload: CheckoutPayload = {
         warehouse_id: "00000000-0000-0000-0000-000000000000", // Will be overridden or ignored if single warehouse
         status: "Delivered",
         source: "Walk-In Customer",
@@ -291,6 +306,12 @@ export default function POSPage() {
       // Let backend auto-resolve the warehouse with sufficient stock
       payload.warehouse_id = "00000000-0000-0000-0000-000000000000";
 
+      const fingerprint = JSON.stringify(payload);
+      if (checkoutRequest.current?.fingerprint !== fingerprint) {
+        checkoutRequest.current = { fingerprint, id: crypto.randomUUID() };
+      }
+      payload.request_id = checkoutRequest.current.id;
+
       const res = await fetchApi("/orders", {
         method: "POST",
         body: JSON.stringify(payload)
@@ -302,10 +323,9 @@ export default function POSPage() {
         discount,
         totalAmount
       });
-
       // Auto-print to local agent
       try {
-        await fetch("http://127.0.0.1:8199/api/print", {
+        const printResponse = await fetch("http://127.0.0.1:8199/api/print", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -325,6 +345,11 @@ export default function POSPage() {
             receipt_type: "customer"
           })
         });
+        if (!printResponse.ok) throw new Error("Print agent rejected receipt");
+        setCart([]);
+        setDiscount(0);
+        setLastOrder(null);
+        checkoutRequest.current = null;
       } catch (printErr) {
         console.warn("Print agent failed, falling back to browser print", printErr);
         setTimeout(() => {
@@ -332,21 +357,22 @@ export default function POSPage() {
         }, 100);
       }
 
-    } catch (error: any) {
-      alert("فشل إتمام الطلب: " + (error.message || "تأكد من المخزون"));
+    } catch (error: unknown) {
+      alert("فشل إتمام الطلب: " + errorMessage(error, "تأكد من المخزون"));
     } finally {
       setIsProcessing(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-[#131313] text-[#e5e2e1] overflow-hidden selection:bg-primary/30 flex">
+    <div className="min-h-screen bg-[#131313] text-[#e5e2e1] overflow-x-hidden selection:bg-primary/30 flex">
       <SideNav />
+      <TopNav title="نقطة البيع" />
 
-      <main className="flex-1 mr-[364px] ml-8 my-8 flex gap-6 h-[calc(100vh-64px)]">
+      <main className="mx-4 mb-8 mt-28 flex min-w-0 flex-1 flex-col gap-6 lg:ml-8 lg:mr-[364px] lg:mt-36 xl:h-[calc(100vh-176px)] xl:flex-row">
         
         {/* RIGHT PANE: Cart & Checkout (Takes 1/3) */}
-        <div className="w-[400px] flex flex-col gap-6">
+        <div className="w-full flex flex-col gap-6 xl:w-[400px] xl:shrink-0">
           
           {/* Customer / Settings Panel */}
           <div className="glass p-6 rounded-2xl hi-fi-shadow flex flex-col gap-4 shrink-0">
@@ -523,7 +549,7 @@ export default function POSPage() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="ابحث بالباركود، كود المنتج أو الاسم..."
-                className="w-full bg-[#131313] border border-white/10 rounded-full py-4 pr-12 pl-6 text-white focus:ring-2 focus:ring-primary/40 focus:outline-none transition-all placeholder:text-[#e2bfb0]/30"
+                className="app-search-focus w-full bg-[#131313] border border-white/10 rounded-full py-4 pr-12 pl-6 text-white transition-all placeholder:text-[#e2bfb0]/30"
               />
               <span className="material-symbols-outlined absolute left-4 top-3.5 text-primary opacity-50">barcode_scanner</span>
             </div>
@@ -551,7 +577,7 @@ export default function POSPage() {
                     
                     <div className="w-full h-24 bg-[#131313] rounded-xl flex items-center justify-center p-2 mt-2 border border-white/5">
                       {product.image_url ? (
-                        <img src={product.image_url} alt={product.name_ar} className="max-w-full max-h-full object-contain" />
+                        <Image src={product.image_url} alt={product.name_ar} width={96} height={96} className="max-w-full max-h-full object-contain" unoptimized />
                       ) : (
                         <span className="material-symbols-outlined text-4xl text-[#e2bfb0]/20">image</span>
                       )}

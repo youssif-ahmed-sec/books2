@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { createPortal } from "react-dom";
 import Image from "next/image";
 import Barcode from "react-barcode";
 import { UserRole, canViewCost, canEditProduct } from "@/utils/auth";
+import { useHydrated } from "@/lib/useHydrated";
 
 interface StockItem {
   id: string | number;
@@ -31,11 +32,7 @@ interface InventoryTableRowProps {
 
 export function InventoryTableRow({ item, onEdit, userRole }: InventoryTableRowProps) {
   const [showBarcodeModal, setShowBarcodeModal] = useState(false);
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const mounted = useHydrated();
   const stockColor =
     item.stockStatus === "critical"
       ? "bg-[#ffb4ab]"
@@ -54,14 +51,11 @@ export function InventoryTableRow({ item, onEdit, userRole }: InventoryTableRowP
       <td className="px-8 py-6 min-w-[250px]">
         <div className="flex items-center gap-5">
           <div className="w-14 h-14 rounded-2xl bg-[#2a2a2a] border border-white/5 flex-shrink-0 flex items-center justify-center overflow-hidden">
-            <Image
-              src={item.image || '/placeholder.png'}
-              alt={item.nameAr}
-              width={56}
-              height={56}
-              className="object-cover w-full h-full"
-              unoptimized
-            />
+            {item.image ? (
+              <Image src={item.image} alt={item.nameAr} width={56} height={56} className="object-cover w-full h-full" unoptimized />
+            ) : (
+              <span className="material-symbols-outlined text-[#e2bfb0]/60" aria-hidden="true">menu_book</span>
+            )}
           </div>
           <div>
             <p className="font-bold text-[#e5e2e1]">{item.nameAr}</p>
@@ -158,14 +152,14 @@ export function InventoryTableRow({ item, onEdit, userRole }: InventoryTableRowP
             >
               <span className="material-symbols-outlined text-[18px]">shopping_cart_checkout</span>
             </button>
-          ) : (
+          ) : userRole === "ADMIN" ? (
             <button
               className="w-9 h-9 rounded-full glass flex items-center justify-center text-[#e2bfb0]/60 hover:text-primary hover:border-primary/30 transition-all"
               title="السجل"
             >
               <span className="material-symbols-outlined text-[18px]">history</span>
             </button>
-          )}
+          ) : null}
         </div>
       </td>
 

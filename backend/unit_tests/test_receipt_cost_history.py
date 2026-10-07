@@ -40,6 +40,7 @@ async def test_supplier_statement_uses_each_receipt_cost_and_supplier_snapshot()
 
         async def receive(supplier_id, cost):
             return await create_inventory_transaction(InventoryTransactionCreate(
+                request_id=uuid4(),
                 product_id=product.id, warehouse_id=warehouse.id,
                 transaction_type="Receiving", quantity_changed=Decimal("2"),
                 supplier_id=supplier_id, unit_cost=cost,
@@ -92,6 +93,7 @@ async def test_receipt_requires_actual_cost_and_supplier_before_stock_changes():
 
     session = NoDatabaseCalls()
     transaction = InventoryTransactionCreate(
+        request_id=uuid4(),
         product_id=uuid4(), warehouse_id=uuid4(),
         transaction_type="Receiving", quantity_changed=1,
     )

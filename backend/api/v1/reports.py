@@ -9,7 +9,7 @@ from models.order import Order, OrderStatusEnum
 from models.inventory import InventoryTransaction
 from models.customer import Customer
 from models.user import User
-from core.dependencies import require_inventory_access, require_admin
+from core.dependencies import require_admin
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
 
@@ -63,7 +63,7 @@ async def get_inventory_report(
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_inventory_access),
+    current_user: User = Depends(require_admin),
 ):
     """
     Get inventory movements (transactions).

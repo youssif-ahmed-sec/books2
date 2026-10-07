@@ -31,6 +31,7 @@ class OrderCreate(BaseModel):
     payment_method:  str = "Cash"
     notes:           Optional[str] = None
     items:           List[OrderItemCreate]
+    request_id:      UUID
 
     @field_validator("items")
     @classmethod
@@ -100,6 +101,7 @@ class OrderResponse(BaseModel):
     user_id:         Optional[UUID] = None
     assigned_to_id:  Optional[UUID] = None
     status:          str
+    allowed_next_statuses: List[str] = []
     source:          Optional[str] = None
     total_amount:    float
     tax_amount:      float

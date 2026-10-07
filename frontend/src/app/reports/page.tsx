@@ -5,6 +5,21 @@ import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
 import { fetchApi } from "@/lib/api";
 import { roleHome } from "@/lib/roleHome";
+import { orderSourceLabels, orderStatusLabels } from "@/lib/orderLabels";
+
+interface SalesReport {
+  metrics: { total_revenue: number; completed_orders: number; total_orders: number };
+  data: { id: string; customer_name?: string; source: string; status: string; final_total: number; created_at: string }[];
+}
+
+interface InventoryReportRow {
+  id: string;
+  quantity_changed: number;
+  transaction_type: string;
+  reference_document?: string;
+  notes?: string;
+  created_at: string;
+}
 
 export default function ReportsPage() {
   const [role, setRole] = useState<string | null>(null);
@@ -12,46 +27,36 @@ export default function ReportsPage() {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   
-  const [salesData, setSalesData] = useState<any>(null);
-  const [inventoryData, setInventoryData] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [salesData, setSalesData] = useState<SalesReport | null>(null);
+  const [inventoryData, setInventoryData] = useState<InventoryReportRow[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     fetchApi("/auth/me").then(user => {
-      if (["ADMIN", "INVENTORY_CONTROLLER"].includes(user.role)) setRole(user.role);
+      if (user.role === "ADMIN") {
+        setRole(user.role);
+      }
       else window.location.href = roleHome(user.role);
     }).catch(() => setRole(null));
   }, []);
 
   useEffect(() => {
     if (!role) return;
-    if (role === "INVENTORY_CONTROLLER" && activeTab !== "inventory") {
-      setActiveTab("inventory");
-      return;
-    }
-    loadData();
+    const queryParams = new URLSearchParams();
+    if (startDate) queryParams.append("start_date", new Date(startDate).toISOString());
+    if (endDate) queryParams.append("end_date", new Date(endDate).toISOString());
+    let active = true;
+    const endpoint = activeTab === "sales" ? "/reports/sales" : "/reports/inventory";
+    fetchApi(`${endpoint}?${queryParams.toString()}`)
+      .then(res => {
+        if (!active) return;
+        if (activeTab === "sales") setSalesData(res);
+        else setInventoryData(res);
+      })
+      .catch(console.error)
+      .finally(() => { if (active) setIsLoading(false); });
+    return () => { active = false; };
   }, [role, activeTab, startDate, endDate]);
-
-  const loadData = async () => {
-    setIsLoading(true);
-    try {
-      const queryParams = new URLSearchParams();
-      if (startDate) queryParams.append("start_date", new Date(startDate).toISOString());
-      if (endDate) queryParams.append("end_date", new Date(endDate).toISOString());
-
-      if (activeTab === "sales") {
-        const res = await fetchApi(`/reports/sales?${queryParams.toString()}`);
-        setSalesData(res);
-      } else {
-        const res = await fetchApi(`/reports/inventory?${queryParams.toString()}`);
-        setInventoryData(res);
-      }
-    } catch (err: any) {
-      console.error(err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   if (!role) return null;
 
@@ -59,52 +64,52 @@ export default function ReportsPage() {
     <div className="min-h-screen" dir="rtl">
       <SideNav />
       <TopNav title="التقارير" />
-      <main className="mr-[352px] pt-28 pb-8 px-8">
+      <main className="app-main">
         <div className="space-y-6">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
-              <h1 className="text-2xl font-bold tracking-tight text-white">التقارير الشاملة</h1>
-              <p className="text-sm text-zinc-400 mt-1">تقارير المبيعات وحركات المخزون</p>
+              <h1 className="app-heading">التقارير</h1>
+              <p className="app-subtitle">المبيعات وحركات المخزون</p>
             </div>
             <div className="flex gap-4">
               <div>
-                <label className="block text-xs text-zinc-400 mb-1">من تاريخ</label>
+                <label className="app-muted block text-xs mb-1">من تاريخ</label>
                 <input 
                   type="date" 
                   value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white"
+                  onChange={(e) => { setStartDate(e.target.value); setIsLoading(true); }}
+                  className="app-field text-sm"
                 />
               </div>
               <div>
-                <label className="block text-xs text-zinc-400 mb-1">إلى تاريخ</label>
+                <label className="app-muted block text-xs mb-1">إلى تاريخ</label>
                 <input 
                   type="date" 
                   value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white"
+                  onChange={(e) => { setEndDate(e.target.value); setIsLoading(true); }}
+                  className="app-field text-sm"
                 />
               </div>
             </div>
           </div>
 
-          <div className="flex space-x-4 border-b border-zinc-800 rtl:space-x-reverse">
+          <div className="flex gap-4 border-b border-white/10">
             {role === "ADMIN" && <button
-              onClick={() => setActiveTab("sales")}
+              onClick={() => { setActiveTab("sales"); setIsLoading(true); }}
               className={`pb-4 px-2 text-sm font-medium transition-colors border-b-2 ${
                 activeTab === "sales"
                   ? "border-primary text-primary"
-                  : "border-transparent text-zinc-400 hover:text-white"
+                  : "border-transparent app-muted hover:text-white"
               }`}
             >
               تقرير المبيعات
             </button>}
             <button
-              onClick={() => setActiveTab("inventory")}
+              onClick={() => { setActiveTab("inventory"); setIsLoading(true); }}
               className={`pb-4 px-2 text-sm font-medium transition-colors border-b-2 ${
                 activeTab === "inventory"
                   ? "border-primary text-primary"
-                  : "border-transparent text-zinc-400 hover:text-white"
+                  : "border-transparent app-muted hover:text-white"
               }`}
             >
               حركات المخزون
@@ -112,27 +117,27 @@ export default function ReportsPage() {
           </div>
 
           {isLoading ? (
-            <div className="text-zinc-400 py-10 text-center">جاري التحميل...</div>
+            <div className="app-panel app-muted py-10 text-center">جاري التحميل...</div>
           ) : activeTab === "sales" && salesData ? (
             <div className="space-y-6">
-              <div className="grid grid-cols-3 gap-6">
-                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-                  <h3 className="text-zinc-400 text-sm font-medium">إجمالي المبيعات</h3>
-                  <p className="text-3xl font-bold text-emerald-400 mt-2">{salesData.metrics.total_revenue} ر.س</p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="app-panel p-8">
+                  <h3 className="app-muted text-sm font-bold">إجمالي المبيعات</h3>
+                  <p className="text-3xl font-black text-primary mt-2">{Number(salesData.metrics.total_revenue).toLocaleString("ar-EG")} <span className="text-sm">ج.م</span></p>
                 </div>
-                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-                  <h3 className="text-zinc-400 text-sm font-medium">الطلبات المكتملة</h3>
-                  <p className="text-3xl font-bold text-white mt-2">{salesData.metrics.completed_orders}</p>
+                <div className="app-panel p-8">
+                  <h3 className="app-muted text-sm font-bold">الطلبات المكتملة</h3>
+                  <p className="text-3xl font-black text-white mt-2">{salesData.metrics.completed_orders}</p>
                 </div>
-                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-                  <h3 className="text-zinc-400 text-sm font-medium">إجمالي الطلبات (بكل الحالات)</h3>
-                  <p className="text-3xl font-bold text-white mt-2">{salesData.metrics.total_orders}</p>
+                <div className="app-panel p-8">
+                  <h3 className="app-muted text-sm font-bold">إجمالي الطلبات بكل الحالات</h3>
+                  <p className="text-3xl font-black text-white mt-2">{salesData.metrics.total_orders}</p>
                 </div>
               </div>
               
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
-                <table className="w-full text-sm text-right text-zinc-300">
-                  <thead className="text-xs text-zinc-400 bg-zinc-800/50 uppercase">
+              <div className="app-panel overflow-x-auto">
+                <table className="w-full text-sm text-right text-[#e5e2e1]">
+                  <thead className="app-table-head text-xs">
                     <tr>
                       <th className="px-6 py-4 font-medium">رقم الطلب</th>
                       <th className="px-6 py-4 font-medium">العميل</th>
@@ -142,22 +147,22 @@ export default function ReportsPage() {
                       <th className="px-6 py-4 font-medium">تاريخ الإنشاء</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-zinc-800">
-                    {salesData.data.map((order: any) => (
-                      <tr key={order.id} className="hover:bg-zinc-800/30 transition-colors">
+                  <tbody>
+                    {salesData.data.map(order => (
+                      <tr key={order.id} className="app-table-row">
                         <td className="px-6 py-4 font-medium text-white">{order.id.split("-")[0]}</td>
                         <td className="px-6 py-4">{order.customer_name || "غير محدد"}</td>
-                        <td className="px-6 py-4">{order.source}</td>
+                        <td className="px-6 py-4">{orderSourceLabels[order.source] || order.source}</td>
                         <td className="px-6 py-4">
-                          <span className="px-2.5 py-1 bg-zinc-800 rounded-full text-xs">{order.status}</span>
+                          <span className="px-2.5 py-1 bg-white/5 border border-white/10 rounded-full text-xs">{orderStatusLabels[order.status] || order.status}</span>
                         </td>
-                        <td className="px-6 py-4 font-bold text-emerald-400">{order.final_total} ر.س</td>
+                        <td className="px-6 py-4 font-bold text-primary">{Number(order.final_total).toLocaleString("ar-EG")} ج.م</td>
                         <td className="px-6 py-4">{new Date(order.created_at).toLocaleDateString("ar-EG")}</td>
                       </tr>
                     ))}
                     {salesData.data.length === 0 && (
                       <tr>
-                        <td colSpan={6} className="px-6 py-8 text-center text-zinc-500">لا توجد بيانات لهذه الفترة</td>
+                        <td colSpan={6} className="app-muted px-6 py-8 text-center">لا توجد بيانات لهذه الفترة</td>
                       </tr>
                     )}
                   </tbody>
@@ -165,9 +170,9 @@ export default function ReportsPage() {
               </div>
             </div>
           ) : activeTab === "inventory" && inventoryData ? (
-            <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
-              <table className="w-full text-sm text-right text-zinc-300">
-                <thead className="text-xs text-zinc-400 bg-zinc-800/50 uppercase">
+            <div className="app-panel overflow-x-auto">
+              <table className="w-full text-sm text-right text-[#e5e2e1]">
+                <thead className="app-table-head text-xs">
                   <tr>
                     <th className="px-6 py-4 font-medium">نوع الحركة</th>
                     <th className="px-6 py-4 font-medium">تغير الكمية</th>
@@ -176,9 +181,9 @@ export default function ReportsPage() {
                     <th className="px-6 py-4 font-medium">التاريخ</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-zinc-800">
-                  {inventoryData.map((tx: any) => (
-                    <tr key={tx.id} className="hover:bg-zinc-800/30 transition-colors">
+                <tbody>
+                  {inventoryData.map(tx => (
+                    <tr key={tx.id} className="app-table-row">
                       <td className="px-6 py-4">
                         <span className={`px-2.5 py-1 rounded-full text-xs ${
                           tx.quantity_changed > 0 ? "bg-emerald-500/10 text-emerald-400" : "bg-red-500/10 text-red-400"
@@ -196,7 +201,7 @@ export default function ReportsPage() {
                   ))}
                   {inventoryData.length === 0 && (
                     <tr>
-                      <td colSpan={5} className="px-6 py-8 text-center text-zinc-500">لا توجد حركات مخزون لهذه الفترة</td>
+                      <td colSpan={5} className="app-muted px-6 py-8 text-center">لا توجد حركات مخزون لهذه الفترة</td>
                     </tr>
                   )}
                 </tbody>

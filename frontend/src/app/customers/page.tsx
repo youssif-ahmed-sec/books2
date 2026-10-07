@@ -20,11 +20,12 @@ const customerSchema = z.object({
 });
 
 type CustomerFormValues = z.infer<typeof customerSchema>;
+type Customer = CustomerFormValues & { id: string; total_purchases: number };
 
 export default function CustomersPage() {
-  const [customers, setCustomers] = useState<any[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [isSlideoverOpen, setIsSlideoverOpen] = useState(false);
-  const [editingCustomer, setEditingCustomer] = useState<any>(null);
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
 
   const { register, handleSubmit, reset, formState: { errors, isSubmitting } } = useForm<CustomerFormValues>({
     resolver: zodResolver(customerSchema),
@@ -43,7 +44,9 @@ export default function CustomersPage() {
   };
 
   useEffect(() => {
-    loadCustomers();
+    fetchApi("/customers").then(setCustomers).catch((err) => {
+      console.error("Failed to load customers:", err);
+    });
   }, []);
 
   const openAdd = () => {
@@ -61,7 +64,7 @@ export default function CustomersPage() {
     setIsSlideoverOpen(true);
   };
 
-  const openEdit = (customer: any) => {
+  const openEdit = (customer: Customer) => {
     setEditingCustomer(customer);
     reset({
       name: customer.name,
@@ -100,26 +103,26 @@ export default function CustomersPage() {
   return (
     <div className="min-h-screen" dir="rtl">
       <SideNav />
-      <TopNav title="العملاء (CRM)" />
-      <main className="mr-[352px] pt-28 pb-8 px-8">
+      <TopNav title="العملاء" />
+      <main className="app-main">
         <div className="space-y-6">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
-              <h1 className="text-2xl font-bold tracking-tight text-white">العملاء (CRM)</h1>
-              <p className="text-sm text-zinc-400 mt-1">إدارة بيانات العملاء وتاريخ المشتريات</p>
+              <h1 className="app-heading">العملاء</h1>
+              <p className="app-subtitle">بيانات العملاء وتاريخ مشترياتهم</p>
             </div>
             <button
               onClick={openAdd}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+              className="app-primary-button"
             >
               + إضافة عميل
             </button>
           </div>
 
-      <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden shadow-sm">
+      <div className="app-panel overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-right text-sm">
-            <thead className="bg-zinc-800/50 border-b border-zinc-800 text-zinc-400">
+            <thead className="app-table-head border-b border-white/5">
               <tr>
                 <th className="px-4 py-3 font-medium">اسم العميل</th>
                 <th className="px-4 py-3 font-medium">الهاتف</th>
@@ -129,22 +132,22 @@ export default function CustomersPage() {
                 <th className="px-4 py-3 font-medium">إجراءات</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-800 text-zinc-300">
+            <tbody className="text-[#e5e2e1]">
               {customers.map((c) => (
-                <tr key={c.id} className="hover:bg-zinc-800/30 transition-colors">
+                <tr key={c.id} className="app-table-row">
                   <td className="px-4 py-3 font-medium text-white">{c.name}</td>
                   <td className="px-4 py-3" dir="ltr">{c.phone}</td>
                   <td className="px-4 py-3">
-                    <span className="bg-zinc-800 text-zinc-300 px-2 py-1 rounded text-xs">
+                    <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-[#e2bfb0]">
                       {c.customer_type}
                     </span>
                   </td>
                   <td className="px-4 py-3">{c.city || "-"}</td>
-                  <td className="px-4 py-3">{c.total_purchases} ر.س</td>
+                  <td className="px-4 py-3">{Number(c.total_purchases).toLocaleString("ar-EG")} ج.م</td>
                   <td className="px-4 py-3">
                     <button
                       onClick={() => openEdit(c)}
-                      className="text-emerald-500 hover:text-emerald-400 text-xs font-medium"
+                      className="text-primary hover:text-orange-300 text-xs font-bold"
                     >
                       تعديل
                     </button>
@@ -153,7 +156,7 @@ export default function CustomersPage() {
               ))}
               {customers.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-zinc-500">
+                  <td colSpan={6} className="app-muted px-4 py-8 text-center">
                     لا يوجد عملاء مضافين بعد
                   </td>
                 </tr>
@@ -166,33 +169,33 @@ export default function CustomersPage() {
       {isSlideoverOpen && (
         <div className="fixed inset-0 z-50 flex justify-end">
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsSlideoverOpen(false)}></div>
-          <div className="relative w-full max-w-md bg-zinc-900 h-full shadow-2xl border-r border-zinc-800 flex flex-col animate-slide-in-right">
-            <div className="flex items-center justify-between p-6 border-b border-zinc-800">
+          <div className="relative w-full max-w-md bg-[#1c1b1b] h-full shadow-2xl border-r border-white/10 flex flex-col animate-slide-in-right">
+            <div className="flex items-center justify-between p-6 border-b border-white/10">
               <h2 className="text-xl font-bold text-white">{editingCustomer ? "تعديل بيانات العميل" : "إضافة عميل جديد"}</h2>
-              <button onClick={() => setIsSlideoverOpen(false)} className="text-zinc-400 hover:text-white transition-colors">✕</button>
+              <button type="button" aria-label="إغلاق" onClick={() => setIsSlideoverOpen(false)} className="app-muted hover:text-white transition-colors">✕</button>
             </div>
             
             <form onSubmit={handleSubmit(onSubmit)} className="flex-1 overflow-y-auto p-6 space-y-4">
               <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-1">الاسم <span className="text-red-500">*</span></label>
-                <input {...register("name")} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500" />
+                <label className="block text-sm font-medium text-[#e2bfb0] mb-1">الاسم <span className="text-red-500">*</span></label>
+                <input {...register("name")} className="app-field" />
                 {errors.name && <p className="text-red-500 text-xs mt-1">{errors.name.message}</p>}
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-1">رقم الهاتف <span className="text-red-500">*</span></label>
-                <input {...register("phone")} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500" />
+                <label className="block text-sm font-medium text-[#e2bfb0] mb-1">رقم الهاتف <span className="text-red-500">*</span></label>
+                <input {...register("phone")} className="app-field" />
                 {errors.phone && <p className="text-red-500 text-xs mt-1">{errors.phone.message}</p>}
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-1">رقم الواتساب</label>
-                <input {...register("whatsapp_number")} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500" />
+                <label className="block text-sm font-medium text-[#e2bfb0] mb-1">رقم الواتساب</label>
+                <input {...register("whatsapp_number")} className="app-field" />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-1">نوع العميل</label>
-                <select {...register("customer_type")} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500">
+                <label className="block text-sm font-medium text-[#e2bfb0] mb-1">نوع العميل</label>
+                <select {...register("customer_type")} className="app-field">
                   <option value="Retail Customer">عميل تجزئة</option>
                   <option value="Wholesale Customer">عميل جملة</option>
                   <option value="VIP Customer">عميل VIP</option>
@@ -201,23 +204,23 @@ export default function CustomersPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-1">المدينة</label>
-                <input {...register("city")} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500" />
+                <label className="block text-sm font-medium text-[#e2bfb0] mb-1">المدينة</label>
+                <input {...register("city")} className="app-field" />
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-1">البريد الإلكتروني</label>
-                <input {...register("email")} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500" />
+                <label className="block text-sm font-medium text-[#e2bfb0] mb-1">البريد الإلكتروني</label>
+                <input {...register("email")} className="app-field" />
                 {errors.email && <p className="text-red-500 text-xs mt-1">{errors.email.message}</p>}
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-1">ملاحظات</label>
-                <textarea {...register("notes")} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500" rows={3}></textarea>
+                <label className="block text-sm font-medium text-[#e2bfb0] mb-1">ملاحظات</label>
+                <textarea {...register("notes")} className="app-field" rows={3}></textarea>
               </div>
 
-              <div className="pt-4 border-t border-zinc-800 mt-6">
-                <button type="submit" disabled={isSubmitting} className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-medium py-3 rounded-lg transition-colors">
+              <div className="pt-4 border-t border-white/10 mt-6">
+                <button type="submit" disabled={isSubmitting} className="app-primary-button w-full">
                   {isSubmitting ? "جاري الحفظ..." : "حفظ العميل"}
                 </button>
               </div>

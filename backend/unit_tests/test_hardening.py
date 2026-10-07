@@ -26,6 +26,7 @@ from schemas.auth import UserRegisterRequest
 from schemas.order import OrderCreate, OrderDraftCreate, OrderItemCreate, OrderStatusUpdate
 from schemas.product import ProductCreate, SupplierPaymentCreate
 from services.order_service import OrderService
+from services.order_workflow import allowed_next_statuses
 
 
 @pytest.mark.parametrize(
@@ -78,6 +79,7 @@ def test_cashier_cannot_read_inventory_transaction_history():
         (RoleEnum.SENIOR_SALES, "/api/v1/dashboards/management"),
         (RoleEnum.INVENTORY_CONTROLLER, "/api/v1/dashboards/management"),
         (RoleEnum.SENIOR_SALES, "/api/v1/reports/inventory"),
+        (RoleEnum.INVENTORY_CONTROLLER, "/api/v1/reports/inventory"),
     ],
 )
 def test_reports_keep_sales_and_inventory_roles_separate(role, path):
@@ -114,6 +116,18 @@ def test_static_file_lookup_cannot_escape_export_directory(tmp_path, monkeypatch
     monkeypatch.setattr(main, "static_dir", str(static_root))
     assert main.safe_static_file("index.html") == static_root / "index.html"
     assert main.safe_static_file("../secret.html") is None
+
+
+def test_static_selection_skips_incomplete_packaged_export(tmp_path):
+    packaged = tmp_path / "backend" / "static"
+    packaged.mkdir(parents=True)
+    (packaged / "old-chunk.js").write_text("old")
+    export = tmp_path / "frontend" / "out"
+    export.mkdir(parents=True)
+    (export / "index.html").write_text("current")
+
+    assert main.select_static_dir(packaged, export) == export
+    assert main.select_static_dir(packaged) is None
 
 
 def test_upload_type_checks_file_signature():
@@ -207,6 +221,7 @@ def test_supplier_financial_fields_are_redacted_for_inventory_role():
 
 
 def test_whatsapp_webhook_rejects_bad_signature(monkeypatch):
+    monkeypatch.setenv("WHATSAPP_ENABLED", "1")
     monkeypatch.setenv("WHATSAPP_APP_SECRET", "unit-test-secret")
     with TestClient(app) as client:
         assert client.post(
@@ -216,6 +231,7 @@ def test_whatsapp_webhook_rejects_bad_signature(monkeypatch):
 
 
 def test_whatsapp_webhook_accepts_valid_signature(monkeypatch):
+    monkeypatch.setenv("WHATSAPP_ENABLED", "1")
     monkeypatch.setenv("WHATSAPP_APP_SECRET", "unit-test-secret")
     payload = b"{}"
     signature = "sha256=" + hmac.new(b"unit-test-secret", payload, hashlib.sha256).hexdigest()
@@ -225,6 +241,24 @@ def test_whatsapp_webhook_accepts_valid_signature(monkeypatch):
             headers={"x-hub-signature-256": signature},
         )
     assert response.status_code == 404  # Authenticated request reached payload handling.
+
+
+def test_whatsapp_webhook_does_not_acknowledge_unhandled_message(monkeypatch):
+    monkeypatch.setenv("WHATSAPP_ENABLED", "1")
+    monkeypatch.setenv("WHATSAPP_APP_SECRET", "unit-test-secret")
+    payload = b'{"object":"whatsapp_business_account","entry":[{"changes":[{"value":{"messages":[{"id":"m1"}]}}]}]}'
+    signature = "sha256=" + hmac.new(b"unit-test-secret", payload, hashlib.sha256).hexdigest()
+    with TestClient(app) as client:
+        response = client.post("/api/v1/webhooks/whatsapp", content=payload,
+                               headers={"x-hub-signature-256": signature})
+    assert response.status_code == 503
+
+
+def test_whatsapp_webhook_is_disabled_without_launch_flag(monkeypatch):
+    monkeypatch.delenv("WHATSAPP_ENABLED", raising=False)
+    with TestClient(app) as client:
+        assert client.get("/api/v1/webhooks/whatsapp").status_code == 404
+        assert client.post("/api/v1/webhooks/whatsapp", content=b"{}").status_code == 404
 
 
 def test_product_cost_is_hidden_from_cashier():
@@ -265,9 +299,28 @@ def test_new_user_password_must_be_long_enough_without_bcrypt_truncation():
 def test_order_creation_cannot_claim_a_status_without_matching_stock_behavior():
     item = {"product_id": uuid4(), "unit_id": uuid4(), "quantity": 1}
     with pytest.raises(ValidationError):
-        OrderCreate(warehouse_id=uuid4(), status=OrderStatusEnum.CANCELLED, items=[item])
+        OrderCreate(request_id=uuid4(), warehouse_id=uuid4(), status=OrderStatusEnum.CANCELLED, items=[item])
     with pytest.raises(ValidationError):
         OrderDraftCreate(status=OrderStatusEnum.DELIVERED, items=[item])
+
+
+def test_stock_mutations_require_a_retry_identity():
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=uuid4(), role=RoleEnum.ADMIN)
+    try:
+        with TestClient(app) as client:
+            order = client.post("/api/v1/orders", json={
+                "warehouse_id": str(uuid4()),
+                "items": [{"product_id": str(uuid4()), "unit_id": str(uuid4()), "quantity": 1}],
+            })
+            receipt = client.post("/api/v1/inventory/transactions", json={
+                "product_id": str(uuid4()), "warehouse_id": str(uuid4()),
+                "transaction_type": "Receiving", "quantity_changed": 1,
+                "supplier_id": str(uuid4()), "unit_cost": 5,
+            })
+        assert order.status_code == 422
+        assert receipt.status_code == 422
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
 
 
 class Result:
@@ -302,7 +355,7 @@ class Session:
 @pytest.mark.asyncio
 async def test_delivering_previously_issued_order_does_not_deduct_again():
     order = Order(
-        id=uuid4(), status=OrderStatusEnum.CANCELLED.value, source="Manual Entry",
+        id=uuid4(), status=OrderStatusEnum.READY.value, source="Manual Entry",
         total_amount=Decimal("10"), tax_amount=Decimal("0"),
         discount_amount=Decimal("0"), shipping_cost=Decimal("0"),
         payment_method="Cash", created_at=datetime.now(timezone.utc),
@@ -328,10 +381,27 @@ async def test_fulfilled_order_cannot_reopen_without_stock_reversal():
 
 
 @pytest.mark.asyncio
+async def test_order_cannot_skip_stages_or_reopen_cancelled_order():
+    assert allowed_next_statuses(OrderStatusEnum.READY.value) == [
+        OrderStatusEnum.DELIVERED.value, OrderStatusEnum.CANCELLED.value,
+    ]
+    assert allowed_next_statuses(OrderStatusEnum.DELIVERED.value) == [OrderStatusEnum.CLOSED.value]
+    for start in (OrderStatusEnum.DRAFT, OrderStatusEnum.CANCELLED):
+        order = Order(id=uuid4(), status=start.value)
+        session = Session([Result(value=order)])
+        with pytest.raises(ValueError, match="not allowed"):
+            await OrderService.update_order_status(
+                session, order.id, OrderStatusUpdate(status=OrderStatusEnum.DELIVERED), uuid4()
+            )
+        assert session.commits == 0
+
+
+@pytest.mark.asyncio
 async def test_manual_issue_cannot_make_stock_negative():
     balance = SimpleNamespace(current_stock=Decimal("1"))
-    session = Session([Result(value=SimpleNamespace(id=uuid4())), Result(value=uuid4()), Result(value=balance)])
+    session = Session([Result(), Result(value=SimpleNamespace(id=uuid4())), Result(value=uuid4()), Result(value=balance)])
     transaction = InventoryTransactionCreate(
+        request_id=uuid4(),
         product_id=uuid4(), warehouse_id=uuid4(),
         transaction_type="Issuing", quantity_changed=Decimal("-2"),
     )

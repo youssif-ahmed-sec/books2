@@ -4,9 +4,20 @@ import { useState, useEffect } from "react";
 import { fetchApi } from "@/lib/api";
 import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
+import { orderStatusLabels } from "@/lib/orderLabels";
+
+interface InboxOrder {
+  id: string;
+  status: string;
+  customer_name?: string | null;
+  total_amount: number;
+  allowed_next_statuses: string[];
+}
+
+const inboxStatuses = ["New Lead", "Draft Order", "Waiting Quotation", "Quotation Sent", "Waiting Customer Approval"];
 
 export default function InboxPage() {
-  const [orders, setOrders] = useState<any[]>([]);
+  const [orders, setOrders] = useState<InboxOrder[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const loadOrders = async () => {
@@ -14,8 +25,8 @@ export default function InboxPage() {
     try {
       const data = await fetchApi("/orders");
       // Filter for inbox-relevant statuses
-      const inboxOrders = data.filter((o: any) => 
-        ["New Lead", "Draft", "Quotation", "Waiting Approval"].includes(o.status)
+      const inboxOrders = data.filter((o: InboxOrder) =>
+        inboxStatuses.includes(o.status)
       );
       setOrders(inboxOrders);
     } catch (err) {
@@ -26,7 +37,10 @@ export default function InboxPage() {
   };
 
   useEffect(() => {
-    loadOrders();
+    fetchApi("/orders")
+      .then((data: InboxOrder[]) => setOrders(data.filter((o) => inboxStatuses.includes(o.status))))
+      .catch((err) => console.error("Failed to load inbox orders:", err))
+      .finally(() => setIsLoading(false));
   }, []);
 
   const updateStatus = async (orderId: string, newStatus: string) => {
@@ -49,94 +63,94 @@ export default function InboxPage() {
   return (
     <div className="min-h-screen" dir="rtl">
       <SideNav />
-      <TopNav title="البريد الوارد (أومني)" />
-      <main className="mr-[352px] pt-28 pb-8 px-8">
+      <TopNav title="متابعة الطلبات" />
+      <main className="app-main">
         <div className="space-y-6">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-white">البريد الوارد (طلبات الأومني تشانل)</h1>
-            <p className="text-sm text-zinc-400 mt-1">متابعة طلبات الواتساب، عروض الأسعار، والموافقات</p>
+            <h1 className="app-heading">متابعة الطلبات</h1>
+            <p className="app-subtitle">المسودات وعروض الأسعار وموافقات العملاء</p>
           </div>
 
       {isLoading ? (
-        <div className="text-zinc-400">جاري التحميل...</div>
+        <div className="app-panel app-muted p-8">جاري تحميل الطلبات...</div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-6">
           {/* New Leads / Drafts */}
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 flex flex-col gap-4 shadow-sm">
-            <h2 className="text-lg font-bold text-white border-b border-zinc-800 pb-2">طلبات جديدة / مسودة</h2>
-            {orders.filter(o => ["New Lead", "Draft"].includes(o.status)).map(order => (
-              <div key={order.id} className="bg-zinc-800 rounded-lg p-4 flex flex-col gap-3 border border-zinc-700/50">
+          <div className="app-panel p-6 flex flex-col gap-4">
+            <h2 className="text-lg font-bold text-white border-b border-white/10 pb-3">طلبات جديدة ومسودات</h2>
+            {orders.filter(o => ["New Lead", "Draft Order"].includes(o.status)).map(order => (
+              <div key={order.id} className="bg-white/5 rounded-2xl p-4 flex flex-col gap-3 border border-white/5">
                 <div className="flex justify-between items-start">
                   <div>
-                    <span className="text-xs text-zinc-400 font-mono">#{order.id.slice(0,8)}</span>
+                    <span className="app-muted text-xs font-mono">#{order.id.slice(0,8)}</span>
                     <h3 className="text-white font-medium">{order.customer_name || "عميل غير مسجل"}</h3>
                   </div>
-                  <span className="bg-blue-500/20 text-blue-400 px-2 py-1 rounded text-xs">
-                    {order.status}
+                  <span className="bg-primary/10 text-primary px-3 py-1 rounded-full text-xs">
+                    {orderStatusLabels[order.status] || order.status}
                   </span>
                 </div>
-                <div className="text-lg font-bold text-emerald-400">{order.total_amount} ر.س</div>
+                <div className="text-lg font-bold text-primary">{Number(order.total_amount).toLocaleString("ar-EG")} ج.م</div>
                 <div className="flex gap-2 mt-2">
-                  <button onClick={() => updateStatus(order.id, "Quotation")} className="flex-1 bg-zinc-700 hover:bg-zinc-600 text-white py-1.5 rounded text-sm transition-colors">
-                    إرسال عرض سعر
-                  </button>
-                  <button onClick={() => updateStatus(order.id, "Approved")} className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-1.5 rounded text-sm transition-colors">
-                    موافقة
+                  <button disabled={!order.allowed_next_statuses.length} onClick={() => updateStatus(order.id, order.allowed_next_statuses[0])} className="app-secondary-button flex-1">
+                    الخطوة التالية
                   </button>
                 </div>
               </div>
             ))}
+            {!orders.some(o => ["New Lead", "Draft Order"].includes(o.status)) && <p className="app-muted py-8 text-center text-sm">لا توجد طلبات جديدة</p>}
           </div>
 
           {/* Quotations */}
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 flex flex-col gap-4 shadow-sm">
-            <h2 className="text-lg font-bold text-white border-b border-zinc-800 pb-2">عروض أسعار مرسلة</h2>
-            {orders.filter(o => o.status === "Quotation").map(order => (
-              <div key={order.id} className="bg-zinc-800 rounded-lg p-4 flex flex-col gap-3 border border-zinc-700/50">
+          <div className="app-panel p-6 flex flex-col gap-4">
+            <h2 className="text-lg font-bold text-white border-b border-white/10 pb-3">عروض الأسعار</h2>
+            {orders.filter(o => ["Waiting Quotation", "Quotation Sent"].includes(o.status)).map(order => (
+              <div key={order.id} className="bg-white/5 rounded-2xl p-4 flex flex-col gap-3 border border-white/5">
                 <div className="flex justify-between items-start">
                   <div>
-                    <span className="text-xs text-zinc-400 font-mono">#{order.id.slice(0,8)}</span>
+                    <span className="app-muted text-xs font-mono">#{order.id.slice(0,8)}</span>
                     <h3 className="text-white font-medium">{order.customer_name || "عميل غير مسجل"}</h3>
                   </div>
-                  <span className="bg-orange-500/20 text-orange-400 px-2 py-1 rounded text-xs">
-                    Quotation
+                  <span className="bg-primary/10 text-primary px-3 py-1 rounded-full text-xs">
+                    {orderStatusLabels[order.status] || order.status}
                   </span>
                 </div>
-                <div className="text-lg font-bold text-emerald-400">{order.total_amount} ر.س</div>
+                <div className="text-lg font-bold text-primary">{Number(order.total_amount).toLocaleString("ar-EG")} ج.م</div>
                 <div className="flex gap-2 mt-2">
-                  <button onClick={() => handlePrintQuotation(order.id)} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-1.5 rounded text-sm transition-colors">
+                  <button onClick={() => handlePrintQuotation(order.id)} className="app-secondary-button flex-1">
                     طباعة / PDF
                   </button>
-                  <button onClick={() => updateStatus(order.id, "Approved")} className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-1.5 rounded text-sm transition-colors">
-                    موافقة
+                  <button disabled={!order.allowed_next_statuses.length} onClick={() => updateStatus(order.id, order.allowed_next_statuses[0])} className="app-primary-button flex-1">
+                    الخطوة التالية
                   </button>
                 </div>
               </div>
             ))}
+            {!orders.some(o => ["Waiting Quotation", "Quotation Sent"].includes(o.status)) && <p className="app-muted py-8 text-center text-sm">لا توجد عروض أسعار قيد المتابعة</p>}
           </div>
 
           {/* Waiting Approval */}
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 flex flex-col gap-4 shadow-sm">
-            <h2 className="text-lg font-bold text-white border-b border-zinc-800 pb-2">في انتظار الموافقة</h2>
-            {orders.filter(o => o.status === "Waiting Approval").map(order => (
-              <div key={order.id} className="bg-zinc-800 rounded-lg p-4 flex flex-col gap-3 border border-zinc-700/50">
+          <div className="app-panel p-6 flex flex-col gap-4">
+            <h2 className="text-lg font-bold text-white border-b border-white/10 pb-3">في انتظار الموافقة</h2>
+            {orders.filter(o => o.status === "Waiting Customer Approval").map(order => (
+              <div key={order.id} className="bg-white/5 rounded-2xl p-4 flex flex-col gap-3 border border-white/5">
                 <div className="flex justify-between items-start">
                   <div>
-                    <span className="text-xs text-zinc-400 font-mono">#{order.id.slice(0,8)}</span>
+                    <span className="app-muted text-xs font-mono">#{order.id.slice(0,8)}</span>
                     <h3 className="text-white font-medium">{order.customer_name || "عميل غير مسجل"}</h3>
                   </div>
-                  <span className="bg-purple-500/20 text-purple-400 px-2 py-1 rounded text-xs">
-                    Waiting Approval
+                  <span className="bg-primary/10 text-primary px-3 py-1 rounded-full text-xs">
+                    {orderStatusLabels[order.status]}
                   </span>
                 </div>
-                <div className="text-lg font-bold text-emerald-400">{order.total_amount} ر.س</div>
+                <div className="text-lg font-bold text-primary">{Number(order.total_amount).toLocaleString("ar-EG")} ج.م</div>
                 <div className="flex gap-2 mt-2">
-                  <button onClick={() => updateStatus(order.id, "Approved")} className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-1.5 rounded text-sm transition-colors">
+                  <button disabled={!order.allowed_next_statuses.includes("Approved")} onClick={() => updateStatus(order.id, "Approved")} className="app-primary-button flex-1">
                     اعتماد الطلب
                   </button>
                 </div>
               </div>
             ))}
+            {!orders.some(o => o.status === "Waiting Customer Approval") && <p className="app-muted py-8 text-center text-sm">لا توجد طلبات تنتظر الموافقة</p>}
           </div>
         </div>
       )}

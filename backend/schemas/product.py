@@ -65,7 +65,7 @@ class ProductBundleComponentResponse(ProductBundleComponentBase):
 class ProductBase(BaseModel):
     sku: str
     barcode: Optional[str] = None
-    name_en: str
+    name_en: str = ""
     name_ar: str
     category_id: Optional[UUID] = None
     subcategory_id: Optional[UUID] = None
@@ -112,8 +112,8 @@ class ProductUpdate(BaseModel):
     total_stock: Optional[Decimal] = Field(default=None, ge=0, allow_inf_nan=False)
 
 class CategoryBase(BaseModel):
-    name_en: str
     name_ar: str
+    name_en: str = ""
 
 class CategoryCreate(CategoryBase):
     pass
@@ -128,8 +128,8 @@ class CategoryResponse(CategoryBase):
 
 class SubcategoryBase(BaseModel):
     category_id: UUID
-    name_en: str
     name_ar: str
+    name_en: str = ""
 
 class SubcategoryCreate(SubcategoryBase):
     pass
@@ -144,8 +144,8 @@ class SubcategoryResponse(SubcategoryBase):
     model_config = ConfigDict(from_attributes=True)
 
 class BrandBase(BaseModel):
-    name_en: str
     name_ar: str
+    name_en: str = ""
 
 class BrandCreate(BrandBase):
     pass

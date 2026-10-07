@@ -2,6 +2,7 @@ import os
 import pytest
 import asyncio
 from dotenv import load_dotenv
+from sqlalchemy.engine import make_url
 
 # Load .env explicitly
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
@@ -10,6 +11,17 @@ load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 test_db_url = os.getenv("TEST_DATABASE_URL")
 if not test_db_url:
     raise RuntimeError("TEST_DATABASE_URL is not set!")
+primary_db_url = os.getenv("DATABASE_URL")
+if not primary_db_url:
+    raise RuntimeError("DATABASE_URL is required to verify test database isolation")
+if os.getenv("TEST_DATABASE_RESET_CONFIRM") != "1":
+    raise RuntimeError("Set TEST_DATABASE_RESET_CONFIRM=1 only for an isolated disposable test database")
+primary = make_url(primary_db_url)
+test = make_url(test_db_url)
+same_endpoint = (primary.host, primary.port, primary.database) == (test.host, test.port, test.database)
+same_project_login = (primary.username, primary.database) == (test.username, test.database)
+if same_endpoint or same_project_login:
+    raise RuntimeError("TEST_DATABASE_URL may resolve to the primary database")
 os.environ["DATABASE_URL"] = test_db_url
 
 # Now we can safely import app modules

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Text, Numeric
+from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Text, Numeric, JSON, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from .user import Base
@@ -7,10 +7,7 @@ import uuid
 
 
 class OrderStatusEnum(str, enum.Enum):
-    """
-    Python-level ENUM for order status.
-    Strict state machine validation is enforced in Pydantic.
-    """
+    """Order labels; transition rules are enforced by the service when defined."""
     NEW_LEAD = "New Lead"
     DRAFT = "Draft Order"
     WAITING_QUOTATION = "Waiting Quotation"
@@ -35,6 +32,7 @@ class OrderSourceEnum(str, enum.Enum):
 
 class Order(Base):
     __tablename__ = "orders"
+    __table_args__ = (UniqueConstraint("request_id", name="uq_orders_request_id"),)
 
     id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     customer_id     = Column(UUID(as_uuid=True), nullable=True)  # Nullable for walk-in POS
@@ -53,6 +51,8 @@ class Order(Base):
 
     payment_method  = Column(String, default="Cash")
     notes           = Column(Text, nullable=True)
+    request_id      = Column(UUID(as_uuid=True), nullable=True)
+    request_fingerprint = Column(String(64), nullable=True)
 
     created_at      = Column(DateTime(timezone=True), server_default=func.now())
     updated_at      = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -75,5 +75,7 @@ class OrderItem(Base):
     price_level     = Column(String, nullable=False, default="Retail")
     unit_price      = Column(Numeric(12, 2), nullable=False)  # price/selling-unit (from DB)
     total_price     = Column(Numeric(12, 2), nullable=False)  # unit_price * quantity_requested
+    # Immutable bill of materials for a draft bundle; NULL marks legacy orders that need review.
+    bundle_components_snapshot = Column(JSON, nullable=True)
 
     created_at      = Column(DateTime(timezone=True), server_default=func.now())

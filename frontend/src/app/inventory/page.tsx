@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
 import { InventoryTableRow } from "@/components/InventoryTableRow";
@@ -10,28 +11,62 @@ import InventoryMovementsModal from "@/components/InventoryMovementsModal";
 import ReceiveStockPanel from "@/components/ReceiveStockPanel";
 import { fetchApi } from "@/lib/api";
 import { getUserRole, canViewCost, canEditProduct, UserRole } from "@/utils/auth";
+import { useHydrated } from "@/lib/useHydrated";
+
+interface InventoryItem {
+  id: string;
+  nameAr: string;
+  nameEn: string;
+  tag: string;
+  sku: string;
+  barcode: string;
+  category: string;
+  retailPrice: string;
+  wholesalePrice: string;
+  stockQty: string;
+  stockUnit: string;
+  stockPercent: number;
+  stockStatus: "normal" | "low" | "critical";
+  image?: string;
+}
+interface StatCard {
+  icon: string; iconColor: string; label: string; value: string;
+  valueColor?: string; valueExtra?: string; sub: string; subColor: string;
+}
+interface CatalogProduct {
+  id: string; sku: string; barcode: string; name_ar: string; name_en: string;
+  base_unit: string; image_url?: string; max_stock_level: string; min_stock_level: string;
+  category?: { name_ar: string };
+  units: Array<{ unit_name: string; prices: Array<{ price_level: string; price: string }> }>;
+}
+interface Balance { product_id: string; current_stock: string }
+interface RecentTransaction { transaction_type: string; product_name?: string; created_at: string }
+interface StockMovement { product: string; type: string; date: string; typeStyle: string }
+interface PurchaseNeeded { name: string; stock: string; image?: string }
+interface SupplierOption { id: string; name: string }
+interface CategoryOption { id: string; name_ar: string }
 
 export default function InventoryPage() {
   const [showAddPanel, setShowAddPanel] = useState(false);
   const [showEditPanel, setShowEditPanel] = useState(false);
   const [showMovementsModal, setShowMovementsModal] = useState(false);
   const [showReceivePanel, setShowReceivePanel] = useState(false);
-  const [selectedItem, setSelectedItem] = useState<any>(null);
+  const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
 
-  const [inventoryItems, setInventoryItems] = useState<any[]>([]);
-  const [statCards, setStatCards] = useState<any[]>([
-    { icon: "trending_up", iconColor: "text-primary", label: "مبيعات اليوم", value: "0", sub: "", subColor: "text-green-400" },
+  const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
+  const [statCards, setStatCards] = useState<StatCard[]>([
     { icon: "warning", iconColor: "text-primary", label: "منخفض المخزون", value: "0", valueColor: "text-primary", sub: "يحتاج إعادة طلب", subColor: "text-[#e2bfb0]/60" },
     { icon: "error", iconColor: "text-[#ffb4ab]", label: "مخزون حرج", value: "0", valueColor: "text-[#ffb4ab]", sub: "أصناف نفدت", subColor: "text-[#e2bfb0]/60" },
     { icon: "payments", iconColor: "text-primary", label: "قيمة المخزون", value: "0", valueExtra: "ج.م", sub: "تقدير القيمة الحالية", subColor: "text-[#e2bfb0]/60" },
   ]);
-  const [stockMovements, setStockMovements] = useState<any[]>([]);
-  const [purchaseNeeded, setPurchaseNeeded] = useState<any[]>([]);
+  const [stockMovements, setStockMovements] = useState<StockMovement[]>([]);
+  const [purchaseNeeded, setPurchaseNeeded] = useState<PurchaseNeeded[]>([]);
   const [loading, setLoading] = useState(true);
-  const [userRole, setUserRole] = useState<UserRole | null>(null);
+  const hydrated = useHydrated();
+  const userRole: UserRole | null = hydrated ? getUserRole() : null;
 
-  const [suppliers, setSuppliers] = useState<any[]>([]);
-  const [categories, setCategories] = useState<any[]>([]);
+  const [suppliers, setSuppliers] = useState<SupplierOption[]>([]);
+  const [categories, setCategories] = useState<CategoryOption[]>([]);
   
   const [selectedSupplier, setSelectedSupplier] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("");
@@ -47,7 +82,7 @@ export default function InventoryPage() {
   }, []);
 
   useEffect(() => {
-    setUserRole(getUserRole());
+    if (!userRole) return;
     const loadData = async () => {
       try {
         setLoading(true);
@@ -62,16 +97,17 @@ export default function InventoryPage() {
           fetchApi(`/products?${params.toString()}`),
           fetchApi("/inventory/balances"),
           fetchApi("/inventory/stats"),
-          fetchApi("/inventory/transactions/recent"),
+          userRole === "ADMIN" ? fetchApi("/inventory/transactions/recent") : Promise.resolve([]),
         ]);
 
         setTotalItems(productsRes.total || 0);
-        const productsList = productsRes.data || [];
+        const productsList: CatalogProduct[] = productsRes.data || [];
+        const balances: Balance[] = balancesRes;
 
         // Merge balances with products
-        const mappedItems = productsList.map((product: any) => {
-          const productBalances = balancesRes.filter((b: any) => b.product_id === product.id);
-          const currentStock = productBalances.reduce((sum: number, b: any) => sum + Number(parseFloat(b.current_stock) || 0), 0);
+        const mappedItems: InventoryItem[] = productsList.map((product) => {
+          const productBalances = balances.filter((b) => b.product_id === product.id);
+          const currentStock = productBalances.reduce((sum, b) => sum + Number(parseFloat(b.current_stock) || 0), 0);
           
           let retailPrice = "0.00";
           let wholesalePrice = "0.00";
@@ -83,14 +119,14 @@ export default function InventoryPage() {
                unitName = baseUnit.unit_name;
              }
              if (baseUnit.prices && baseUnit.prices.length > 0) {
-                const retail = baseUnit.prices.find((p: any) => p.price_level === "Retail");
-                const wholesale = baseUnit.prices.find((p: any) => p.price_level === "Wholesale");
+                const retail = baseUnit.prices.find((p) => p.price_level === "Retail");
+                const wholesale = baseUnit.prices.find((p) => p.price_level === "Wholesale");
                 if (retail) retailPrice = Number(parseFloat(retail.price) || 0).toFixed(2);
                 if (wholesale) wholesalePrice = Number(parseFloat(wholesale.price) || 0).toFixed(2);
              }
           }
 
-          let stockStatus = "normal";
+          let stockStatus: InventoryItem["stockStatus"] = "normal";
           let stockPercent = 100;
           
           const maxStock = Number(parseFloat(product.max_stock_level) || 0);
@@ -137,14 +173,14 @@ export default function InventoryPage() {
         
         // Map stats
         setStatCards([
-          { icon: "trending_up", iconColor: "text-primary", label: "حركات اليوم", value: statsRes.today_movements.toString(), sub: "", subColor: "text-green-400" },
+          ...(userRole === "ADMIN" ? [{ icon: "trending_up", iconColor: "text-primary", label: "حركات اليوم", value: String(statsRes.today_movements ?? 0), sub: "", subColor: "text-green-400" }] : []),
           { icon: "warning", iconColor: "text-primary", label: "منخفض المخزون", value: statsRes.low_stock_count.toString(), valueColor: "text-primary", sub: "يحتاج إعادة طلب", subColor: "text-[#e2bfb0]/60" },
           { icon: "error", iconColor: "text-[#ffb4ab]", label: "مخزون حرج", value: statsRes.critical_stock_count.toString(), valueColor: "text-[#ffb4ab]", sub: "أصناف نفدت", subColor: "text-[#e2bfb0]/60" },
           { icon: "payments", iconColor: "text-primary", label: "قيمة المخزون", value: parseFloat(statsRes.total_value).toLocaleString(), valueExtra: "ج.م", sub: "تقدير القيمة الحالية", subColor: "text-[#e2bfb0]/60" },
         ]);
 
         // Map transactions
-        const mappedMovements = transactionsRes.map((tx: any) => {
+        const mappedMovements = (transactionsRes as RecentTransaction[]).map((tx) => {
           let typeLabel = "غير معروف";
           let style = "bg-gray-500/10 text-gray-400 border-gray-500/20";
           
@@ -170,8 +206,8 @@ export default function InventoryPage() {
         setStockMovements(mappedMovements);
         
         // Map purchase needed (critical and low stock items)
-        const lowItems = mappedItems.filter((i: any) => i.stockStatus === 'low' || i.stockStatus === 'critical').slice(0, 5);
-        setPurchaseNeeded(lowItems.map((i: any) => ({
+        const lowItems = mappedItems.filter((i) => i.stockStatus === 'low' || i.stockStatus === 'critical').slice(0, 5);
+        setPurchaseNeeded(lowItems.map((i) => ({
           name: i.nameAr,
           stock: `${i.stockQty} ${i.stockUnit}`,
           image: i.image,
@@ -185,22 +221,12 @@ export default function InventoryPage() {
     };
     
     loadData();
-  }, [page, limit, selectedSupplier, selectedCategory, selectedStockStatus]);
+  }, [page, limit, selectedSupplier, selectedCategory, selectedStockStatus, userRole]);
 
-  const handleView = (item: any) => {
-    setSelectedItem(item);
-    setShowEditPanel(true);
-  };
-
-  const handleEdit = (item: any) => {
-    setSelectedItem(item);
-    setShowEditPanel(true);
-  };
-
-  const handleDelete = async (item: any) => {
+  const handleDelete = async (item: InventoryItem) => {
     if (confirm(`هل أنت متأكد من حذف المنتج "${item.nameAr}"؟`)) {
       try {
-        const response = await fetchApi(`/products/${item.id}`, { method: 'DELETE' });
+        await fetchApi(`/products/${item.id}`, { method: 'DELETE' });
         // Since the backend returns 204 No Content, we can just reload
         window.location.reload();
       } catch (err) {
@@ -219,11 +245,11 @@ export default function InventoryPage() {
       <TopNav title="إدارة المخزون" />
 
       {/* Main Content */}
-      <main className="mr-[364px] ml-8 pt-40 pb-16 space-y-10">
+      <main className="app-main space-y-10">
         {/* Header Actions */}
-        <div className="flex items-end justify-between">
+        <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
           <div>
-            <h3 className="text-4xl font-bold text-[#e5e2e1] tracking-tight">قائمة المنتجات</h3>
+            <h3 className="app-heading">قائمة المنتجات</h3>
             <p className="text-[#e2bfb0]/70 mt-2 text-lg">
               إجمالي المسجل:{" "}
               {loading ? (
@@ -234,11 +260,7 @@ export default function InventoryPage() {
               صنف متاح
             </p>
           </div>
-          <div className="flex items-center gap-4">
-            <button className="flex items-center gap-3 px-6 py-3.5 glass text-[#e5e2e1] rounded-full hover:bg-white/10 transition-all font-bold text-sm">
-              <span className="material-symbols-outlined text-sm">download</span>
-              تصدير البيانات
-            </button>
+          <div className="flex flex-wrap items-center gap-4">
             {canEditProduct(userRole) && (
               <>
                 <button
@@ -434,7 +456,7 @@ export default function InventoryPage() {
           {/* Side Panels */}
           <div className="col-span-12 lg:col-span-3 flex flex-col gap-8">
             {/* Stock Movements */}
-            <div className="glass rounded-2xl hi-fi-shadow p-6">
+            {userRole === "ADMIN" && <div className="glass rounded-2xl hi-fi-shadow p-6">
               <div className="flex items-center justify-between mb-6 px-2">
                 <h4 className="font-bold text-lg text-[#e5e2e1] flex items-center gap-2">
                   <span className="material-symbols-outlined text-primary">history</span>
@@ -478,7 +500,7 @@ export default function InventoryPage() {
                   </tbody>
                 </table>
               </div>
-            </div>
+            </div>}
 
             {/* Needs Purchase Order */}
             <div className="glass rounded-2xl hi-fi-shadow p-6">
@@ -497,12 +519,12 @@ export default function InventoryPage() {
                   purchaseNeeded.map((item, i) => (
                     <div
                       key={i}
-                      className="flex items-center justify-between p-4 rounded-2xl bg-white/5 border border-white/5 group hover:bg-white/10 transition-all cursor-pointer"
+                      className="flex items-center justify-between p-4 rounded-2xl bg-white/5 border border-white/5"
                     >
                       <div className="flex items-center gap-4">
                         <div className="w-12 h-12 rounded-2xl bg-[#131313] flex items-center justify-center border border-white/5 overflow-hidden">
                           {item.image ? (
-                            <img src={item.image} alt={item.name} className="w-8 h-8 object-contain" />
+                            <Image src={item.image} alt={item.name} width={32} height={32} className="w-8 h-8 object-contain" unoptimized />
                           ) : (
                             <span className="material-symbols-outlined text-[#e2bfb0]/60">inventory</span>
                           )}
@@ -512,9 +534,6 @@ export default function InventoryPage() {
                           <p className="text-[10px] text-[#ffb4ab]">مخزون: {item.stock}</p>
                         </div>
                       </div>
-                      <button className="w-9 h-9 rounded-full glass group-hover:bg-primary group-hover:text-white transition-all flex items-center justify-center">
-                        <span className="material-symbols-outlined text-sm">add_shopping_cart</span>
-                      </button>
                     </div>
                   ))
                 )}
@@ -524,36 +543,18 @@ export default function InventoryPage() {
         </div>
       </main>
 
-      {/* Floating Action Button */}
-      <button
-        onClick={() => setShowAddPanel(true)}
-        className="fixed bottom-12 left-12 w-20 h-20 bg-primary text-white rounded-full flex items-center justify-center shadow-2xl shadow-primary/40 hover:scale-110 active:scale-95 transition-all z-50 group"
-      >
-        <span
-          className="material-symbols-outlined text-[40px] group-hover:rotate-90 transition-transform"
-          style={{ fontVariationSettings: "'FILL' 1" }}
-        >
-          add
-        </span>
-        <div className="absolute -inset-4 bg-primary/20 blur-2xl rounded-full -z-10 group-hover:bg-primary/30 transition-all" />
-      </button>
-
       {/* Panels */}
       {showAddPanel && <AddProductPanel onClose={() => { setShowAddPanel(false); window.location.reload(); }} />}
       {showEditPanel && selectedItem && (
         <EditProductPanel
           productId={selectedItem.id}
           onClose={() => setShowEditPanel(false)}
-          onSuccess={() => {
-            fetchApi("/products").then(res => {
-              window.location.reload();
-            });
-          }}
+          onSuccess={() => window.location.reload()}
           onDelete={() => handleDelete(selectedItem)}
         />
       )}
       {/* Modals */}
-      {showMovementsModal && <InventoryMovementsModal onClose={() => setShowMovementsModal(false)} />}
+      {userRole === "ADMIN" && showMovementsModal && <InventoryMovementsModal onClose={() => setShowMovementsModal(false)} />}
       {showReceivePanel && <ReceiveStockPanel onClose={() => setShowReceivePanel(false)} onSaved={() => window.location.reload()} />}
     </div>
   );

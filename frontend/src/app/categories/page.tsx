@@ -8,16 +8,18 @@ import { z } from "zod";
 import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
 import { fetchApi } from "@/lib/api";
+import { errorMessage } from "@/lib/errors";
+import { useHydrated } from "@/lib/useHydrated";
 
 // ─── Schemas ──────────────────────────────────────────────────────────────────
 const categorySchema = z.object({
   name_ar: z.string().min(2, "الاسم العربي مطلوب"),
-  name_en: z.string().min(2, "الاسم الإنجليزي مطلوب"),
+  name_en: z.string(),
 });
 
 const subcategorySchema = z.object({
   name_ar: z.string().min(2, "الاسم العربي مطلوب"),
-  name_en: z.string().min(2, "الاسم الإنجليزي مطلوب"),
+  name_en: z.string(),
   category_id: z.string().min(1, "التصنيف الرئيسي مطلوب"),
 });
 
@@ -47,13 +49,11 @@ function CategoryModal({
   onClose: () => void;
   onSuccess: () => void;
 }) {
-  const [mounted, setMounted] = useState(false);
+  const mounted = useHydrated();
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<CategoryFormValues>({
     resolver: zodResolver(categorySchema),
     defaultValues: { name_ar: existing?.name_ar || "", name_en: existing?.name_en || "" },
   });
-
-  useEffect(() => { setMounted(true); }, []);
 
   const onSubmit = async (data: CategoryFormValues) => {
     try {
@@ -64,7 +64,7 @@ function CategoryModal({
       }
       onSuccess();
       onClose();
-    } catch (err: any) { alert(err.message); }
+    } catch (err) { alert(errorMessage(err, "حدث خطأ أثناء الحفظ")); }
   };
 
   if (!mounted) return null;
@@ -79,12 +79,12 @@ function CategoryModal({
         <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
           <div>
             <label className="text-xs text-[#e2bfb0]/60 mb-1 block">الاسم العربي *</label>
-            <input {...register("name_ar")} placeholder="مثال: كتب دراسية" className={`w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border ${errors.name_ar ? "border-red-500/50" : "border-white/10"} focus:outline-none focus:border-primary/50`} />
+            <input {...register("name_ar")} placeholder="اسم التصنيف بالعربية" className={`w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border ${errors.name_ar ? "border-red-500/50" : "border-white/10"} focus:outline-none focus:border-primary/50`} />
             {errors.name_ar && <p className="text-red-400 text-xs mt-1">{errors.name_ar.message}</p>}
           </div>
           <div>
-            <label className="text-xs text-[#e2bfb0]/60 mb-1 block">الاسم الإنجليزي *</label>
-            <input {...register("name_en")} placeholder="e.g. Academic Books" className={`w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border ${errors.name_en ? "border-red-500/50" : "border-white/10"} focus:outline-none focus:border-primary/50`} />
+            <label className="text-xs text-[#e2bfb0]/60 mb-1 block">الاسم بالإنجليزية · اختياري</label>
+            <input {...register("name_en")} placeholder="اسم التصنيف بالإنجليزية" className={`w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border ${errors.name_en ? "border-red-500/50" : "border-white/10"} focus:outline-none focus:border-primary/50`} />
             {errors.name_en && <p className="text-red-400 text-xs mt-1">{errors.name_en.message}</p>}
           </div>
           <div className="flex gap-3 mt-2">
@@ -111,7 +111,7 @@ function SubcategoryModal({
   onClose: () => void;
   onSuccess: () => void;
 }) {
-  const [mounted, setMounted] = useState(false);
+  const mounted = useHydrated();
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<SubcategoryFormValues>({
     resolver: zodResolver(subcategorySchema),
     defaultValues: {
@@ -120,8 +120,6 @@ function SubcategoryModal({
       category_id: existing?.category_id || defaultCategoryId || "",
     },
   });
-
-  useEffect(() => { setMounted(true); }, []);
 
   const onSubmit = async (data: SubcategoryFormValues) => {
     try {
@@ -132,7 +130,7 @@ function SubcategoryModal({
       }
       onSuccess();
       onClose();
-    } catch (err: any) { alert(err.message); }
+    } catch (err) { alert(errorMessage(err, "حدث خطأ أثناء الحفظ")); }
   };
 
   if (!mounted) return null;
@@ -155,12 +153,12 @@ function SubcategoryModal({
           </div>
           <div>
             <label className="text-xs text-[#e2bfb0]/60 mb-1 block">الاسم العربي *</label>
-            <input {...register("name_ar")} placeholder="مثال: رياضيات" className={`w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border ${errors.name_ar ? "border-red-500/50" : "border-white/10"} focus:outline-none focus:border-primary/50`} />
+            <input {...register("name_ar")} placeholder="اسم التصنيف الفرعي بالعربية" className={`w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border ${errors.name_ar ? "border-red-500/50" : "border-white/10"} focus:outline-none focus:border-primary/50`} />
             {errors.name_ar && <p className="text-red-400 text-xs mt-1">{errors.name_ar.message}</p>}
           </div>
           <div>
-            <label className="text-xs text-[#e2bfb0]/60 mb-1 block">الاسم الإنجليزي *</label>
-            <input {...register("name_en")} placeholder="e.g. Mathematics" className={`w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border ${errors.name_en ? "border-red-500/50" : "border-white/10"} focus:outline-none focus:border-primary/50`} />
+            <label className="text-xs text-[#e2bfb0]/60 mb-1 block">الاسم بالإنجليزية · اختياري</label>
+            <input {...register("name_en")} placeholder="اسم التصنيف الفرعي بالإنجليزية" className={`w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border ${errors.name_en ? "border-red-500/50" : "border-white/10"} focus:outline-none focus:border-primary/50`} />
             {errors.name_en && <p className="text-red-400 text-xs mt-1">{errors.name_en.message}</p>}
           </div>
           <div className="flex gap-3 mt-2">
@@ -201,12 +199,22 @@ export default function CategoriesPage() {
     } catch { } finally { setLoading(false); }
   };
 
-  useEffect(() => { loadAll(); }, []);
+  useEffect(() => {
+    Promise.all([fetchApi("/products/categories"), fetchApi("/products/subcategories")])
+      .then(([cats, subs]) => {
+        setCategories(cats);
+        setSubcategories(subs);
+        setExpandedCats(new Set(cats.map((c: Category) => c.id)));
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, []);
 
   const toggleExpand = (id: string) => {
     setExpandedCats(prev => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   };
@@ -216,7 +224,7 @@ export default function CategoriesPage() {
     try {
       await fetchApi(`/products/categories/${id}`, { method: "DELETE" });
       loadAll();
-    } catch (err: any) { alert(err.message); }
+    } catch (err) { alert(errorMessage(err, "تعذر حذف التصنيف")); }
   };
 
   const deleteSubcategory = async (id: string) => {
@@ -224,7 +232,7 @@ export default function CategoriesPage() {
     try {
       await fetchApi(`/products/subcategories/${id}`, { method: "DELETE" });
       loadAll();
-    } catch (err: any) { alert(err.message); }
+    } catch (err) { alert(errorMessage(err, "تعذر حذف التصنيف الفرعي")); }
   };
 
   const getSubsForCategory = (catId: string) => subcategories.filter(s => s.category_id === catId);
@@ -233,14 +241,14 @@ export default function CategoriesPage() {
     <div className="min-h-screen" dir="rtl">
       <SideNav />
       <TopNav title="إدارة التصنيفات" />
-      <main className="mr-[352px] pt-28 pb-8 px-8">
+      <main className="app-main">
         {/* Header */}
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-8">
           <div>
-            <h1 className="text-3xl font-bold text-white">إدارة التصنيفات</h1>
-            <p className="text-[#e2bfb0]/60 mt-1 text-sm">شجرة تصنيفات المنتجات والفئات الفرعية</p>
+            <h1 className="app-heading">إدارة التصنيفات</h1>
+            <p className="app-subtitle">شجرة تصنيفات المنتجات والفئات الفرعية</p>
           </div>
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
             <button onClick={() => setCatModal({ mode: "add" })} className="flex items-center gap-2 glass border border-white/10 text-white font-bold px-5 py-3 rounded-full hover:bg-white/5 transition-all">
               <span className="material-symbols-outlined text-[18px]">add</span>
               تصنيف رئيسي
@@ -310,7 +318,7 @@ export default function CategoriesPage() {
                       </div>
                       <div>
                         <p className="font-bold text-white">{cat.name_ar}</p>
-                        <p className="text-xs text-[#e2bfb0]/50">{cat.name_en} · {subs.length} تصنيف فرعي</p>
+                        <p className="text-xs text-[#e2bfb0]/50">{cat.name_en ? `${cat.name_en} · ` : ""}{subs.length} تصنيف فرعي</p>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -333,7 +341,7 @@ export default function CategoriesPage() {
                       {subs.length === 0 ? (
                         <div className="px-8 py-5 text-xs text-[#e2bfb0]/30 flex items-center gap-2">
                           <span className="material-symbols-outlined text-[14px]">subdirectory_arrow_right</span>
-                          لا توجد تصنيفات فرعية — اضغط "فرعي" لإضافة واحدة
+                          لا توجد تصنيفات فرعية — اضغط &quot;فرعي&quot; لإضافة واحدة
                         </div>
                       ) : subs.map((sub, idx) => (
                         <div key={sub.id} className={`flex items-center justify-between px-8 py-4 ${idx < subs.length - 1 ? "border-b border-white/5" : ""}`}>
@@ -347,7 +355,7 @@ export default function CategoriesPage() {
                             </div>
                             <div>
                               <p className="text-sm font-bold text-[#e2bfb0]/90">{sub.name_ar}</p>
-                              <p className="text-[10px] text-[#e2bfb0]/40">{sub.name_en}</p>
+                              {sub.name_en && <p className="text-[10px] text-[#e2bfb0]/40">{sub.name_en}</p>}
                             </div>
                           </div>
                           <div className="flex items-center gap-2">

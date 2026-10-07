@@ -23,6 +23,7 @@ class InventoryTransactionBase(BaseModel):
 class InventoryTransactionCreate(InventoryTransactionBase):
     supplier_id: Optional[UUID] = None
     unit_cost: Optional[Decimal] = Field(default=None, ge=0, allow_inf_nan=False)
+    request_id: UUID
 
 class InventoryTransactionResponse(InventoryTransactionBase):
     id: UUID
@@ -44,7 +45,7 @@ class InventoryBalanceResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 class InventoryStatsResponse(BaseModel):
-    today_movements: int
+    today_movements: Optional[int]
     low_stock_count: int
     critical_stock_count: int
     total_value: Decimal

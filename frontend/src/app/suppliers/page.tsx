@@ -9,6 +9,8 @@ import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
 import { fetchApi } from "@/lib/api";
 import BrandsManagement from "@/components/BrandsManagement";
+import { errorMessage } from "@/lib/errors";
+import { useHydrated } from "@/lib/useHydrated";
 
 // ─── Zod Schemas ─────────────────────────────────────────────────────────────
 const supplierSchema = z.object({
@@ -72,7 +74,7 @@ interface Payment {
 function AddSupplierPanel({ onClose, onSuccess, isAdmin }: { onClose: () => void; onSuccess: () => void; isAdmin: boolean }) {
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<SupplierFormValues>({
     resolver: zodResolver(supplierSchema),
-    defaultValues: { opening_balance: "0", payment_method: "COD" } as any,
+    defaultValues: { opening_balance: "0", payment_terms_days: "COD" },
   });
 
   const onSubmit = async (data: SupplierFormValues) => {
@@ -90,8 +92,8 @@ function AddSupplierPanel({ onClose, onSuccess, isAdmin }: { onClose: () => void
       });
       onSuccess();
       onClose();
-    } catch (err: any) {
-      alert(err.message || "فشل إنشاء المورد");
+    } catch (err: unknown) {
+      alert(errorMessage(err, "فشل إنشاء المورد"));
     }
   };
 
@@ -195,7 +197,7 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess, isAdmin }: { suppli
   const [detail, setDetail] = useState<SupplierDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"info" | "statement" | "payment">("info");
-  const [mounted, setMounted] = useState(false);
+  const mounted = useHydrated();
 
   const { register, handleSubmit, reset, formState: { errors, isSubmitting } } = useForm<SupplierFormValues>({
     resolver: zodResolver(supplierSchema),
@@ -207,7 +209,6 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess, isAdmin }: { suppli
   });
 
   useEffect(() => {
-    setMounted(true);
     fetchApi(`/suppliers/${supplierId}`).then(data => {
       setDetail(data);
       reset({
@@ -241,7 +242,7 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess, isAdmin }: { suppli
       });
       onSuccess();
       onClose();
-    } catch (err: any) { alert(err.message); }
+    } catch (err: unknown) { alert(errorMessage(err, "فشل تحديث المورد")); }
   };
 
   const onPaySubmit = async (data: PaymentFormValues) => {
@@ -252,9 +253,9 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess, isAdmin }: { suppli
       });
       const updated = await fetchApi(`/suppliers/${supplierId}`);
       setDetail(updated);
-      resetPay({ payment_method: "Cash" } as any);
+      resetPay({ payment_method: "Cash" });
       setActiveTab("statement");
-    } catch (err: any) { alert(err.message); }
+    } catch (err: unknown) { alert(errorMessage(err, "فشل تسجيل الدفعة")); }
   };
 
   if (!mounted) return null;
@@ -312,8 +313,8 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess, isAdmin }: { suppli
 
         {/* Tabs */}
         <div className="flex border-b border-white/10 px-6">
-          {[{ key: "info", label: "البيانات", icon: "person" }, ...(isAdmin ? [{ key: "statement", label: "كشف الحساب", icon: "receipt_long" }, { key: "payment", label: "تسجيل دفعة", icon: "payments" }] : [])].map(tab => (
-            <button key={tab.key} onClick={() => setActiveTab(tab.key as any)}
+          {([{ key: "info", label: "البيانات", icon: "person" }, ...(isAdmin ? [{ key: "statement", label: "كشف الحساب", icon: "receipt_long" }, { key: "payment", label: "تسجيل دفعة", icon: "payments" }] : [])] as { key: "info" | "statement" | "payment"; label: string; icon: string }[]).map(tab => (
+            <button key={tab.key} onClick={() => setActiveTab(tab.key)}
               className={`flex items-center gap-2 px-4 py-4 text-xs font-bold transition-all border-b-2 ${activeTab === tab.key ? "border-primary text-primary" : "border-transparent text-[#e2bfb0]/60 hover:text-white"}`}>
               <span className="material-symbols-outlined text-[16px]">{tab.icon}</span>
               {tab.label}
@@ -471,7 +472,13 @@ export default function SuppliersPage() {
 
   useEffect(() => {
     fetchApi("/auth/me").then(user => setRole(user.role)).catch(() => setRole(null));
-    loadSuppliers();
+    fetchApi("/suppliers?search=&limit=50")
+      .then(res => {
+        setSuppliers(res.data || []);
+        setTotal(res.total || 0);
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false));
   }, []);
 
   const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -484,50 +491,39 @@ export default function SuppliersPage() {
     try {
       await fetchApi(`/suppliers/${id}`, { method: "DELETE" });
       loadSuppliers(search);
-    } catch (err: any) { alert(err.message); }
+    } catch (err: unknown) { alert(errorMessage(err, "فشل حذف المورد")); }
   };
-
-  const statCards = [
-    { icon: "local_shipping", label: "إجمالي الموردين", value: total.toString(), color: "text-primary" },
-    { icon: "payments", label: "الموردين النشطين", value: suppliers.filter(s => !s.notes?.includes("inactive")).length.toString(), color: "text-green-400" },
-  ];
 
   return (
     <div className="min-h-screen" dir="rtl">
       <SideNav />
       <TopNav title="إدارة الموردين" />
-      <main className="mr-[352px] pt-28 pb-8 px-8">
+      <main className="app-main">
         {/* Header */}
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-8">
           <div>
-            <h1 className="text-3xl font-bold text-white">إدارة الموردين</h1>
-            <p className="text-[#e2bfb0]/60 mt-1 text-sm">{role === "ADMIN" ? "إدارة سجلات الموردين وكشوفات الحساب" : "إدارة بيانات الموردين"}</p>
+            <h1 className="app-heading">إدارة الموردين</h1>
+            <p className="app-subtitle">{role === "ADMIN" ? "سجلات الموردين وكشوفات الحساب" : "بيانات الموردين"}</p>
           </div>
-          <button onClick={() => setShowAddPanel(true)} className="flex items-center gap-2 bg-primary text-white font-bold px-6 py-3 rounded-full hover:brightness-110 active:scale-95 transition-all shadow-lg shadow-primary/20">
+          <button onClick={() => setShowAddPanel(true)} className="app-primary-button">
             <span className="material-symbols-outlined text-[20px]">add</span>
             إضافة مورد
           </button>
         </div>
 
         {/* Stat Cards */}
-        <div className="grid grid-cols-2 gap-4 mb-8">
-          {statCards.map((c, i) => (
-            <div key={i} className="glass rounded-2xl p-6 hi-fi-shadow">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center">
-                  <span className={`material-symbols-outlined ${c.color}`}>{c.icon}</span>
-                </div>
-                <div>
-                  <p className="text-[#e2bfb0]/60 text-xs">{c.label}</p>
-                  <p className={`text-2xl font-bold ${c.color}`}>{c.value}</p>
-                </div>
-              </div>
-            </div>
-          ))}
+        <div className="app-panel mb-8 inline-flex min-w-64 items-center gap-4 p-6">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10">
+            <span className="material-symbols-outlined text-primary">local_shipping</span>
+          </div>
+          <div>
+            <p className="app-muted text-xs">إجمالي الموردين</p>
+            <p className="text-2xl font-bold text-primary">{total.toLocaleString("ar-EG")}</p>
+          </div>
         </div>
 
         {/* Search */}
-        <div className="glass rounded-2xl p-4 mb-6 flex items-center gap-3">
+        <div className="glass app-search-focus rounded-2xl p-4 mb-6 flex items-center gap-3">
           <span className="material-symbols-outlined text-[#e2bfb0]/40">search</span>
           <input value={search} onChange={handleSearch} placeholder="بحث بالاسم أو الهاتف أو البريد..." className="flex-1 bg-transparent text-sm text-white placeholder:text-[#e2bfb0]/30 focus:outline-none" />
         </div>
