@@ -1,6 +1,6 @@
 import { fetchApi } from "@/lib/api";
 
-export type LocalPrintType = "customer" | "barcode" | "invoice";
+export type LocalPrintType = "customer" | "barcode" | "invoice" | "stock_receipt";
 
 interface OrderDocument {
   id: string;

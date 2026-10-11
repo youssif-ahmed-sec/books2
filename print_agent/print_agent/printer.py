@@ -93,7 +93,7 @@ class PrinterManager:
         if not order:
             log.warning("No order data provided to native printer.")
             return False
-        if receipt_type not in {"customer", "invoice", "barcode", "test"}:
+        if receipt_type not in {"customer", "invoice", "barcode", "stock_receipt", "test"}:
             raise ValueError("Unsupported print document type")
         if receipt_type == "barcode":
             copies = order.get("quantity", order.get("qty", 1))
@@ -227,6 +227,49 @@ class PrinterManager:
             "order": self._font("arialbd", size(35)),
             "grand": self._font("arialbd", size(33)),
         }
+
+    def _generate_stock_receipt_image(self, receipt: Dict[str, Any]) -> Image.Image:
+        scale = self.RENDER_SCALE
+        width = self.PAPER_WIDTH_PX * scale
+        margin = self.MARGIN * scale
+        rows = self._items(receipt)
+        fonts = self._get_fonts(scale)
+        image = Image.new("RGB", (width, (570 + len(rows) * 100) * scale), "white")
+        draw = ImageDraw.Draw(image)
+        right = width - margin
+        y = self._paste_store_logo(image, margin, scale) + 20 * scale
+
+        def write(value, font=fonts["small"], step=36):
+            nonlocal y
+            value = str(value)
+            draw.text((right, y), value, fill="black", font=font, anchor="ra",
+                      direction="rtl" if is_arabic(value) else "ltr")
+            y += step * scale
+
+        write("مكتبة سعود الشافعي", fonts["order"], 55)
+        write("فاتورة استلام مخزون", fonts["order"], 52)
+        write(f"رقم الاستلام: {receipt.get('id', '')}")
+        date_text, time_text = self._format_date_parts(receipt.get("created_at"))
+        write(f"التاريخ: {date_text} {time_text}")
+        write(f"المورد: {receipt.get('supplier_name', '')}")
+        write(f"المخزن: {receipt.get('warehouse_name', '')}")
+        if receipt.get("supplier_document"):
+            write(f"مستند المورد: {receipt['supplier_document']}")
+        y += 12 * scale
+        draw.line((margin, y, right, y), fill="black", width=scale)
+        y += 18 * scale
+        for row in rows:
+            item = row.get("item") or row
+            name = str(item.get("name") or item.get("product_name") or "")
+            unit = str(item.get("unit") or "")
+            qty = row.get("qty") or row.get("quantity") or 0
+            write(name, fonts["item"], 40)
+            write(f"{qty} {unit}", fonts["small"], 38)
+            draw.line((margin, y, right, y), fill="#dddddd", width=scale)
+            y += 12 * scale
+        write(f"عدد الأصناف: {len(rows)}", fonts["small"])
+        write("هذا المستند للكميات فقط؛ المديونية تُسجل من حساب المورد.", fonts["small"])
+        return image.crop((0, 0, width, min(image.height, y + margin)))
 
     def _generate_receipt_image(self, order: Dict[str, Any], receipt_type: str = "customer") -> Image.Image:
         scale = self.RENDER_SCALE
@@ -707,6 +750,9 @@ class PrinterManager:
                 if receipt_type == "barcode":
                     image = self._generate_barcode_image(order)
                     copies = int(order.get("quantity") or order.get("qty") or 1)
+                elif receipt_type == "stock_receipt":
+                    image = self._generate_stock_receipt_image(order)
+                    copies = 1
                 else:
                     image = self._generate_receipt_image(order, receipt_type)
                     copies = 1

@@ -47,6 +47,7 @@ class InventoryTransaction(Base):
     # Receipt facts must remain stable when the product's current cost or supplier changes.
     supplier_id = Column(UUID(as_uuid=True), ForeignKey("suppliers.id"), nullable=True)
     unit_cost = Column(Numeric(18, 2), nullable=True)
+    supplier_finance_included = Column(Boolean, nullable=False, default=True, server_default="true")
     reference_document = Column(String, nullable=True)
     notes = Column(String, nullable=True)
     request_id = Column(UUID(as_uuid=True), nullable=True)

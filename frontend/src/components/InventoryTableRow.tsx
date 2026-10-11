@@ -8,7 +8,7 @@ import { UserRole, canViewCost, canEditProduct } from "@/utils/auth";
 import { useHydrated } from "@/lib/useHydrated";
 
 interface StockItem {
-  id: string | number;
+  id: string;
   nameAr: string;
   nameEn: string;
   tag: string;
@@ -32,10 +32,11 @@ interface StockItem {
 interface InventoryTableRowProps {
   item: StockItem;
   onEdit: (item: StockItem) => void;
+  onDelete: (item: StockItem) => void;
   userRole: UserRole | null;
 }
 
-export function InventoryTableRow({ item, onEdit, userRole }: InventoryTableRowProps) {
+export function InventoryTableRow({ item, onEdit, onDelete, userRole }: InventoryTableRowProps) {
   const [showBarcodeModal, setShowBarcodeModal] = useState(false);
   const barcodeUnits: BarcodePrintUnit[] = item.units.filter(unit => unit.barcode).map(unit => ({
     id: unit.id, name: unit.unit_name, barcode: unit.barcode, price: unit.retailPrice, copies: 1,
@@ -157,6 +158,18 @@ export function InventoryTableRow({ item, onEdit, userRole }: InventoryTableRowP
             title="تفاصيل المنتج وسجله" aria-label={`تفاصيل ${item.nameAr}`}>
             <span className="material-symbols-outlined text-[18px]">history</span>
           </Link>
+          {userRole === "ADMIN" && (
+            <button
+              type="button"
+              onClick={() => onDelete(item)}
+              className="h-9 px-3 rounded-full border border-[#ffb4ab]/25 text-[#ffb4ab] hover:bg-[#ffb4ab]/10 transition-all flex items-center justify-center gap-1 text-xs font-bold"
+              title={`حذف ${item.nameAr}`}
+              aria-label={`حذف ${item.nameAr}`}
+            >
+              <span className="material-symbols-outlined text-[18px]" aria-hidden="true">delete</span>
+              حذف
+            </button>
+          )}
         </div>
       </td>
 

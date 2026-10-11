@@ -4,11 +4,10 @@ import { notifyError } from "@/lib/notifications";
 
 import { useEffect, useState, useRef } from "react";
 import { createPortal } from "react-dom";
-import { Controller, useForm } from "react-hook-form";
+import { Controller, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import SideNav from "@/components/SideNav";
-import { warehouseOnlyMode } from "@/lib/warehouseMode";
 import TopNav from "@/components/TopNav";
 import { ProductSelect } from "@/components/ProductSelect";
 import { fetchApi } from "@/lib/api";
@@ -57,18 +56,31 @@ interface Supplier {
 
 interface SupplierDetail extends Supplier {
   total_purchases: number;
+  total_manual_debt: number;
   total_payments: number;
   balance: number | null;
   statement_incomplete: boolean;
   unpriced_receipts: number;
   unattributed_receipts: number;
   payments: Payment[];
+  debt_entries: DebtEntry[];
+}
+
+interface DebtEntry {
+  id: string;
+  entry_type: "DEBT" | "REVERSAL";
+  amount: number;
+  note: string;
+  reference_number?: string;
+  reverses_entry_id?: string;
+  created_at: string;
 }
 
 interface Payment {
   id: string;
   amount: number;
   payment_method: string;
+  cash_source?: "SHIFT" | "OUTSIDE_SHIFT" | null;
   reference_number?: string;
   notes?: string;
   payment_date: string;
@@ -89,8 +101,8 @@ function AddSupplierPanel({ onClose, onSuccess, isAdmin }: { onClose: () => void
         body: JSON.stringify({
           ...supplierInfo,
           ...(isAdmin ? {
-            opening_balance: parseFloat(opening_balance || "0"),
-            credit_limit: credit_limit ? parseFloat(credit_limit) : null,
+            opening_balance: opening_balance || "0",
+            credit_limit: credit_limit || null,
           } : {}),
         }),
       });
@@ -102,11 +114,11 @@ function AddSupplierPanel({ onClose, onSuccess, isAdmin }: { onClose: () => void
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-start" dir="rtl">
+    <div className="fixed inset-0 z-[100]" dir="rtl">
       {/* Dark overlay */}
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-[520px] h-full overflow-y-auto flex flex-col shadow-2xl" style={{ marginRight: "320px", background: "#1a1918", borderLeft: "1px solid rgba(255,255,255,0.08)" }}>
-        <div className="flex items-center justify-between p-8 border-b border-white/10 flex-shrink-0">
+      <div className="supplier-drawer absolute inset-y-0 right-0 flex w-full max-w-[520px] flex-col overflow-y-auto shadow-2xl" style={{ background: "#1a1918", borderLeft: "1px solid rgba(255,255,255,0.08)" }}>
+        <div className="flex items-center justify-between p-5 sm:p-8 border-b border-white/10 flex-shrink-0">
           <div>
             <h2 className="text-xl font-bold text-white">إضافة مورد جديد</h2>
             <p className="text-sm text-[#e2bfb0]/60 mt-1">تسجيل بيانات مورد في النظام</p>
@@ -116,7 +128,7 @@ function AddSupplierPanel({ onClose, onSuccess, isAdmin }: { onClose: () => void
           </button>
         </div>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="p-8 flex flex-col gap-6 flex-1">
+        <form onSubmit={handleSubmit(onSubmit)} className="p-5 sm:p-8 flex flex-col gap-6 flex-1">
           {/* Basic Info */}
           <div>
             <p className="text-sm font-bold text-primary mb-4 text-right">البيانات الأساسية</p>
@@ -126,7 +138,7 @@ function AddSupplierPanel({ onClose, onSuccess, isAdmin }: { onClose: () => void
                 <input {...register("name")} placeholder="اسم الشركة أو المورد" className={`w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border ${errors.name ? "border-red-500/50" : "border-white/10"} focus:outline-none focus:border-primary/50`} />
                 {errors.name && <p className="text-red-400 text-xs mt-1">{errors.name.message}</p>}
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="text-xs text-[#e2bfb0]/60 mb-1 block">رقم الهاتف</label>
                   <input {...register("phone")} placeholder="01xxxxxxxxx" className="w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border border-white/10 focus:outline-none focus:border-primary/50" />
@@ -148,7 +160,7 @@ function AddSupplierPanel({ onClose, onSuccess, isAdmin }: { onClose: () => void
           <div>
             <p className="text-sm font-bold text-primary mb-4 text-right">البيانات المالية</p>
             <div className="flex flex-col gap-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="text-xs text-[#e2bfb0]/60 mb-1 block">الرقم الضريبي</label>
                   <input {...register("tax_number")} placeholder="الرقم الضريبي" className="w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border border-white/10 focus:outline-none focus:border-primary/50" />
@@ -161,9 +173,9 @@ function AddSupplierPanel({ onClose, onSuccess, isAdmin }: { onClose: () => void
                   } />
                 </div>
               </div>
-              {isAdmin && <div className="grid grid-cols-2 gap-4">
+              {isAdmin && <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs text-[#e2bfb0]/60 mb-1 block">الرصيد الافتتاحي (ج.م)</label>
+                  <label className="text-xs text-[#e2bfb0]/60 mb-1 block">المديونية السابقة عند إضافة المورد (ج.م)</label>
                   <input {...register("opening_balance")} type="number" step="0.01" defaultValue="0" className={`w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border ${errors.opening_balance ? "border-red-500/50" : "border-white/10"} focus:outline-none focus:border-primary/50`} />
                 </div>
                 <div>
@@ -193,11 +205,18 @@ function AddSupplierPanel({ onClose, onSuccess, isAdmin }: { onClose: () => void
 }
 
 // ─── Edit / Detail Panel ──────────────────────────────────────────────────────
-function EditSupplierPanel({ supplierId, onClose, onSuccess, isAdmin }: { supplierId: string; onClose: () => void; onSuccess: () => void; isAdmin: boolean }) {
+function EditSupplierPanel({ supplierId, onClose, onSuccess, isAdmin, initialTab = "info" }: { supplierId: string; onClose: () => void; onSuccess: () => void; isAdmin: boolean; initialTab?: "info" | "statement" | "debt" | "payment" }) {
   const paymentRequest = useRef<{ fingerprint: string; id: string } | null>(null);
+  const debtRequest = useRef<{ fingerprint: string; id: string } | null>(null);
+  const reversalRequest = useRef<{ fingerprint: string; id: string } | null>(null);
   const [detail, setDetail] = useState<SupplierDetail | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"info" | "statement" | "payment">("info");
+  const [activeTab, setActiveTab] = useState<"info" | "statement" | "debt" | "payment">(initialTab);
+  const [debtDraft, setDebtDraft] = useState({ amount: "", note: "", reference_number: "" });
+  const [debtBusy, setDebtBusy] = useState(false);
+  const [reversingId, setReversingId] = useState<string | null>(null);
+  const [reversalReason, setReversalReason] = useState("");
+  const [cashSource, setCashSource] = useState<"" | "SHIFT" | "OUTSIDE_SHIFT">("");
   const mounted = useHydrated();
 
   const { register, control, handleSubmit, reset, formState: { errors, isSubmitting } } = useForm<SupplierFormValues>({
@@ -208,6 +227,7 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess, isAdmin }: { suppli
     resolver: zodResolver(paymentSchema),
     defaultValues: { payment_method: "Cash" },
   });
+  const paymentMethod = useWatch({ control: payControl, name: "payment_method" });
 
   useEffect(() => {
     fetchApi(`/suppliers/${supplierId}`).then(data => {
@@ -230,14 +250,16 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess, isAdmin }: { suppli
 
   const onSubmit = async (data: SupplierFormValues) => {
     try {
-      const { opening_balance, credit_limit, ...supplierInfo } = data;
+      const supplierInfo = { ...data };
+      const credit_limit = supplierInfo.credit_limit;
+      delete supplierInfo.opening_balance;
+      delete supplierInfo.credit_limit;
       await fetchApi(`/suppliers/${supplierId}`, {
         method: "PUT",
         body: JSON.stringify({
           ...supplierInfo,
           ...(isAdmin ? {
-            opening_balance: parseFloat(opening_balance || "0"),
-            credit_limit: credit_limit ? parseFloat(credit_limit) : null,
+            credit_limit: credit_limit || null,
           } : {}),
         }),
       });
@@ -247,29 +269,95 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess, isAdmin }: { suppli
   };
 
   const onPaySubmit = async (data: PaymentFormValues) => {
+    if (data.payment_method === "Cash" && !cashSource) {
+      notifyError("حدد مصدر الدفعة النقدية قبل تسجيلها.");
+      return;
+    }
     try {
-      const payment = { ...data, amount: parseFloat(data.amount) };
+      const payment = { ...data, amount: data.amount, cash_source: data.payment_method === "Cash" ? cashSource : null };
       const fingerprint = JSON.stringify(payment);
       if (paymentRequest.current?.fingerprint !== fingerprint) paymentRequest.current = { fingerprint, id: crypto.randomUUID() };
       await fetchApi(`/suppliers/${supplierId}/payments`, {
         method: "POST",
         body: JSON.stringify({ ...payment, request_id: paymentRequest.current.id }),
       });
-      paymentRequest.current = null;
       const updated = await fetchApi(`/suppliers/${supplierId}`);
       setDetail(updated);
+      paymentRequest.current = null;
       resetPay({ payment_method: "Cash" });
+      setCashSource("");
       setActiveTab("statement");
     } catch (err: unknown) { notifyError(errorMessage(err, "فشل تسجيل الدفعة")); }
   };
 
+  const refreshDetail = async () => {
+    const updated = await fetchApi(`/suppliers/${supplierId}`);
+    setDetail(updated);
+    onSuccess();
+  };
+
+  const onDebtSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const amount = Number(debtDraft.amount);
+    const note = debtDraft.note.trim();
+    if (!Number.isFinite(amount) || amount <= 0 || !/^\d+(?:\.\d{1,2})?$/.test(debtDraft.amount) || note.length < 2) {
+      notifyError("أدخل مبلغًا موجبًا حتى خانتين عشريتين ووصفًا للمديونية.");
+      return;
+    }
+    const payload = { amount: debtDraft.amount, note, reference_number: debtDraft.reference_number.trim() || null };
+    const fingerprint = JSON.stringify(payload);
+    if (debtRequest.current?.fingerprint !== fingerprint) debtRequest.current = { fingerprint, id: crypto.randomUUID() };
+    setDebtBusy(true);
+    try {
+      await fetchApi(`/suppliers/${supplierId}/debts`, {
+        method: "POST", body: JSON.stringify({ ...payload, request_id: debtRequest.current.id }),
+      });
+      await refreshDetail();
+      debtRequest.current = null;
+      setDebtDraft({ amount: "", note: "", reference_number: "" });
+      setActiveTab("statement");
+    } catch (err: unknown) {
+      notifyError(errorMessage(err, "فشل تسجيل المديونية"));
+    } finally {
+      setDebtBusy(false);
+    }
+  };
+
+  const reverseDebt = async (entry: DebtEntry) => {
+    const reason = reversalReason.trim();
+    if (reason.length < 2) { notifyError("اكتب سبب التصحيح."); return; }
+    const fingerprint = `${entry.id}:${reason}`;
+    if (reversalRequest.current?.fingerprint !== fingerprint) reversalRequest.current = { fingerprint, id: crypto.randomUUID() };
+    setDebtBusy(true);
+    try {
+      await fetchApi(`/suppliers/${supplierId}/debts/${entry.id}/reverse`, {
+        method: "POST", body: JSON.stringify({ request_id: reversalRequest.current.id, reason }),
+      });
+      await refreshDetail();
+      reversalRequest.current = null;
+      setReversingId(null);
+      setReversalReason("");
+    } catch (err: unknown) {
+      notifyError(errorMessage(err, "فشل تصحيح المديونية"));
+    } finally {
+      setDebtBusy(false);
+    }
+  };
+
+  const statementItems = [
+    ...(detail?.debt_entries || []).map(entry => ({ kind: "debt" as const, date: entry.created_at, entry })),
+    ...(detail?.payments || []).map(payment => ({ kind: "payment" as const, date: payment.payment_date, payment })),
+  ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const reversedDebtIds = new Set((detail?.debt_entries || [])
+    .filter(entry => entry.entry_type === "REVERSAL").map(entry => entry.reverses_entry_id));
+
   if (!mounted) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[60] flex items-start justify-start" dir="rtl">
+    <div className="fixed inset-0 z-[100]" dir="rtl">
       {/* Dark overlay */}
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-[600px] h-full overflow-y-auto flex flex-col shadow-2xl" style={{ marginRight: "320px", background: "#1a1918", borderLeft: "1px solid rgba(255,255,255,0.08)" }}>
+      <div className="supplier-drawer absolute inset-y-0 right-0 flex w-full max-w-[600px] flex-col overflow-y-auto shadow-2xl" style={{ background: "#1a1918", borderLeft: "1px solid rgba(255,255,255,0.08)" }}>
         <div className="flex items-center justify-between p-8 border-b border-white/10 flex-shrink-0">
           <div>
             <h2 className="text-xl font-bold text-white">{loading ? "..." : detail?.name}</h2>
@@ -282,16 +370,21 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess, isAdmin }: { suppli
 
         {/* Balance Cards */}
         {isAdmin && detail && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 p-6 border-b border-white/10">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-6 border-b border-white/10">
             <div className="glass rounded-2xl p-4 text-right">
-              <p className="text-sm text-[#e2bfb0]/80 mb-1">الرصيد الافتتاحي</p>
+              <p className="text-sm text-[#e2bfb0]/80 mb-1">المديونية السابقة</p>
               <p className="text-lg font-bold text-white">{Number(detail.opening_balance || 0).toLocaleString()}</p>
               <p className="text-xs text-[#e2bfb0]/60">ج.م</p>
             </div>
             <div className="glass rounded-2xl p-4 text-right">
-              <p className="text-sm text-[#e2bfb0]/80 mb-1">إجمالي المشتريات</p>
+              <p className="text-sm text-[#e2bfb0]/80 mb-1">استلامات قديمة محسوبة</p>
               <p className="text-lg font-bold text-white">{Number(detail.total_purchases).toLocaleString()}</p>
               <p className="text-xs text-[#e2bfb0]/60">{detail.statement_incomplete ? "مشتريات موثقة فقط" : "ج.م"}</p>
+            </div>
+            <div className="glass rounded-2xl p-4 text-right">
+              <p className="text-sm text-[#e2bfb0]/80 mb-1">مديونيات أُضيفت يدويًا</p>
+              <p className="text-lg font-bold text-white">{Number(detail.total_manual_debt || 0).toLocaleString()}</p>
+              <p className="text-xs text-[#e2bfb0]/60">ج.م · استلام المخزن لا يزيد هذا المبلغ</p>
             </div>
             <div className="glass rounded-2xl p-4 text-right">
               <p className="text-sm text-[#e2bfb0]/80 mb-1">إجمالي المدفوعات</p>
@@ -318,7 +411,7 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess, isAdmin }: { suppli
 
         {/* Tabs */}
         <div className="flex border-b border-white/10 px-6">
-          {([{ key: "info", label: "البيانات", icon: "person" }, ...(isAdmin ? [{ key: "statement", label: "كشف الحساب", icon: "receipt_long" }, { key: "payment", label: "تسجيل دفعة", icon: "payments" }] : [])] as { key: "info" | "statement" | "payment"; label: string; icon: string }[]).map(tab => (
+          {([{ key: "info", label: "البيانات", icon: "person" }, ...(isAdmin ? [{ key: "statement", label: "كشف الحساب", icon: "receipt_long" }, { key: "debt", label: "إضافة مديونية", icon: "add_card" }, { key: "payment", label: "تسجيل دفعة", icon: "payments" }] : [])] as { key: "info" | "statement" | "debt" | "payment"; label: string; icon: string }[]).map(tab => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key)}
               className={`flex items-center gap-2 px-4 py-4 text-xs font-bold transition-all border-b-2 ${activeTab === tab.key ? "border-primary text-primary" : "border-transparent text-[#e2bfb0]/60 hover:text-white"}`}>
               <span className="material-symbols-outlined text-[16px]">{tab.icon}</span>
@@ -363,10 +456,10 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess, isAdmin }: { suppli
                   } />
                 </div>
               </div>
-              {isAdmin && <div className="grid grid-cols-2 gap-4">
+              {isAdmin && <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs text-[#e2bfb0]/60 mb-1 block">الرصيد الافتتاحي (ج.م)</label>
-                  <input {...register("opening_balance")} type="number" step="0.01" className="w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border border-white/10 focus:outline-none focus:border-primary/50" />
+                  <label className="text-xs text-[#e2bfb0]/60 mb-1 block">المديونية السابقة عند الإضافة (ثابتة)</label>
+                  <p className="glass rounded-xl px-4 py-3 text-sm text-white border border-white/10">{Number(detail?.opening_balance || 0).toLocaleString()} ج.م</p>
                 </div>
                 <div>
                   <label className="text-xs text-[#e2bfb0]/60 mb-1 block">حد الائتمان (ج.م)</label>
@@ -387,26 +480,45 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess, isAdmin }: { suppli
           {/* Statement Tab */}
           {activeTab === "statement" && (
             <div>
-              {detail?.payments.length === 0 ? (
+              <p className="text-xs text-[#e2bfb0]/70 mb-4">المستحق = المديونية السابقة + الاستلامات القديمة المحسوبة + المديونيات اليدوية − الدفعات. استلامات المخزن الجديدة لا تدخل الحساب.</p>
+              {statementItems.length === 0 ? (
                 <div className="text-center py-16 text-[#e2bfb0]/40">
                   <span className="material-symbols-outlined text-6xl block mb-4">receipt_long</span>
-                  <p>لا توجد مدفوعات مسجلة بعد</p>
+                  <p>لا توجد حركات مالية مسجلة بعد</p>
                 </div>
               ) : (
                 <div className="flex flex-col gap-3">
-                  {detail?.payments.map(p => (
-                    <div key={p.id} className="glass rounded-2xl p-4 flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-green-500/10 flex items-center justify-center">
-                          <span className="material-symbols-outlined text-green-400 text-[18px]">payments</span>
-                        </div>
-                        <div>
-                          <p className="text-sm font-bold text-white">{p.payment_method}</p>
-                          <p className="text-xs text-[#e2bfb0]/70">{new Date(p.payment_date).toLocaleDateString("ar-EG")}{p.reference_number ? ` · ${p.reference_number}` : ""}</p>
-                          {p.notes && <p className="text-xs text-[#e2bfb0]/60">{p.notes}</p>}
-                        </div>
+                  {statementItems.map(item => item.kind === "payment" ? (
+                    <div key={`payment-${item.payment.id}`} className="glass rounded-2xl p-4 flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-bold text-white">دفعة · {item.payment.payment_method}{item.payment.payment_method === "Cash" ? item.payment.cash_source === "OUTSIDE_SHIFT" ? " · خارج الوردية" : " · من الوردية" : ""}</p>
+                        <p className="text-xs text-[#e2bfb0]/70">{new Date(item.payment.payment_date).toLocaleDateString("ar-EG")}{item.payment.reference_number ? ` · ${item.payment.reference_number}` : ""}</p>
+                        {item.payment.notes && <p className="text-xs text-[#e2bfb0]/60">{item.payment.notes}</p>}
                       </div>
-                      <p className="font-bold text-green-400">+{Number(p.amount).toLocaleString()} ج.م</p>
+                      <p className="font-bold text-green-400 whitespace-nowrap">−{Number(item.payment.amount).toLocaleString()} ج.م</p>
+                    </div>
+                  ) : (
+                    <div key={`debt-${item.entry.id}`} className="glass rounded-2xl p-4 space-y-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-bold text-white">{item.entry.entry_type === "DEBT" ? "مديونية مضافة" : "تصحيح مديونية"}</p>
+                          <p className="text-xs text-[#e2bfb0]/70">{new Date(item.entry.created_at).toLocaleDateString("ar-EG")}{item.entry.reference_number ? ` · ${item.entry.reference_number}` : ""}</p>
+                          <p className="text-xs text-[#e2bfb0]/70 mt-1">{item.entry.note}</p>
+                        </div>
+                        <p className={`font-bold whitespace-nowrap ${item.entry.entry_type === "DEBT" ? "text-[#ffb4ab]" : "text-green-400"}`}>
+                          {item.entry.entry_type === "DEBT" ? "+" : "−"}{Number(item.entry.amount).toLocaleString()} ج.م
+                        </p>
+                      </div>
+                      {item.entry.entry_type === "DEBT" && !reversedDebtIds.has(item.entry.id) && (
+                        reversingId === item.entry.id ? (
+                          <div className="flex flex-wrap gap-2">
+                            <input value={reversalReason} onChange={event => setReversalReason(event.target.value)} placeholder="سبب التصحيح" maxLength={500}
+                              className="app-field min-w-0 flex-1" aria-label="سبب تصحيح المديونية" />
+                            <button type="button" disabled={debtBusy} onClick={() => reverseDebt(item.entry)} className="app-secondary-button">تأكيد التصحيح</button>
+                            <button type="button" onClick={() => { setReversingId(null); setReversalReason(""); }} className="app-secondary-button">إلغاء</button>
+                          </div>
+                        ) : <button type="button" onClick={() => setReversingId(item.entry.id)} className="text-xs text-[#e2bfb0]/70 hover:text-white">تصحيح هذا الإدخال</button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -414,9 +526,31 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess, isAdmin }: { suppli
             </div>
           )}
 
+          {activeTab === "debt" && (
+            <form onSubmit={onDebtSubmit} className="flex flex-col gap-4">
+              <p className="text-sm text-[#e2bfb0]/70">سجّل مبلغ الفاتورة أو المديونية الجديدة هنا. هذه الحركة مالية فقط ولا تغيّر كمية المخزون.</p>
+              <label className="text-sm text-[#e2bfb0]/80">قيمة المديونية (ج.م)
+                <input type="number" min="0.01" step="0.01" required value={debtDraft.amount}
+                  onChange={event => setDebtDraft(previous => ({ ...previous, amount: event.target.value }))}
+                  className="app-field mt-2 w-full" />
+              </label>
+              <label className="text-sm text-[#e2bfb0]/80">وصف الفاتورة أو سبب المديونية
+                <input required minLength={2} maxLength={500} value={debtDraft.note}
+                  onChange={event => setDebtDraft(previous => ({ ...previous, note: event.target.value }))}
+                  className="app-field mt-2 w-full" placeholder="مثلاً: فاتورة توريد 15 أكتوبر" />
+              </label>
+              <label className="text-sm text-[#e2bfb0]/80">رقم الفاتورة أو المرجع · اختياري
+                <input maxLength={100} value={debtDraft.reference_number}
+                  onChange={event => setDebtDraft(previous => ({ ...previous, reference_number: event.target.value }))}
+                  className="app-field mt-2 w-full" />
+              </label>
+              <button type="submit" disabled={debtBusy} className="app-primary-button justify-center">{debtBusy ? "جاري التسجيل..." : "تسجيل المديونية"}</button>
+            </form>
+          )}
+
           {/* Payment Tab */}
           {activeTab === "payment" && (
-            <form onSubmit={handlePaySubmit(onPaySubmit)} className="flex flex-col gap-4">
+            <form onSubmit={event => { void handlePaySubmit(onPaySubmit)(event); }} className="flex flex-col gap-4">
               <div>
                 <label className="text-xs text-[#e2bfb0]/60 mb-1 block">المبلغ (ج.م) *</label>
                 <input {...regPay("amount")} type="number" step="0.01" placeholder="0.00" className={`w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border ${payErrors.amount ? "border-red-500/50" : "border-white/10"} focus:outline-none focus:border-primary/50`} />
@@ -428,7 +562,11 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess, isAdmin }: { suppli
                   <ProductSelect label="طريقة الدفع" value={field.value} onChange={field.onChange} placeholder="اختر طريقة الدفع"
                     options={[{ value: "Cash", label: "نقداً" }, { value: "Bank Transfer", label: "تحويل بنكي" }, { value: "Check", label: "شيك" }, { value: "Other", label: "أخرى" }]} />
                 } />
-                <p className="mt-2 text-xs text-[#e2bfb0]/60">الدفع النقدي يتطلب وردية نقدية مفتوحة باسمك ورصيدًا كافيًا في الدرج.</p>
+                {paymentMethod === "Cash" && <div className="mt-3">
+                  <ProductSelect label="مصدر المبلغ النقدي" value={cashSource} onChange={value => setCashSource(value as "" | "SHIFT" | "OUTSIDE_SHIFT")}
+                    placeholder="حدد مصدر الدفعة" options={[{ value: "OUTSIDE_SHIFT", label: "خارج الوردية" }, { value: "SHIFT", label: "من درج الوردية" }]} />
+                  <p className="mt-2 text-xs text-[#e2bfb0]/60">الدفعة من درج الوردية تتطلب وردية مفتوحة ورصيدًا كافيًا. الدفعة خارج الوردية تُسجل في كشف المورد فقط.</p>
+                </div>}
               </div>
               <div>
                 <label className="text-xs text-[#e2bfb0]/60 mb-1 block">رقم المرجع / الشيك</label>
@@ -460,6 +598,11 @@ export default function SuppliersPage() {
   const [search, setSearch] = useState("");
   const [showAddPanel, setShowAddPanel] = useState(false);
   const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null);
+  const [supplierTab, setSupplierTab] = useState<"info" | "statement" | "debt" | "payment">("info");
+  const openSupplier = (id: string, tab: "info" | "statement" | "debt" | "payment" = "info") => {
+    setSupplierTab(tab);
+    setSelectedSupplierId(id);
+  };
 
   const loadSuppliers = async (q = "") => {
     setLoading(true);
@@ -505,7 +648,7 @@ export default function SuppliersPage() {
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-8">
           <div>
             <h1 className="app-heading">إدارة الموردين</h1>
-            <p className="app-subtitle">{role === "ADMIN" && !warehouseOnlyMode ? "سجلات الموردين وكشوفات الحساب" : "بيانات الموردين"}</p>
+            <p className="app-subtitle">{role === "ADMIN" ? "سجلات الموردين وكشوفات الحساب" : "بيانات الموردين"}</p>
           </div>
           <button onClick={() => setShowAddPanel(true)} className="app-primary-button">
             <span className="material-symbols-outlined text-[20px]">add</span>
@@ -561,7 +704,7 @@ export default function SuppliersPage() {
                           <span className="material-symbols-outlined text-primary text-[18px]">local_shipping</span>
                         </div>
                         <div>
-                          <p className="font-bold text-white text-sm">{s.name}</p>
+                          <button type="button" onClick={() => openSupplier(s.id, role === "ADMIN" ? "statement" : "info")} className="font-bold text-white text-sm hover:text-primary text-right underline-offset-4 hover:underline" aria-label={`فتح تفاصيل المورد ${s.name}`}>{s.name}</button>
                           {s.tax_number && <p className="text-xs text-[#e2bfb0]/70">رقم ضريبي: {s.tax_number}</p>}
                         </div>
                       </div>
@@ -580,9 +723,8 @@ export default function SuppliersPage() {
                     </td>
                     <td className="px-8 py-5">
                       <div className="flex items-center justify-center gap-2">
-                        <button onClick={() => setSelectedSupplierId(s.id)} className="w-9 h-9 rounded-full glass flex items-center justify-center text-[#e2bfb0]/60 hover:text-primary transition-all" title="عرض / تعديل">
-                          <span className="material-symbols-outlined text-[18px]">edit</span>
-                        </button>
+                        <button onClick={() => openSupplier(s.id, role === "ADMIN" ? "statement" : "info")} className="app-secondary-button text-xs" title="تفاصيل المورد وكشف حسابه">تفاصيل {role === "ADMIN" ? "وكشف الحساب" : ""}</button>
+                        {role === "ADMIN" && <button onClick={() => openSupplier(s.id, "debt")} className="app-secondary-button text-xs">إضافة مديونية</button>}
                         <button onClick={() => handleDelete(s.id)} className="w-9 h-9 rounded-full glass flex items-center justify-center text-[#e2bfb0]/60 hover:text-[#ffb4ab] transition-all" title="حذف">
                           <span className="material-symbols-outlined text-[18px]">delete</span>
                         </button>
@@ -602,12 +744,13 @@ export default function SuppliersPage() {
       </main>
 
       {/* Add Panel */}
-      {showAddPanel && role && <AddSupplierPanel isAdmin={role === "ADMIN" && !warehouseOnlyMode} onClose={() => setShowAddPanel(false)} onSuccess={() => loadSuppliers(search)} />}
+      {showAddPanel && role && <AddSupplierPanel isAdmin={role === "ADMIN"} onClose={() => setShowAddPanel(false)} onSuccess={() => loadSuppliers(search)} />}
 
       {/* Edit Panel */}
       {selectedSupplierId && role && (
         <EditSupplierPanel
-          isAdmin={role === "ADMIN" && !warehouseOnlyMode}
+          isAdmin={role === "ADMIN"}
+          initialTab={supplierTab}
           supplierId={selectedSupplierId}
           onClose={() => setSelectedSupplierId(null)}
           onSuccess={() => loadSuppliers(search)}

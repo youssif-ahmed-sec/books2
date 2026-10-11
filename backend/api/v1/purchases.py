@@ -148,17 +148,14 @@ async def receive_purchase(
         await db.flush()
     InventoryService.record_movement(
         db, balance, payload.quantity, user.id, TransactionTypeEnum.RECEIVING,
-        supplier_id=order.supplier_id, unit_cost=payload.unit_cost,
+        supplier_id=order.supplier_id,
         reference_document=str(order.id), notes="Purchase order receipt",
         request_id=payload.request_id, request_fingerprint=fingerprint,
     )
-    previous_cost = Decimal(str(product.cost or 0))
-    product.cost = payload.unit_cost
     order.received_quantity = next_quantity
     order.status = "RECEIVED" if next_quantity == Decimal(str(order.quantity)) else "PARTIALLY_RECEIVED"
     db.add(AuditLog(user_id=user.id, action="RECEIVE_PURCHASE", entity_type="PurchaseOrder", entity_id=str(order.id),
-                    old_value={"product_cost": str(previous_cost)},
-                    new_value={"quantity": str(payload.quantity), "unit_cost": str(payload.unit_cost)}))
+                    new_value={"quantity": str(payload.quantity)}))
     try:
         await db.commit()
     except IntegrityError:

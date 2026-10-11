@@ -16,10 +16,12 @@ def visible_supplier_detail(data: dict, role: RoleEnum) -> SupplierDetailRespons
         response.opening_balance = None
         response.credit_limit = None
         response.total_purchases = None
+        response.total_manual_debt = None
         response.total_payments = None
         response.balance = None
         response.statement_incomplete = False
         response.unpriced_receipts = 0
         response.unattributed_receipts = 0
         response.payments = []
+        response.debt_entries = []
     return response

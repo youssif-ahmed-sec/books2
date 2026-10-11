@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field
-from typing import List, Optional
+from typing import List, Optional, Literal
 from uuid import UUID
 from datetime import datetime
 from decimal import Decimal
@@ -202,6 +202,7 @@ class SupplierPaymentCreate(BaseModel):
     request_id: UUID
     amount: Decimal = Field(gt=0, allow_inf_nan=False)
     payment_method: PaymentMethodEnum = PaymentMethodEnum.CASH
+    cash_source: Optional[Literal["SHIFT", "OUTSIDE_SHIFT"]] = None
     reference_number: Optional[str] = None
     notes: Optional[str] = None
 
@@ -210,19 +211,47 @@ class SupplierPaymentResponse(BaseModel):
     supplier_id: UUID
     amount: Decimal
     payment_method: str
+    cash_source: Optional[str] = None
     reference_number: Optional[str] = None
     notes: Optional[str] = None
     payment_date: datetime
     model_config = ConfigDict(from_attributes=True)
 
+
+class SupplierDebtCreate(BaseModel):
+    request_id: UUID
+    amount: Decimal = Field(gt=0, allow_inf_nan=False, max_digits=18, decimal_places=2)
+    note: str = Field(min_length=2, max_length=500)
+    reference_number: Optional[str] = Field(default=None, max_length=100)
+
+
+class SupplierDebtReverse(BaseModel):
+    request_id: UUID
+    reason: str = Field(min_length=2, max_length=500)
+
+
+class SupplierDebtEntryResponse(BaseModel):
+    id: UUID
+    supplier_id: UUID
+    entry_type: str
+    amount: Decimal
+    note: str
+    reference_number: Optional[str] = None
+    reverses_entry_id: Optional[UUID] = None
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
 class SupplierDetailResponse(SupplierResponse):
     total_purchases: Optional[Decimal] = None
+    total_manual_debt: Optional[Decimal] = None
     total_payments: Optional[Decimal] = None
     balance: Optional[Decimal] = None
     statement_incomplete: bool = False
     unpriced_receipts: int = 0
     unattributed_receipts: int = 0
     payments: List[SupplierPaymentResponse] = []
+    debt_entries: List[SupplierDebtEntryResponse] = []
     model_config = ConfigDict(from_attributes=True)
 
 class PaginatedSupplierResponse(BaseModel):

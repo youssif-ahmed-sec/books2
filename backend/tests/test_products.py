@@ -62,7 +62,7 @@ async def test_create_product(async_client):
 
 
 @pytest.mark.asyncio
-async def test_receipt_keeps_supplier_purchase_value_after_product_cost_changes(async_client):
+async def test_receipt_changes_stock_without_supplier_debt_or_product_cost(async_client):
     import uuid
 
     supplier_response = await async_client.post("/api/v1/suppliers", json={"name": "Receipt test supplier"})
@@ -92,10 +92,12 @@ async def test_receipt_keeps_supplier_purchase_value_after_product_cost_changes(
         "supplier_id": supplier_id,
         "transaction_type": "Receiving",
         "quantity_changed": "2",
-        "unit_cost": "7",
     })
     assert receipt_response.status_code == 201, receipt_response.text
     assert "unit_cost" not in receipt_response.json()
+    before_edit = await async_client.get(f"/api/v1/products/{product_id}")
+    assert before_edit.status_code == 200
+    assert Decimal(before_edit.json()["cost"]) == Decimal("5")
 
     updated = await async_client.put(f"/api/v1/products/{product_id}", json={"cost": "100"})
     assert updated.status_code == 200, updated.text
@@ -103,6 +105,6 @@ async def test_receipt_keeps_supplier_purchase_value_after_product_cost_changes(
     statement_response = await async_client.get(f"/api/v1/suppliers/{supplier_id}")
     assert statement_response.status_code == 200, statement_response.text
     statement = statement_response.json()
-    assert Decimal(statement["total_purchases"]) == Decimal("14")
-    assert Decimal(statement["balance"]) == Decimal("14")
+    assert Decimal(statement["total_purchases"]) == Decimal("0")
+    assert Decimal(statement["balance"]) == Decimal("0")
     assert statement["statement_incomplete"] is False

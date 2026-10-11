@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.pool import StaticPool
 
-from api.v1.inventory import create_inventory_transaction
+from api.v1.inventory import create_inventory_transaction, create_stock_receipt, get_stock_receipt
 from core.dependencies import get_current_user
 from core.security import hash_password
 from database import get_db
@@ -21,7 +21,7 @@ from models.product import Product, ProductUnit, ProductPrice, ProductBundleComp
 from models.inventory import InventoryBalance, InventoryTransaction, Warehouse
 from models.order import Order, OrderItem, OrderStatusEnum
 from models.financial import CashShift
-from schemas.inventory import InventoryTransactionCreate
+from schemas.inventory import InventoryTransactionCreate, StockReceiptCreate
 from schemas.order import OrderCreate, OrderDraftCreate, OrderStatusUpdate, OrderPreparation
 from services.order_service import OrderService
 
@@ -142,7 +142,7 @@ async def test_receipt_retry_returns_original_movement(database):
         await db.commit()
         payload = InventoryTransactionCreate(
             request_id=request_id, product_id=product_id, warehouse_id=warehouse_id,
-            transaction_type="Receiving", quantity_changed=2, supplier_id=supplier_id, unit_cost=7,
+            transaction_type="Receiving", quantity_changed=2, supplier_id=supplier_id,
         )
         first = await create_inventory_transaction(payload, db, user)
         replay = await create_inventory_transaction(payload, db, user)
@@ -150,8 +150,76 @@ async def test_receipt_retry_returns_original_movement(database):
         assert (await db.execute(select(InventoryBalance.current_stock))).scalar_one() == 2
         assert len((await db.execute(select(InventoryTransaction))).scalars().all()) == 1
         with pytest.raises(HTTPException) as error:
-            await create_inventory_transaction(payload.model_copy(update={"unit_cost": Decimal("9")}), db, user)
+            await create_inventory_transaction(payload.model_copy(update={"quantity_changed": Decimal("9")}), db, user)
         assert error.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_stock_receipt_adds_existing_quantity_atomically_without_pricing(database):
+    user_id, warehouse_id, first_id, second_id, supplier_id = [uuid4() for _ in range(5)]
+    async with database() as db:
+        user = User(id=user_id, role=RoleEnum.INVENTORY_CONTROLLER)
+        db.add_all([
+            user, Warehouse(id=warehouse_id, name="Main"), Supplier(id=supplier_id, name="Supplier"),
+            Product(id=first_id, sku="RCV-A", name_en="Pen", name_ar="قلم", base_unit="Piece", cost=Decimal("7")),
+            Product(id=second_id, sku="RCV-B", name_en="Notebook", name_ar="دفتر", base_unit="Piece", cost=Decimal("9")),
+        ])
+        await db.flush()
+        db.add(InventoryBalance(product_id=first_id, warehouse_id=warehouse_id, current_stock=5))
+        await db.commit()
+        first = StockReceiptCreate(request_id=uuid4(), supplier_id=supplier_id, warehouse_id=warehouse_id,
+                                   lines=[{"product_id": first_id, "quantity": "3"},
+                                          {"product_id": second_id, "quantity": "2"}])
+        with pytest.raises(HTTPException) as missing:
+            await create_stock_receipt(StockReceiptCreate(
+                request_id=uuid4(), supplier_id=supplier_id, warehouse_id=warehouse_id,
+                lines=[{"product_id": first_id, "quantity": "3"},
+                       {"product_id": uuid4(), "quantity": "2"}],
+            ), db, user)
+        assert missing.value.status_code == 404
+        assert (await db.execute(select(InventoryBalance.current_stock))).scalar_one() == Decimal("5")
+        document = await create_stock_receipt(first, db, user)
+        assert len(document["lines"]) == 2
+        assert len((await get_stock_receipt(first.request_id, db, user))["lines"]) == 2
+        assert (await create_stock_receipt(first, db, user))["id"] == str(first.request_id)
+        second = StockReceiptCreate(request_id=uuid4(), supplier_id=supplier_id, warehouse_id=warehouse_id,
+                                    lines=[{"product_id": first_id, "quantity": "4"}])
+        await create_stock_receipt(second, db, user)
+        balances = {row.product_id: row.current_stock for row in
+                    (await db.execute(select(InventoryBalance))).scalars().all()}
+        assert balances[first_id] == Decimal("12")
+        assert balances[second_id] == Decimal("2")
+        products = {row.id: row.cost for row in (await db.execute(select(Product))).scalars().all()}
+        assert products[first_id] == Decimal("7") and products[second_id] == Decimal("9")
+        movements = (await db.execute(select(InventoryTransaction))).scalars().all()
+        assert len(movements) == 3
+        assert all(row.unit_cost is None and row.supplier_finance_included is False for row in movements)
+        with pytest.raises(HTTPException) as error:
+            await create_stock_receipt(StockReceiptCreate(
+                request_id=first.request_id, supplier_id=supplier_id, warehouse_id=warehouse_id,
+                lines=[{"product_id": first_id, "quantity": "8"}],
+            ), db, user)
+        assert error.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_stock_receipt_rejects_cashier_role(database):
+    async def isolated_db():
+        async with database() as db:
+            yield db
+
+    app.dependency_overrides[get_db] = isolated_db
+    app.dependency_overrides[get_current_user] = lambda: User(id=uuid4(), role=RoleEnum.CASHIER_ORDERS)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post("/api/v1/inventory/receipts", json={
+                "request_id": str(uuid4()), "supplier_id": str(uuid4()), "warehouse_id": str(uuid4()),
+                "lines": [{"product_id": str(uuid4()), "quantity": "1"}],
+            })
+            assert response.status_code == 403
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_current_user, None)
 
 
 @pytest.mark.asyncio

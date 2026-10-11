@@ -65,8 +65,8 @@ async def test_warehouse_roles_movements_transfer_count_and_concurrent_issue():
 
             receipt = {"request_id": str(uuid4()), "product_id": str(product_id),
                        "warehouse_id": str(source_id), "transaction_type": "Receiving",
-                       "quantity_changed": "2.00", "supplier_id": str(supplier_id), "unit_cost": "7.25"}
-            assert (await client.post("/api/v1/inventory/transactions", json={**receipt, "unit_cost": None})).status_code == 422
+                       "quantity_changed": "2.00", "supplier_id": str(supplier_id)}
+            assert (await client.post("/api/v1/inventory/transactions", json={**receipt, "unit_cost": "7.25"})).status_code == 422
             assert (await client.post("/api/v1/inventory/transactions", json={**receipt, "quantity_changed": "0.001"})).status_code == 422
             assert (await client.post("/api/v1/inventory/transactions", json={**receipt, "quantity_changed": "-1"})).status_code == 400
             assert (await client.post("/api/v1/inventory/transactions", json={**receipt, "warehouse_id": str(inactive_id)})).status_code == 404
@@ -107,7 +107,7 @@ async def test_warehouse_roles_movements_transfer_count_and_concurrent_issue():
             assert (await client.delete(f"/api/v1/products/{product_id}")).status_code == 409
             assert (await client.post(f"/api/v1/suppliers/{supplier_id}/payments", json={
                 "request_id": str(uuid4()), "amount": "1", "payment_method": "Cash",
-            })).status_code == 404
+            })).status_code == 422
 
         async with AsyncSessionLocal() as db:
             rows = (await db.execute(select(InventoryBalance).where(InventoryBalance.product_id == product_id))).scalars().all()
@@ -153,7 +153,7 @@ async def test_purchase_approval_receipt_limit_and_archive_rule():
             assert (await client.post(f"/api/v1/purchases/{purchase_id}/approve")).status_code == 409
             assert (await client.post(f"/api/v1/purchases/{purchase_id}/place")).status_code == 200
             act_as(controller_id, RoleEnum.INVENTORY_CONTROLLER)
-            payload = {"request_id": str(uuid4()), "warehouse_id": str(warehouse_id), "quantity": "1.00", "unit_cost": "12.50"}
+            payload = {"request_id": str(uuid4()), "warehouse_id": str(warehouse_id), "quantity": "1.00"}
             assert (await client.post(f"/api/v1/purchases/{purchase_id}/receive", json={**payload, "unit_cost": "12.501"})).status_code == 422
             first = await client.post(f"/api/v1/purchases/{purchase_id}/receive", json=payload)
             assert first.status_code == 200 and first.json()["received_quantity"] == "1.00", first.text
@@ -168,10 +168,10 @@ async def test_purchase_approval_receipt_limit_and_archive_rule():
             balance = (await db.execute(select(InventoryBalance).where(InventoryBalance.product_id == product_id))).scalar_one()
             product = (await db.execute(select(Product).where(Product.id == product_id))).scalar_one()
             assert order.received_quantity == Decimal("2") and balance.current_stock == Decimal("2")
-            assert product.cost == Decimal("12.50")
+            assert product.cost == Decimal("0")
             receipts = (await db.execute(select(InventoryTransaction).where(
                 InventoryTransaction.reference_document == str(purchase_id),
             ))).scalars().all()
-            assert len(receipts) == 2 and all(row.supplier_id == supplier_id and row.unit_cost == Decimal("12.50") for row in receipts)
+            assert len(receipts) == 2 and all(row.supplier_id == supplier_id and row.unit_cost is None for row in receipts)
     finally:
         app.dependency_overrides.pop(get_current_user, None)

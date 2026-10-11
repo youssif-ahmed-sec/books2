@@ -37,6 +37,7 @@ class InventoryService:
             quantity_changed=delta,
             supplier_id=supplier_id,
             unit_cost=unit_cost,
+            supplier_finance_included=False,
             reference_document=reference_document,
             notes=notes,
             request_id=request_id,

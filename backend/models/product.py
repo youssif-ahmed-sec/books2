@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Enum, Numeric, UniqueConstraint
+from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Enum, Numeric, UniqueConstraint, CheckConstraint, Index
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
@@ -61,12 +61,33 @@ class SupplierPayment(Base):
     supplier_id = Column(UUID(as_uuid=True), ForeignKey("suppliers.id"), nullable=False)
     amount = Column(Numeric(18, 2), nullable=False)
     payment_method = Column(Enum(PaymentMethodEnum), nullable=False, default=PaymentMethodEnum.CASH)
+    cash_source = Column(String(16), nullable=True)
     reference_number = Column(String, nullable=True)
     notes = Column(String, nullable=True)
     payment_date = Column(DateTime(timezone=True), server_default=func.now())
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     supplier = relationship("Supplier", back_populates="payments")
+
+
+class SupplierDebtEntry(Base):
+    __tablename__ = "supplier_debt_entries"
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="ck_supplier_debt_entries_positive_amount"),
+        CheckConstraint("entry_type IN ('DEBT', 'REVERSAL')", name="ck_supplier_debt_entries_type"),
+        UniqueConstraint("reverses_entry_id", name="uq_supplier_debt_entries_reversal"),
+        Index("ix_supplier_debt_entries_supplier_created", "supplier_id", "created_at"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True)
+    supplier_id = Column(UUID(as_uuid=True), ForeignKey("suppliers.id"), nullable=False)
+    entry_type = Column(String(16), nullable=False)
+    amount = Column(Numeric(18, 2), nullable=False)
+    note = Column(String(500), nullable=False)
+    reference_number = Column(String(100), nullable=True)
+    reverses_entry_id = Column(UUID(as_uuid=True), ForeignKey("supplier_debt_entries.id"), nullable=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class Product(Base):

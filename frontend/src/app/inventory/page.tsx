@@ -53,7 +53,8 @@ interface CatalogProduct {
 interface Balance { product_id: string; current_stock: string }
 interface RecentTransaction { transaction_type: string; product_name?: string; created_at: string }
 interface StockMovement { product: string; type: string; date: string; typeStyle: string }
-interface PurchaseNeeded { name: string; stock: string; image?: string }
+interface PurchaseNeeded { id: string; name: string; stock: string; image?: string }
+interface StockAlert { product_id: string; name: string; stock: number; base_unit: string; image_url?: string }
 interface SupplierOption { id: string; name: string }
 interface CategoryOption { id: string; name_ar: string }
 
@@ -72,6 +73,7 @@ export default function InventoryPage() {
   ]);
   const [stockMovements, setStockMovements] = useState<StockMovement[]>([]);
   const [purchaseNeeded, setPurchaseNeeded] = useState<PurchaseNeeded[]>([]);
+  const [purchaseNeededLoading, setPurchaseNeededLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   const hydrated = useHydrated();
   const userRole: UserRole | null = hydrated ? getUserRole() : null;
@@ -225,14 +227,6 @@ export default function InventoryPage() {
         });
         setStockMovements(mappedMovements);
         
-        // Map purchase needed (critical and low stock items)
-        const lowItems = mappedItems.filter((i) => i.stockStatus === 'low' || i.stockStatus === 'critical').slice(0, 5);
-        setPurchaseNeeded(lowItems.map((i) => ({
-          name: i.nameAr,
-          stock: `${i.stockQty} ${i.stockUnit}`,
-          image: i.image,
-        })));
-
       } catch (error) {
         console.error("Failed to load inventory data:", error);
         notifyError(error instanceof Error ? error.message : "تعذر تحميل بيانات المخزون");
@@ -242,20 +236,52 @@ export default function InventoryPage() {
   }, [page, limit, selectedSupplier, selectedCategory, selectedStockStatus, userRole]);
 
   useEffect(() => {
-    loadData();
+    const timer = window.setTimeout(() => { void loadData(); }, 0);
+    return () => window.clearTimeout(timer);
   }, [loadData]);
 
-  const refreshData = useCallback(() => { void loadData(false); }, [loadData]);
+  const loadPurchaseNeeded = useCallback(async () => {
+    if (!userRole) return;
+    setPurchaseNeededLoading(true);
+    try {
+      const alerts = await fetchApi("/reports/stock-alerts") as StockAlert[];
+      setPurchaseNeeded(alerts.map((alert) => ({
+        id: alert.product_id,
+        name: alert.name,
+        stock: `${Number(alert.stock).toLocaleString("ar-EG", { maximumFractionDigits: 3 })} ${alert.base_unit}`,
+        image: alert.image_url,
+      })));
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : "تعذر تحميل الأصناف التي تحتاج أمر شراء");
+    } finally {
+      setPurchaseNeededLoading(false);
+    }
+  }, [userRole]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void loadPurchaseNeeded(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadPurchaseNeeded]);
+
+  const refreshData = useCallback(() => {
+    void loadData(false);
+    void loadPurchaseNeeded();
+  }, [loadData, loadPurchaseNeeded]);
 
   const handleDelete = async (item: InventoryItem) => {
-    if (confirm(`هل أنت متأكد من حذف المنتج "${item.nameAr}"؟`)) {
+    if (confirm(`حذف المنتج "${item.nameAr}" من القائمة؟ سيبقى سجله محفوظًا، ويجب أن يكون رصيده صفرًا ولا يوجد له أمر شراء مفتوح.`)) {
       try {
         await fetchApi(`/products/${item.id}`, { method: 'DELETE' });
         setShowEditPanel(false);
-        await loadData(false);
+        if (inventoryItems.length === 1 && page > 1) setPage(page - 1);
+        else await loadData(false);
+        await loadPurchaseNeeded();
       } catch (err) {
         console.error("Failed to delete product:", err);
-        notifyError("حدث خطأ أثناء الحذف.");
+        const message = err instanceof Error ? err.message : "";
+        notifyError(message.includes("warehouse stock") ? "لا يمكن حذف منتج له رصيد في المخزن." :
+          message.includes("open purchase order") ? "لا يمكن حذف منتج له أمر شراء مفتوح." :
+          message || "حدث خطأ أثناء حذف المنتج.");
       }
     }
   };
@@ -276,7 +302,7 @@ export default function InventoryPage() {
             <h3 className="app-heading">قائمة المنتجات</h3>
             {loading ? <span className="app-skeleton mt-3 h-5 w-40" aria-label="جاري تحميل عدد المنتجات" /> : (
               <p className="text-[#e2bfb0]/70 mt-2 text-lg">
-                إجمالي المسجل: <span className="text-primary font-bold">{inventoryItems.length.toLocaleString()}</span> صنف متاح
+                إجمالي المسجل: <span className="text-primary font-bold">{totalItems.toLocaleString()}</span> صنف متاح
               </p>
             )}
           </div>
@@ -306,7 +332,7 @@ export default function InventoryPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5" aria-label={loading ? "جاري تحميل إحصاءات المخزون" : undefined}>
           {(loading && userRole === "ADMIN" && statCards.length === 3
             ? [{ icon: "trending_up", iconColor: "text-primary", label: "حركات اليوم", value: "", sub: "", subColor: "text-green-400" }, ...statCards]
-            : statCards).map((card, i) => (
+            : statCards).map((card) => (
             <div key={card.label} className={`glass p-8 rounded-2xl hi-fi-shadow flex flex-col gap-4 text-right ${loading ? "inventory-stat-loading" : ""}`}>
               <div className="flex items-center justify-between">
                 <span className="text-sm font-bold text-[#e2bfb0]/80">{card.label}</span>
@@ -434,6 +460,7 @@ export default function InventoryPage() {
                             setSelectedItem(item);
                             setShowEditPanel(true);
                           }}
+                          onDelete={handleDelete}
                           userRole={userRole}
                         />
                       ))
@@ -538,18 +565,19 @@ export default function InventoryPage() {
                   <span>تحتاج أمر شراء</span>
                   <span className="material-symbols-outlined text-[#ffb4ab]" aria-hidden="true">shopping_cart_checkout</span>
                 </h4>
+                {!purchaseNeededLoading && purchaseNeeded.length > 0 && <span className="text-xs text-[#e2bfb0]/60">{purchaseNeeded.length} صنف</span>}
               </div>
-              <div className="space-y-4">
-                {loading ? (
+              <div className="space-y-4 max-h-[32rem] overflow-y-auto pe-1">
+                {purchaseNeededLoading ? (
                   <div className="inventory-row-skeleton space-y-4 py-2" aria-label="جاري تحميل الأصناف التي تحتاج أمر شراء">
                     {[0, 1, 2].map((index) => <div key={index} className="flex items-center gap-3"><span className="app-skeleton h-10 w-10 shrink-0 rounded-xl" /><span className="app-skeleton h-4 w-32" /><span className="app-skeleton mr-auto h-5 w-12" /></div>)}
                   </div>
                 ) : purchaseNeeded.length === 0 ? (
                   <div className="text-center py-4 text-[#e2bfb0]/60">جميع المنتجات متوفرة بمخزون كافٍ</div>
                 ) : (
-                  purchaseNeeded.map((item, i) => (
+                  purchaseNeeded.map((item) => (
                     <div
-                      key={i}
+                      key={item.id}
                       className="flex items-center justify-between p-4 rounded-2xl bg-white/5 border border-white/5"
                     >
                       <div className="flex items-center gap-4">
@@ -581,7 +609,7 @@ export default function InventoryPage() {
           productId={selectedItem.id}
           onClose={() => setShowEditPanel(false)}
           onSuccess={refreshData}
-          onDelete={() => handleDelete(selectedItem)}
+          onDelete={userRole === "ADMIN" ? () => handleDelete(selectedItem) : undefined}
         />
       )}
       {/* Modals */}

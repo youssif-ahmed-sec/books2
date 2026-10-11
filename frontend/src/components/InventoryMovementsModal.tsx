@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { fetchApi } from "@/lib/api";
 import { notifyError } from "@/lib/notifications";
+import { sendLocalPrint } from "@/lib/localPrint";
 
 interface InventoryMovementsModalProps {
   onClose: () => void;
@@ -14,6 +15,13 @@ interface InventoryTransaction {
   transaction_type: string;
   quantity_changed: number;
   created_at: string;
+  reference_document?: string | null;
+}
+
+interface StockReceipt {
+  id: string; created_at: string; supplier_name: string; warehouse_name: string;
+  supplier_document?: string | null;
+  lines: Array<{ product_id: string; product_name: string; unit_name: string; quantity: string }>;
 }
 
 interface MovementRow {
@@ -24,6 +32,7 @@ interface MovementRow {
   typeStyle: string;
   qty: string;
   qtyColor: string;
+  receiptId?: string;
 }
 
 export default function InventoryMovementsModal({ onClose }: InventoryMovementsModalProps) {
@@ -31,6 +40,8 @@ export default function InventoryMovementsModal({ onClose }: InventoryMovementsM
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
+  const [receipt, setReceipt] = useState<StockReceipt | null>(null);
+  const [printing, setPrinting] = useState(false);
   const limit = 20;
 
   useEffect(() => {
@@ -63,6 +74,7 @@ export default function InventoryMovementsModal({ onClose }: InventoryMovementsM
            date: `${d.toLocaleDateString('ar-EG')} ${d.toLocaleTimeString('ar-EG', {hour:'2-digit', minute:'2-digit'})}`,
            typeStyle: style,
            qty: `${qtyPrefix}${tx.quantity_changed}`,
+           receiptId: tx.reference_document?.startsWith("RCV-") ? tx.reference_document.slice(4) : undefined,
            qtyColor: style.includes("green") ? "text-green-400" : style.includes("red") ? "text-red-400" : style.includes("ffb4ab") ? "text-[#ffb4ab]" : "text-[#e5e2e1]"
         };
       });
@@ -74,6 +86,31 @@ export default function InventoryMovementsModal({ onClose }: InventoryMovementsM
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [page]);
+
+  async function openReceipt(id: string) {
+    try {
+      setReceipt(await fetchApi(`/inventory/receipts/${encodeURIComponent(id)}`) as StockReceipt);
+    } catch (err) {
+      notifyError(err instanceof Error ? err.message : "تعذر فتح فاتورة الاستلام");
+    }
+  }
+
+  async function printReceipt() {
+    if (!receipt) return;
+    setPrinting(true);
+    try {
+      await sendLocalPrint({
+        id: receipt.id, created_at: receipt.created_at,
+        supplier_name: receipt.supplier_name, warehouse_name: receipt.warehouse_name,
+        supplier_document: receipt.supplier_document,
+        cart: receipt.lines.map(line => ({ name: line.product_name, unit: line.unit_name, qty: Number(line.quantity) })),
+      }, "stock_receipt");
+    } catch (err) {
+      notifyError(err instanceof Error ? err.message : "تعذر إرسال الفاتورة للطابعة");
+    } finally {
+      setPrinting(false);
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" dir="rtl">
@@ -140,6 +177,7 @@ export default function InventoryMovementsModal({ onClose }: InventoryMovementsM
                       <tr key={move.id} className="hover:bg-white/[0.02] transition-colors">
                         <td className="px-8 py-4">
                           <p className="font-bold text-white text-sm">{move.product}</p>
+                          {move.receiptId && <button type="button" onClick={() => openReceipt(move.receiptId!)} className="mt-1 text-xs text-primary hover:underline">فاتورة الاستلام</button>}
                         </td>
                         <td className="px-8 py-4 text-center">
                           <span className={`px-3 py-1 text-xs rounded-full font-bold border ${move.typeStyle}`}>
@@ -212,6 +250,18 @@ export default function InventoryMovementsModal({ onClose }: InventoryMovementsM
         </div>
 
       </div>
+      {receipt && <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 p-4" dir="rtl">
+        <div className="app-panel w-full max-w-xl max-h-[85vh] overflow-y-auto p-6 space-y-4">
+          <div className="flex justify-between gap-3"><div><h3 className="text-xl font-bold">فاتورة استلام المخزون</h3><p className="app-muted text-xs">{receipt.id}</p></div>
+            <button type="button" onClick={() => setReceipt(null)} className="app-muted hover:text-white">إغلاق</button></div>
+          <div className="grid gap-2 sm:grid-cols-2 text-sm"><p>المورد: {receipt.supplier_name}</p><p>المخزن: {receipt.warehouse_name}</p>
+            <p>التاريخ: {new Date(receipt.created_at).toLocaleString("ar-EG")}</p>
+            {receipt.supplier_document && <p>مستند المورد: {receipt.supplier_document}</p>}</div>
+          <div className="overflow-x-auto"><table className="w-full text-sm text-right"><thead><tr className="bg-white/5"><th className="p-2">الصنف</th><th className="p-2">الوحدة</th><th className="p-2">الكمية</th></tr></thead>
+            <tbody>{receipt.lines.map(line => <tr key={line.product_id} className="border-t border-white/10"><td className="p-2">{line.product_name}</td><td className="p-2">{line.unit_name}</td><td className="p-2">{line.quantity}</td></tr>)}</tbody></table></div>
+          <button type="button" disabled={printing} onClick={printReceipt} className="app-primary-button w-full">{printing ? "جارٍ الإرسال..." : "طباعة عبر التطبيق المحلي"}</button>
+        </div>
+      </div>}
     </div>
   );
 }

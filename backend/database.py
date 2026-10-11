@@ -1,6 +1,8 @@
 import os
 import re
 import ssl
+from pathlib import Path
+from urllib.parse import urlsplit
 from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
@@ -32,11 +34,19 @@ elif DATABASE_URL.startswith("postgresql://"):
 # Set SSL via connect_args (the correct way for asyncpg)
 if needs_ssl:
     ca_cert_path = os.getenv("DATABASE_SSL_CA_CERT")
+    database_host = urlsplit(DATABASE_URL).hostname or ""
+    uses_bundled_supabase_ca = False
+    if not ca_cert_path and database_host.endswith((".supabase.com", ".supabase.co")):
+        bundled_ca = Path(__file__).resolve().parent / "certs" / "supabase-root-2021.crt"
+        if not bundled_ca.is_file():
+            raise RuntimeError("Supabase CA certificate is missing from the application package")
+        ca_cert_path = str(bundled_ca)
+        uses_bundled_supabase_ca = True
     ssl_context = ssl.create_default_context(cafile=ca_cert_path or None)
     # Supabase Root 2021 CA lacks a key-usage extension, which Python 3.13's
     # strict X.509 flag requires. Opt in only for that legacy provider CA;
     # certificate-chain and hostname verification remain enabled.
-    if ca_cert_path and os.getenv("DATABASE_SSL_ALLOW_LEGACY_CA") == "1":
+    if ca_cert_path and (uses_bundled_supabase_ca or os.getenv("DATABASE_SSL_ALLOW_LEGACY_CA") == "1"):
         ssl_context.verify_flags &= ~ssl.VERIFY_X509_STRICT
     connect_args["ssl"] = ssl_context
 

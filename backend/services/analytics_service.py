@@ -11,7 +11,7 @@ from models.customer import Customer
 from models.financial import CashAdjustment, Expense, Income, Payment
 from models.inventory import InventoryBalance
 from models.order import Order, OrderItem, OrderStatusEnum
-from models.product import Product, Supplier, SupplierPayment, Category
+from models.product import Product, Supplier, SupplierPayment, SupplierDebtEntry, Category
 from models.inventory import InventoryTransaction, TransactionTypeEnum
 from models.purchase import PurchaseOrder
 from models.returns import SalesReturn, SalesReturnLine
@@ -80,9 +80,11 @@ async def stock_alerts(db: AsyncSession) -> list[dict]:
     for product in products:
         stock = Decimal(str(totals.get(product.id, 0)))
         minimum = Decimal(str(product.min_stock_level or 0))
-        if stock <= 0 or (minimum > 0 and stock <= minimum):
+        if stock <= 0 or (minimum > 0 and stock <= minimum) or (minimum == 0 and stock < 5):
             alerts.append({"product_id": product.id, "name": product.name_ar, "stock": float(stock),
-                           "minimum": float(minimum), "severity": "out" if stock <= 0 else "low"})
+                           "minimum": float(minimum), "severity": "out" if stock <= 0 else "low",
+                           "base_unit": product.base_unit, "image_url": product.image_url})
+    alerts.sort(key=lambda alert: (alert["severity"] != "out", alert["stock"], alert["name"]))
     return alerts
 
 
@@ -124,8 +126,13 @@ async def management_details(db: AsyncSession, now: datetime) -> dict:
 
     supplier_rows = (await db.execute(select(Supplier).where(Supplier.is_deleted == False))).scalars().all()
     receipt_rows = (await db.execute(select(InventoryTransaction.supplier_id, InventoryTransaction.quantity_changed,
-        InventoryTransaction.unit_cost, InventoryTransaction.notes).where(InventoryTransaction.transaction_type == TransactionTypeEnum.RECEIVING))).all()
+        InventoryTransaction.unit_cost, InventoryTransaction.notes).where(
+            InventoryTransaction.transaction_type == TransactionTypeEnum.RECEIVING,
+            InventoryTransaction.supplier_finance_included.is_(True),
+        ))).all()
     payments = (await db.execute(select(SupplierPayment.supplier_id, SupplierPayment.amount))).all()
+    debt_rows = (await db.execute(select(SupplierDebtEntry.supplier_id, SupplierDebtEntry.entry_type,
+        SupplierDebtEntry.amount))).all()
     purchase_orders = (await db.execute(select(PurchaseOrder.supplier_id, PurchaseOrder.status))).all()
     suppliers = []
     unattributed = any(row.supplier_id is None and row.notes != "Initial stock from product creation" for row in receipt_rows)
@@ -134,9 +141,11 @@ async def management_details(db: AsyncSession, now: datetime) -> dict:
         incomplete = unattributed or any(row.unit_cost is None for row in rows)
         received_value = sum((Decimal(str(row.quantity_changed)) * Decimal(str(row.unit_cost or 0)) for row in rows), Decimal("0"))
         paid = sum((Decimal(str(amount)) for supplier_id, amount in payments if supplier_id == supplier.id), Decimal("0"))
+        manual_debt = sum((Decimal(str(amount)) * (1 if entry_type == "DEBT" else -1)
+                           for supplier_id, entry_type, amount in debt_rows if supplier_id == supplier.id), Decimal("0"))
         statuses = [status for supplier_id, status in purchase_orders if supplier_id == supplier.id]
         suppliers.append({"id": supplier.id, "name": supplier.name,
-                          "balance": None if incomplete else float(Decimal(str(supplier.opening_balance or 0)) + received_value - paid),
+                          "balance": None if incomplete else float(Decimal(str(supplier.opening_balance or 0)) + received_value + manual_debt - paid),
                           "statement_incomplete": incomplete, "orders": len(statuses),
                           "received_orders": statuses.count("RECEIVED")})
 

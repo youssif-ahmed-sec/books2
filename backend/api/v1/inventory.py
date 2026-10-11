@@ -3,13 +3,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
-from uuid import UUID
+from uuid import UUID, uuid5
 from typing import List
 
-from models.inventory import InventoryTransaction, InventoryBalance, Warehouse
+from models.inventory import InventoryTransaction, InventoryBalance, Warehouse, TransactionTypeEnum as MovementType
 from models.product import Product, ProductUnit, ProductPrice, Supplier
 from models.user import User, RoleEnum, AuditLog
-from schemas.inventory import InventoryTransactionCreate, InventoryTransactionResponse, InventoryBalanceResponse, InventoryStatsResponse, InventoryTransactionRecentResponse, PaginatedInventoryTransactionResponse
+from schemas.inventory import InventoryTransactionCreate, InventoryTransactionResponse, InventoryBalanceResponse, InventoryStatsResponse, InventoryTransactionRecentResponse, PaginatedInventoryTransactionResponse, StockReceiptCreate
 from sqlalchemy import func, desc
 from datetime import date
 from core.dependencies import require_inventory_access, require_warehouse_access
@@ -19,6 +19,113 @@ from services.inventory_service import InventoryService
 from fastapi_cache.decorator import cache
 
 router = APIRouter(prefix="/inventory", tags=["Inventory"])
+
+
+async def _receipt_document(db: AsyncSession, receipt_id: UUID):
+    reference = f"RCV-{receipt_id}"
+    rows = (await db.execute(
+        select(InventoryTransaction, Product.name_ar, Product.base_unit, Supplier.name, Warehouse.name)
+        .join(Product, Product.id == InventoryTransaction.product_id)
+        .join(Supplier, Supplier.id == InventoryTransaction.supplier_id)
+        .join(Warehouse, Warehouse.id == InventoryTransaction.warehouse_id)
+        .where(InventoryTransaction.reference_document == reference,
+               InventoryTransaction.transaction_type == MovementType.RECEIVING)
+        .order_by(InventoryTransaction.created_at, InventoryTransaction.id)
+    )).all()
+    if not rows:
+        raise HTTPException(status_code=404, detail="Stock receipt not found")
+    first = rows[0][0]
+    return {
+        "id": str(receipt_id), "created_at": first.created_at,
+        "supplier_id": str(first.supplier_id), "supplier_name": rows[0][3],
+        "warehouse_id": str(first.warehouse_id), "warehouse_name": rows[0][4],
+        "supplier_document": first.notes,
+        "lines": [{"product_id": str(tx.product_id), "product_name": product_name,
+                   "unit_name": unit_name, "quantity": tx.quantity_changed}
+                  for tx, product_name, unit_name, _, _ in rows],
+    }
+
+
+@router.get("/receipts/{receipt_id}")
+async def get_stock_receipt(
+    receipt_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_inventory_access),
+):
+    return await _receipt_document(db, receipt_id)
+
+
+@router.post("/receipts", status_code=status.HTTP_201_CREATED)
+async def create_stock_receipt(
+    payload: StockReceiptCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_inventory_access),
+):
+    product_ids = [line.product_id for line in payload.lines]
+    if len(product_ids) != len(set(product_ids)):
+        raise HTTPException(status_code=422, detail="Combine repeated products into one receipt line")
+    fingerprint = request_fingerprint(payload)
+    reference = f"RCV-{payload.request_id}"
+    existing = (await db.execute(select(InventoryTransaction).where(
+        InventoryTransaction.reference_document == reference,
+        InventoryTransaction.transaction_type == MovementType.RECEIVING,
+    ))).scalars().all()
+    if existing:
+        if len(existing) != len(payload.lines) or any(
+            row.user_id != current_user.id or row.request_fingerprint != fingerprint
+            for row in existing
+        ):
+            raise HTTPException(status_code=409, detail="Receipt ID was already used for different data")
+        return await _receipt_document(db, payload.request_id)
+
+    # Lock products in a stable order before warehouse/balances; all lines commit together.
+    products = (await db.execute(select(Product).where(
+        Product.id.in_(product_ids), Product.is_deleted == False,
+    ).order_by(Product.id).with_for_update())).scalars().all()
+    if len(products) != len(product_ids):
+        raise HTTPException(status_code=404, detail="One or more products were not found")
+    warehouse = (await db.execute(select(Warehouse).where(
+        Warehouse.id == payload.warehouse_id, Warehouse.is_active == True,
+    ).with_for_update())).scalar_one_or_none()
+    if warehouse is None:
+        raise HTTPException(status_code=404, detail="Active warehouse not found")
+    supplier = (await db.execute(select(Supplier).where(
+        Supplier.id == payload.supplier_id, Supplier.is_deleted == False,
+    ))).scalar_one_or_none()
+    if supplier is None:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+
+    for line in payload.lines:
+        balance = (await db.execute(select(InventoryBalance).where(
+            InventoryBalance.product_id == line.product_id,
+            InventoryBalance.warehouse_id == payload.warehouse_id,
+        ).with_for_update())).scalar_one_or_none()
+        if balance is None:
+            balance = InventoryBalance(product_id=line.product_id, warehouse_id=payload.warehouse_id, current_stock=0)
+            db.add(balance)
+            await db.flush()
+        InventoryService.record_movement(
+            db, balance, line.quantity, current_user.id, MovementType.RECEIVING,
+            supplier_id=payload.supplier_id, reference_document=reference,
+            notes=payload.supplier_document, request_id=uuid5(payload.request_id, str(line.product_id)),
+            request_fingerprint=fingerprint,
+        )
+        db.add(AuditLog(user_id=current_user.id, action="RECEIVE_STOCK", entity_type="Product",
+                        entity_id=str(line.product_id),
+                        new_value={"quantity": str(line.quantity), "receipt_id": str(payload.request_id)}))
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        existing = (await db.execute(select(InventoryTransaction).where(
+            InventoryTransaction.reference_document == reference,
+            InventoryTransaction.transaction_type == MovementType.RECEIVING,
+        ))).scalars().all()
+        if len(existing) != len(payload.lines) or any(
+            row.user_id != current_user.id or row.request_fingerprint != fingerprint for row in existing
+        ):
+            raise HTTPException(status_code=409, detail="Receipt could not be completed")
+    return await _receipt_document(db, payload.request_id)
 
 
 @router.get("/warehouses")
@@ -46,8 +153,10 @@ async def create_inventory_transaction(
     if transaction_in.transaction_type == "Issuing" and quantity > 0:
         raise HTTPException(status_code=400, detail="Issuing quantity must be negative")
     is_receipt = transaction_in.transaction_type == "Receiving"
-    if is_receipt and (transaction_in.supplier_id is None or transaction_in.unit_cost is None):
-        raise HTTPException(status_code=422, detail="Receiving requires supplier_id and unit_cost")
+    if is_receipt and transaction_in.supplier_id is None:
+        raise HTTPException(status_code=422, detail="Receiving requires supplier_id")
+    if is_receipt and transaction_in.unit_cost is not None:
+        raise HTTPException(status_code=422, detail="Set product cost in product edit, not receiving")
     if not is_receipt and (transaction_in.supplier_id is not None or transaction_in.unit_cost is not None):
         raise HTTPException(status_code=422, detail="Supplier and cost are only valid for Receiving")
 
@@ -117,10 +226,6 @@ async def create_inventory_transaction(
         request_id=transaction_in.request_id,
         request_fingerprint=fingerprint,
     )
-    if is_receipt:
-        product = (await db.execute(select(Product).where(Product.id == transaction_in.product_id).with_for_update())).scalar_one()
-        product.cost = transaction_in.unit_cost
-    
     db.add(AuditLog(user_id=current_user.id, action="INVENTORY_MOVEMENT", entity_type="Product", entity_id=str(transaction_in.product_id), new_value={"quantity": str(quantity), "type": transaction_in.transaction_type.value if hasattr(transaction_in.transaction_type, "value") else transaction_in.transaction_type, "warehouse_id": str(transaction_in.warehouse_id)}))
     
     try:

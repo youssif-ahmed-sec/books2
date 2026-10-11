@@ -136,7 +136,7 @@ async def test_purchase_receipt_transfer_count_and_supplier_cash_payment():
                 response = await client.post(f"/api/v1/purchases/{purchase_id}/{action}")
                 assert response.status_code == 200, response.text
             receipt_payload = {"request_id": str(uuid4()), "warehouse_id": str(first_warehouse),
-                               "quantity": 2, "unit_cost": 7}
+                               "quantity": 2}
             received = await client.post(f"/api/v1/purchases/{purchase_id}/receive", json=receipt_payload)
             assert received.status_code == 200 and received.json()["status"] == "RECEIVED", received.text
             replay = await client.post(f"/api/v1/purchases/{purchase_id}/receive", json=receipt_payload)
@@ -155,8 +155,12 @@ async def test_purchase_receipt_transfer_count_and_supplier_cash_payment():
             assert count.status_code == 200 and count.json()["difference"] == "1.00", count.text
 
             assert (await client.post("/api/v1/cash-register/open", json={"opening_cash": 100})).status_code == 201
+            debt = await client.post(f"/api/v1/suppliers/{supplier_id}/debts", json={
+                "request_id": str(uuid4()), "amount": 14, "note": "فاتورة المورد اليدوية",
+            })
+            assert debt.status_code == 201, debt.text
             payment = await client.post(f"/api/v1/suppliers/{supplier_id}/payments", json={
-                "request_id": str(uuid4()), "amount": 14, "payment_method": "Cash",
+                "request_id": str(uuid4()), "amount": 14, "payment_method": "Cash", "cash_source": "SHIFT",
             })
             assert payment.status_code == 201, payment.text
             shift = await client.get("/api/v1/cash-register/current")

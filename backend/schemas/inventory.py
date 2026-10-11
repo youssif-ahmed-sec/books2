@@ -25,6 +25,21 @@ class InventoryTransactionCreate(InventoryTransactionBase):
     unit_cost: Optional[Decimal] = Field(default=None, ge=0, allow_inf_nan=False)
     request_id: UUID
 
+
+class StockReceiptLine(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    product_id: UUID
+    quantity: Decimal = Field(gt=0, max_digits=18, decimal_places=2, allow_inf_nan=False)
+
+
+class StockReceiptCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_id: UUID
+    supplier_id: UUID
+    warehouse_id: UUID
+    supplier_document: Optional[str] = Field(default=None, max_length=200)
+    lines: List[StockReceiptLine] = Field(min_length=1, max_length=100)
+
 class InventoryTransactionResponse(InventoryTransactionBase):
     id: UUID
     user_id: UUID

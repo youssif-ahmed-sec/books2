@@ -977,11 +977,13 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
           </button>
           {onDelete && (
             <button
+              type="button"
               onClick={() => onDelete()}
-              className="w-16 h-16 rounded-full border border-[#ffb4ab]/20 text-[#ffb4ab]/80 hover:bg-[#ffb4ab]/10 hover:text-[#ffb4ab] active:scale-[0.98] transition-all flex items-center justify-center"
+              className="px-5 py-5 rounded-full border border-[#ffb4ab]/20 text-[#ffb4ab] hover:bg-[#ffb4ab]/10 active:scale-[0.98] transition-all flex items-center justify-center gap-2 font-bold"
               title="حذف المنتج"
             >
-              <span className="material-symbols-outlined">delete</span>
+              <span className="material-symbols-outlined" aria-hidden="true">delete</span>
+              حذف المنتج
             </button>
           )}
           <button

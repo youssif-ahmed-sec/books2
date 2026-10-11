@@ -15,7 +15,7 @@ type Purchase = {
 type Option = { id: string; name: string };
 type ProductOption = { id: string; name_ar: string };
 type SupplierOption = { id: string; name: string; phone?: string | null };
-type ReceiptDraft = { quantity: string; unitCost: string; warehouseId: string };
+type ReceiptDraft = { quantity: string; warehouseId: string };
 
 const statusLabels: Record<string, string> = {
   REQUESTED: "طلب شراء", APPROVED: "معتمد", ORDERED: "أمر شراء",
@@ -107,13 +107,13 @@ export default function PurchasesPage() {
   const receive = async (purchase: Purchase) => {
     const row = receipts[purchase.id];
     const selectedWarehouseId = warehouses.length === 1 ? warehouses[0].id : row?.warehouseId;
-    if (!selectedWarehouseId || Number(row?.quantity) <= 0 || Number(row?.unitCost) < 0 || !row?.unitCost) {
-      setError("اختر المخزن وأدخل الكمية والتكلفة الفعلية");
+    if (!selectedWarehouseId || Number(row?.quantity) <= 0) {
+      setError("اختر المخزن وأدخل الكمية المستلمة");
       return;
     }
     await act(`/purchases/${purchase.id}/receive`, {
       warehouse_id: selectedWarehouseId, quantity: Number(row.quantity),
-      unit_cost: Number(row.unitCost), request_id: crypto.randomUUID(),
+      request_id: crypto.randomUUID(),
     });
   };
 
@@ -141,7 +141,7 @@ export default function PurchasesPage() {
         </form>
         <div className="space-y-3">
           {purchases.map(purchase => {
-            const receipt = receipts[purchase.id] || { quantity: "", unitCost: "", warehouseId: "" };
+            const receipt = receipts[purchase.id] || { quantity: "", warehouseId: "" };
             const product = products.find(item => item.id === purchase.product_id);
             const supplier = suppliers.find(item => item.id === purchase.supplier_id);
             const whatsappUrl = product && supplier ? purchaseWhatsAppUrl(purchase, supplier, product) : null;
@@ -165,7 +165,7 @@ export default function PurchasesPage() {
                   </a> :
                   <span className="app-muted self-center text-sm" title="أضف رقم المورد بصيغة دولية أو رقم محمول مصري، وتأكد من بيانات المنتج">واتساب غير متاح: رقم المورد أو بيانات المنتج غير مكتملة</span>)}
               </div>
-              {["ORDERED", "PARTIALLY_RECEIVED"].includes(purchase.status) && <div className="grid gap-2 md:grid-cols-4">
+              {["ORDERED", "PARTIALLY_RECEIVED"].includes(purchase.status) && <div className="grid gap-2 md:grid-cols-3">
                 {warehouses.length === 1 ? <p className="app-muted self-center text-sm">الاستلام إلى: <strong className="text-[#e5e2e1]">{warehouses[0].name}</strong></p> : warehouses.length > 1 ?
                   <div className="space-y-1"><p className="app-muted text-xs">يوجد أكثر من مخزن مسجل؛ حدد المستلم.</p>
                     <ProductSelect label="المخزن المستلم" value={receipt.warehouseId} placeholder="المخزن المستلم"
@@ -173,7 +173,6 @@ export default function PurchasesPage() {
                       options={warehouses.map(warehouse => ({ value: warehouse.id, label: warehouse.name }))} />
                   </div> : <p role="alert" className="text-sm text-red-400">لا يوجد مخزن نشط للاستلام.</p>}
                 <input className="app-field" type="number" min="0.01" step="0.01" placeholder="الكمية المستلمة" value={receipt.quantity} onChange={event => setReceipts({ ...receipts, [purchase.id]: { ...receipt, quantity: event.target.value } })} />
-                <input className="app-field" type="number" min="0" step="0.01" placeholder="تكلفة الوحدة الفعلية" value={receipt.unitCost} onChange={event => setReceipts({ ...receipts, [purchase.id]: { ...receipt, unitCost: event.target.value } })} />
                 <button className="app-primary-button" disabled={busy || warehouses.length === 0} onClick={() => receive(purchase)}>تسجيل الاستلام</button>
               </div>}
             </article>;
