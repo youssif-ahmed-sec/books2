@@ -1,34 +1,42 @@
 "use client";
 
+import { notifyError } from "@/lib/notifications";
+
 import { useState, useEffect } from "react";
 import Image from "next/image";
 import { fetchApi } from "@/lib/api";
+import { marginFromPrice, pricesFromMargins, type PriceMargins, type TierPrices } from "@/lib/pricing";
 import { z } from "zod";
+import UnitBarcodeField from "@/components/UnitBarcodeField";
+import { ProductSelect } from "@/components/ProductSelect";
+import BundleEditor from "@/components/BundleEditor";
+import { offerComponentPayload, type OfferComponentDraft, type OfferPriceLevel, type OfferProduct } from "@/lib/bundles";
 
 const unitSchema = z.object({
   id: z.string(),
   name: z.string().min(1, "اسم الوحدة مطلوب"),
   conversionFactor: z.coerce.number().min(1, "يجب أن يكون عامل التحويل أكبر من 0"),
-  sku: z.string().optional(),
-  isDefault: z.boolean(),
+  sku: z.string().max(64).regex(/^[\x20-\x7E]*$/, "باركود الوحدة يجب أن يحتوي على أحرف وأرقام إنجليزية").optional(),
   stock: z.coerce.number().min(0, "لا يمكن أن يكون المخزون بالسالب"),
   isBase: z.boolean(),
   retailPrice: z.string().refine(val => !isNaN(parseFloat(val)) && parseFloat(val) >= 0, "مطلوب رقم صحيح"),
+  semiWholesalePrice: z.string().refine(val => !isNaN(parseFloat(val)) && parseFloat(val) >= 0, "مطلوب رقم صحيح"),
   wholesalePrice: z.string().refine(val => !isNaN(parseFloat(val)) && parseFloat(val) >= 0, "مطلوب رقم صحيح"),
+  superWholesalePrice: z.string().refine(val => !isNaN(parseFloat(val)) && parseFloat(val) >= 0, "مطلوب رقم صحيح"),
   vipPrice: z.string().refine(val => !isNaN(parseFloat(val)) && parseFloat(val) >= 0, "مطلوب رقم صحيح"),
 });
 
 const productFormSchema = z.object({
   nameAr: z.string().min(2, "اسم المنتج مطلوب"),
   nameEn: z.string().optional(),
-  barcode: z.string().optional(),
   category_id: z.string().min(1, "التصنيف مطلوب"),
-  supplier_id: z.string().optional().or(z.literal("")),
-  subCategory_id: z.string().optional().or(z.literal("")),
-  brand_id: z.string().optional().or(z.literal("")),
+  supplier_id: z.string().min(1, "المورد الأساسي مطلوب"),
+  subCategory_id: z.string().min(1, "الفئة الفرعية مطلوبة"),
+  brand_id: z.string().min(1, "العلامة التجارية مطلوبة"),
   active: z.boolean(),
   description: z.string().optional(),
   imageUrl: z.string().optional(),
+  warehouseLocation: z.string().optional(),
   costPrice: z.string().refine(val => !isNaN(parseFloat(val)) && parseFloat(val) >= 0, "السعر مطلوب"),
   vatRate: z.string().refine(val => !isNaN(parseFloat(val)) && parseFloat(val) >= 0, "الضريبة مطلوبة"),
   minStockLevel: z.string().refine(val => !isNaN(parseFloat(val)) && parseFloat(val) >= 0, "الحد الأدنى مطلوب"),
@@ -37,22 +45,17 @@ const productFormSchema = z.object({
   units: z.array(unitSchema).min(1, "يجب إضافة وحدة واحدة على الأقل"),
 });
 
-interface BundleComponent {
-  id: string; // frontend key
-  component_id: string;
-  quantity: number;
-}
-
 interface ProductUnit {
   id: string;
   name: string;
   conversionFactor: number;
   sku: string;
-  isDefault: boolean;
   stock: number;
   isBase: boolean;
   retailPrice: string;
+  semiWholesalePrice: string;
   wholesalePrice: string;
+  superWholesalePrice: string;
   vipPrice: string;
 }
 
@@ -64,7 +67,6 @@ interface GlobalUnit {
 
 interface CatalogOption { id: string; name_ar: string; name_en: string; category_id?: string }
 interface SupplierOption { id: string; name: string }
-interface BundleProductOption { id: string; name_ar: string; is_bundle: boolean }
 interface SavedPrice { price_level: string; price: number }
 interface SavedUnit {
   id: string;
@@ -73,7 +75,7 @@ interface SavedUnit {
   barcode?: string | null;
   prices?: SavedPrice[];
 }
-interface SavedBundleComponent { id: string; component_id: string; quantity: number }
+interface SavedBundleComponent { id: string; component_id: string; quantity: number; unit_id?: string | null; price_level?: OfferPriceLevel | null }
 
 interface EditProductPanelProps {
   productId: string;
@@ -83,6 +85,10 @@ interface EditProductPanelProps {
 }
 
 export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: EditProductPanelProps) {
+  useEffect(() => {
+    document.body.classList.add("product-panel-open");
+    return () => document.body.classList.remove("product-panel-open");
+  }, []);
   const [isSaving, setIsSaving] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [form, setForm] = useState({
@@ -97,9 +103,14 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
     active: true,
     description: "",
     imageUrl: "",
+    warehouseLocation: "",
     costPrice: "0",
     vatRate: "0",
     profitMargin: "0",
+    semiWholesaleMargin: "0",
+    wholesaleMargin: "0",
+    superWholesaleMargin: "0",
+    vipMargin: "0",
     minStockLevel: "0",
     maxStockLevel: "0",
     is_bundle: false,
@@ -108,11 +119,19 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
   const [isUploadingImage, setIsUploadingImage] = useState(false);
 
   const [units, setUnits] = useState<ProductUnit[]>([
-    { id: "1", name: "قطعة", conversionFactor: 1, sku: "", isDefault: true, stock: 0, isBase: true, retailPrice: "0", wholesalePrice: "0", vipPrice: "0" },
+    { id: "1", name: "قطعة", conversionFactor: 1, sku: "", stock: 0, isBase: true, retailPrice: "0", semiWholesalePrice: "0", wholesalePrice: "0", superWholesalePrice: "0", vipPrice: "0" },
   ]);
+  const [savedBarcodeIds, setSavedBarcodeIds] = useState<string[]>([]);
 
-  const [bundleComponents, setBundleComponents] = useState<BundleComponent[]>([]);
-  const [productsList, setProductsList] = useState<BundleProductOption[]>([]);
+  const recalculatePrices = (cost: string, vat: string, margins: PriceMargins, tier?: keyof TierPrices) => {
+    setUnits(previous => previous.map(unit => {
+      const calculated = pricesFromMargins(cost, vat, unit.conversionFactor, margins);
+      return tier ? { ...unit, [tier]: calculated[tier] } : { ...unit, ...calculated };
+    }));
+  };
+
+  const [bundleComponents, setBundleComponents] = useState<OfferComponentDraft[]>([]);
+  const [productsList, setProductsList] = useState<OfferProduct[]>([]);
 
   const [globalUnits, setGlobalUnits] = useState<GlobalUnit[]>([]);
   const [showNewUnitDialog, setShowNewUnitDialog] = useState(false);
@@ -129,7 +148,12 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
     async function loadProduct() {
       try {
         setIsLoading(true);
-        const data = await fetchApi(`/products/${productId}`);
+        const [data, catalog] = await Promise.all([fetchApi(`/products/${productId}`), fetchApi("/products?limit=1000")]);
+        const offerProducts: OfferProduct[] = catalog.data || [];
+        setProductsList(offerProducts);
+        const basePrices: SavedPrice[] = data.units?.find((unit: SavedUnit) => unit.unit_name === data.base_unit)?.prices || [];
+        const baseRetail = Number(basePrices.find(price => price.price_level === "Retail")?.price || 0);
+        const baseTier = (level: string) => Number(basePrices.find(price => price.price_level === level)?.price ?? baseRetail);
         setForm({
           sku: data.sku || "",
           nameAr: data.name_ar || "",
@@ -142,29 +166,53 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
           active: data.is_active ?? true,
           description: data.description || "",
           imageUrl: data.image_url || "",
+          warehouseLocation: data.warehouse_location || "",
           costPrice: data.cost?.toString() || "0",
           vatRate: data.tax_rate?.toString() || "0",
-          profitMargin: "0",
+          profitMargin: marginFromPrice(
+            baseRetail,
+            Number(data.cost || 0), Number(data.tax_rate || 0), 1,
+          ),
+          semiWholesaleMargin: marginFromPrice(
+            baseTier("Semi Wholesale"),
+            Number(data.cost || 0), Number(data.tax_rate || 0), 1,
+          ),
+          wholesaleMargin: marginFromPrice(
+            baseTier("Wholesale"),
+            Number(data.cost || 0), Number(data.tax_rate || 0), 1,
+          ),
+          superWholesaleMargin: marginFromPrice(
+            baseTier("Super Wholesale"),
+            Number(data.cost || 0), Number(data.tax_rate || 0), 1,
+          ),
+          vipMargin: marginFromPrice(
+            baseTier("VIP"),
+            Number(data.cost || 0), Number(data.tax_rate || 0), 1,
+          ),
           minStockLevel: data.min_stock_level?.toString() || "0",
           maxStockLevel: data.max_stock_level?.toString() || "0",
           is_bundle: data.is_bundle || false,
         });
         
         if (data.units && data.units.length > 0) {
+          setSavedBarcodeIds(data.units.filter((unit: SavedUnit) => !!unit.barcode).map((unit: SavedUnit) => unit.id));
           const loadedUnits = data.units.map((u: SavedUnit) => {
             const retail = u.prices?.find((p) => p.price_level === "Retail")?.price || 0;
-            const wholesale = u.prices?.find((p) => p.price_level === "Wholesale")?.price || 0;
-            const vip = u.prices?.find((p) => p.price_level === "VIP")?.price || 0;
+            const semiWholesale = u.prices?.find((p) => p.price_level === "Semi Wholesale")?.price ?? retail;
+            const wholesale = u.prices?.find((p) => p.price_level === "Wholesale")?.price ?? retail;
+            const superWholesale = u.prices?.find((p) => p.price_level === "Super Wholesale")?.price ?? retail;
+            const vip = u.prices?.find((p) => p.price_level === "VIP")?.price ?? retail;
             return {
               id: u.id,
               name: u.unit_name,
               conversionFactor: u.conversion_factor,
               sku: u.barcode || "",
-              isDefault: u.unit_name === data.base_unit,
               stock: u.unit_name === data.base_unit ? (data.current_stock || 0) : 0,
               isBase: u.unit_name === data.base_unit,
               retailPrice: retail.toString(),
+              semiWholesalePrice: semiWholesale.toString(),
               wholesalePrice: wholesale.toString(),
+              superWholesalePrice: superWholesale.toString(),
               vipPrice: vip.toString(),
             };
           });
@@ -175,7 +223,9 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
           setBundleComponents(data.bundle_components.map((c: SavedBundleComponent) => ({
             id: c.id || Date.now().toString() + Math.random(),
             component_id: c.component_id,
-            quantity: c.quantity
+            unit_id: c.unit_id || offerProducts.find(p => p.id === c.component_id)?.units.find(u => u.conversion_factor === 1)?.id || "",
+            price_level: c.price_level || "Retail",
+            quantity: c.quantity / (offerProducts.find(p => p.id === c.component_id)?.units.find(u => u.id === c.unit_id)?.conversion_factor || 1),
           })));
         } else {
           setBundleComponents([]);
@@ -208,7 +258,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
           fetchApi("/products/subcategories"),
           fetchApi("/products/brands"),
           fetchApi("/products/suppliers"),
-          fetchApi("/products")
+          fetchApi("/products?limit=1000")
         ]);
         setCategoriesList(cats);
         setSubcategoriesList(subcats);
@@ -231,41 +281,25 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
         name: "",
         conversionFactor: 1,
         sku: "",
-        isDefault: false,
         stock: 0,
         isBase: false,
-        retailPrice: "0",
-        wholesalePrice: "0",
-        vipPrice: "0",
+        ...pricesFromMargins(form.costPrice, form.vatRate, 1, form),
       },
     ]);
   };
 
   const updateUnit = (id: string, field: keyof ProductUnit, value: ProductUnit[keyof ProductUnit]) => {
-    setUnits(prev => prev.map(u => u.id === id ? { ...u, [field]: value } : u));
-  };
-
-  const addBundleComponent = () => {
-    setBundleComponents([
-      ...bundleComponents,
-      { id: Date.now().toString(), component_id: "", quantity: 1 }
-    ]);
-  };
-
-  const updateBundleComponent = (id: string, field: keyof BundleComponent, value: BundleComponent[keyof BundleComponent]) => {
-    setBundleComponents(prev => prev.map(c => c.id === id ? { ...c, [field]: value } : c));
-  };
-
-  const removeBundleComponent = (id: string) => {
-    setBundleComponents(prev => prev.filter(c => c.id !== id));
+    setUnits(prev => prev.map(u => {
+      if (u.id !== id) return u;
+      const updated = { ...u, [field]: value };
+      return field === "conversionFactor"
+        ? { ...updated, ...pricesFromMargins(form.costPrice, form.vatRate, Number(value), form) }
+        : updated;
+    }));
   };
 
   const deleteUnit = (id: string) => {
     setUnits(units.filter(u => u.id !== id));
-  };
-
-  const setDefaultUnit = (id: string) => {
-    setUnits(units.map(u => ({ ...u, isDefault: u.id === id })));
   };
 
   const handleCreateGlobalUnit = async () => {
@@ -287,17 +321,14 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
           name: created.name,
           conversionFactor: created.conversion_factor,
           sku: "",
-          isDefault: false,
           stock: 0,
           isBase: false,
-          retailPrice: "0",
-          wholesalePrice: "0",
-          vipPrice: "0",
+          ...pricesFromMargins(form.costPrice, form.vatRate, created.conversion_factor, form),
         }
       ]);
     } catch (err) {
       console.error(err);
-      alert("Failed to create global unit. It might already exist.");
+      notifyError("تعذر إضافة الوحدة. تأكد أنها غير مسجلة من قبل.");
     }
   };
 
@@ -345,7 +376,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
       }
     } catch (err) {
       console.error("Image upload failed:", err);
-      alert("فشل رفع الصورة");
+      notifyError("فشل رفع الصورة");
     } finally {
       setIsUploadingImage(false);
     }
@@ -367,7 +398,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
         });
         setErrors(fieldErrors);
         console.error("Validation Failed:", validationResult.error.issues);
-        alert(`يرجى مراجعة الحقول التالية: ${fieldErrors.join(", ")}`);
+        notifyError(`يرجى مراجعة الحقول التالية: ${fieldErrors.join(", ")}`);
         return;
       }
       setErrors([]);
@@ -375,7 +406,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
       setIsSaving(true);
       const payload = {
         sku: form.sku, // Keep existing SKU
-        barcode: form.barcode,
+        barcode: form.barcode.trim() || null,
         name_en: form.nameEn.trim(),
         name_ar: form.nameAr,
         base_unit: units.find(u => u.isBase)?.name || "Piece",
@@ -385,6 +416,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
         max_stock_level: parseFloat(form.maxStockLevel) || 0,
         description: form.description,
         image_url: form.imageUrl,
+        warehouse_location: form.warehouseLocation,
         is_active: form.active,
         is_bundle: form.is_bundle,
         category_id: form.category_id && form.category_id !== "" ? form.category_id : null,
@@ -395,27 +427,21 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
           ...( /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(u.id) ? { id: u.id } : {} ),
           unit_name: u.name || "Unknown",
           conversion_factor: u.conversionFactor,
-          barcode: u.sku,
-          is_default: u.isDefault,
+          barcode: u.sku.trim() || null,
           prices: [
             { price_level: "Retail", price_type: "retail", price: parseFloat(u.retailPrice) || 0 },
+            { price_level: "Semi Wholesale", price_type: "semi_wholesale", price: parseFloat(u.semiWholesalePrice) || 0 },
             { price_level: "Wholesale", price_type: "wholesale", price: parseFloat(u.wholesalePrice) || 0 },
+            { price_level: "Super Wholesale", price_type: "super_wholesale", price: parseFloat(u.superWholesalePrice) || 0 },
             { price_level: "VIP", price_type: "vip", price: parseFloat(u.vipPrice) || 0 },
           ]
         })),
-        bundle_components: form.is_bundle ? bundleComponents.map(c => ({
-          component_id: c.component_id,
-          quantity: c.quantity
-        })) : [],
-        initial_stock: totalBaseStock
+        bundle_components: form.is_bundle ? offerComponentPayload(bundleComponents, productsList) : [],
       };
 
       await fetchApi(`/products/${productId}`, {
         method: "PUT",
-        body: JSON.stringify({
-          ...payload,
-          total_stock: units.reduce((acc, u) => acc + ((typeof u.stock === "number" ? u.stock : parseFloat(u.stock as unknown as string)) * u.conversionFactor), 0)
-        }),
+        body: JSON.stringify(payload),
       });
 
       // Close panel and trigger the parent's refresh.
@@ -423,7 +449,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
       onSuccess();
     } catch (err) {
       console.error("Failed to save product:", err);
-      alert("Failed to save product");
+      notifyError(err instanceof Error ? err.message : "تعذر حفظ المنتج");
     } finally {
       setIsSaving(false);
     }
@@ -438,15 +464,15 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
       />
 
       {/* Slide-over Panel */}
-      <aside className="fixed top-0 bottom-0 left-0 w-full max-w-[850px] bg-[#0e0e0e] z-[70] shadow-[0_0_80px_rgba(0,0,0,0.8)] flex flex-col animate-slide-in-left border-r border-white/10">
+      <aside className="product-editor-panel fixed top-0 bottom-0 left-0 w-full max-w-[850px] bg-[#0e0e0e] z-[70] shadow-[0_0_80px_rgba(0,0,0,0.8)] flex flex-col animate-slide-in-left border-r border-white/10">
         {/* Header */}
-        <header className="px-16 py-12 flex justify-between items-center border-b border-white/5 bg-[#0e0e0e]/50 backdrop-blur-md sticky top-0 z-10">
+        <header className="px-5 py-7 sm:px-8 xl:px-12 xl:py-9 flex justify-between items-center border-b border-white/5 bg-[#0e0e0e]/50 backdrop-blur-md sticky top-0 z-10">
           <div>
             <div className="flex items-center gap-2 text-primary mb-2">
               <span className="material-symbols-outlined text-xl">edit_note</span>
-              <span className="text-[11px] font-bold tracking-widest uppercase">نظام إدارة المخزون المركزي</span>
+              <span className="text-xs font-bold">نظام إدارة المخزون المركزي</span>
             </div>
-            <h2 className="text-4xl font-bold text-[#e5e2e1] leading-tight">تعديل منتج</h2>
+            <h2 className="text-2xl font-bold text-[#e5e2e1] leading-tight">تعديل منتج</h2>
             <p className="text-[#e2bfb0] text-sm mt-1">
               قم بتحديث تفاصيل المنتج بدقة لضمان دقة التقارير
             </p>
@@ -460,9 +486,9 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
         </header>
 
         {/* Scrollable Form */}
-        <div className="flex-1 overflow-y-auto px-16 py-16 space-y-16 custom-scrollbar">
+        <div className="flex-1 overflow-y-auto px-5 py-6 sm:px-8 xl:px-10 space-y-9 custom-scrollbar">
           {/* Section 1: Basic Info */}
-          <section className="space-y-8">
+          <section className="space-y-5">
             <div className="flex items-center gap-4">
               <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
                 <span className="material-symbols-outlined">info</span>
@@ -470,41 +496,9 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
               <h3 className="text-2xl font-bold">المعلومات الأساسية</h3>
             </div>
 
-            <div className="grid grid-cols-2 gap-x-8 gap-y-12">
-              {/* Auto Code */}
-              <div className="space-y-5">
-                <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">كود المنتج (تلقائي)</label>
-                <div className="relative">
-                  <input
-                    value="INV-2026-X88"
-                    className="w-full bg-[#0e0e0e] border border-white/5 rounded-full p-4 text-[#e2bfb0] font-mono opacity-50"
-                  />
-                  <span className="absolute left-6 top-1/2 -translate-y-1/2 material-symbols-outlined text-white/20 text-xl">lock</span>
-                </div>
-              </div>
-
-              {/* Barcode */}
-              <div className="space-y-5">
-                <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">الباركود الدولي</label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    placeholder="امسح الباركود أو أدخله"
-                    value={form.barcode}
-                    onChange={(e) => {
-                      setForm({ ...form, barcode: e.target.value });
-                      if (errors.includes("barcode")) setErrors(errors.filter(err => err !== "barcode"));
-                    }}
-                    className={`w-full bg-[#201f1f] border rounded-full p-4 text-[#e5e2e1] focus:ring-2 focus:ring-primary/30 transition-all ${
-                      errors.includes("barcode") ? "border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.2)]" : "border-white/5"
-                    }`}
-                  />
-                  <span className="absolute left-6 top-1/2 -translate-y-1/2 material-symbols-outlined text-primary/40">barcode_scanner</span>
-                </div>
-              </div>
-
+            <div className="product-basic-grid grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-5">
               {/* Arabic Name */}
-              <div className="col-span-2 space-y-5">
+              <div className="sm:col-span-2 space-y-5">
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">اسم المنتج باللغة العربية</label>
                 <input
                   type="text"
@@ -521,7 +515,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
               </div>
 
               {/* English Name */}
-              <div className="col-span-2 space-y-5">
+              <div className="sm:col-span-2 space-y-5">
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">اسم المنتج بالإنجليزية · اختياري</label>
                 <input
                   dir="ltr"
@@ -541,97 +535,53 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
               {/* Category */}
               <div className="space-y-5">
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">التصنيف</label>
-                <div className="relative">
-                  <select
-                    value={form.category_id}
-                    onChange={(e) => {
-                      setForm({ ...form, category_id: e.target.value });
-                      if (errors.includes("category_id")) setErrors(errors.filter(err => err !== "category_id"));
-                    }}
-                    className={`w-full bg-[#201f1f] border rounded-full p-4 text-[#e5e2e1] appearance-none focus:ring-2 focus:ring-primary/30 transition-all ${
-                    errors.includes("category_id") ? "border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.2)]" : "border-white/5"
-                    }`}
-                  >
-                    <option value="">اختر الفئة</option>
-                    {categoriesList.map(c => (
-                      <option key={c.id} value={c.id}>{c.name_ar}</option>
-                    ))}
-                  </select>
-                  <span className="absolute left-6 top-1/2 -translate-y-1/2 material-symbols-outlined pointer-events-none opacity-40">expand_more</span>
-                </div>
+                <ProductSelect label="التصنيف" value={form.category_id} placeholder="اختر الفئة"
+                  options={categoriesList.map(c => ({ value: c.id, label: c.name_ar }))}
+                  invalid={errors.includes("category_id")}
+                  onChange={value => {
+                    setForm(previous => ({ ...previous, category_id: value, subCategory_id: "" }));
+                    setErrors(previous => previous.filter(error => error !== "category_id"));
+                  }} />
               </div>
 
               {/* Supplier */}
               <div className="space-y-5">
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">المورد الأساسي</label>
-                <div className="relative">
-                  <select
-                    value={form.supplier_id}
-                    onChange={(e) => {
-                      setForm({ ...form, supplier_id: e.target.value });
-                      if (errors.includes("supplier_id")) setErrors(errors.filter(err => err !== "supplier_id"));
-                    }}
-                    className={`w-full bg-[#201f1f] border rounded-full p-4 text-[#e5e2e1] appearance-none focus:ring-2 focus:ring-primary/30 transition-all ${
-                    errors.includes("supplier_id") ? "border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.2)]" : "border-white/5"
-                    }`}
-                  >
-                    <option value="">اختر المورد</option>
-                    {suppliersList.map(s => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
-                    ))}
-                  </select>
-                  <span className="absolute left-6 top-1/2 -translate-y-1/2 material-symbols-outlined pointer-events-none opacity-40">expand_more</span>
-                </div>
+                <ProductSelect label="المورد الأساسي" value={form.supplier_id} placeholder="اختر المورد"
+                  options={suppliersList.map(s => ({ value: s.id, label: s.name }))}
+                  invalid={errors.includes("supplier_id")}
+                  onChange={value => {
+                    setForm(previous => ({ ...previous, supplier_id: value }));
+                    setErrors(previous => previous.filter(error => error !== "supplier_id"));
+                  }} />
               </div>
 
               {/* Sub Category */}
               <div className="space-y-5">
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">الفئة الفرعية</label>
-                <div className="relative">
-                  <select
-                    value={form.subCategory_id}
-                    onChange={(e) => {
-                      setForm({ ...form, subCategory_id: e.target.value });
-                      if (errors.includes("subCategory_id")) setErrors(errors.filter(err => err !== "subCategory_id"));
-                    }}
-                    className={`w-full bg-[#201f1f] border rounded-full p-4 text-[#e5e2e1] appearance-none focus:ring-2 focus:ring-primary/30 transition-all ${
-                    errors.includes("subCategory_id") ? "border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.2)]" : "border-white/5"
-                    }`}
-                  >
-                    <option value="">اختر الفئة الفرعية</option>
-                    {subcategoriesList.filter(s => !form.category_id || s.category_id === form.category_id).map(s => (
-                      <option key={s.id} value={s.id}>{s.name_ar}</option>
-                    ))}
-                  </select>
-                  <span className="absolute left-6 top-1/2 -translate-y-1/2 material-symbols-outlined pointer-events-none opacity-40">expand_more</span>
-                </div>
+                <ProductSelect label="الفئة الفرعية" value={form.subCategory_id} placeholder="اختر الفئة الفرعية"
+                  options={subcategoriesList.filter(s => s.category_id === form.category_id).map(s => ({ value: s.id, label: s.name_ar }))}
+                  invalid={errors.includes("subCategory_id")}
+                  onChange={value => {
+                    setForm(previous => ({ ...previous, subCategory_id: value }));
+                    setErrors(previous => previous.filter(error => error !== "subCategory_id"));
+                  }} />
               </div>
 
               {/* Brand */}
               <div className="space-y-5">
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">العلامة التجارية / دار النشر</label>
-                <div className="relative">
-                  <select
-                    value={form.brand_id}
-                    onChange={(e) => {
-                      setForm({ ...form, brand_id: e.target.value });
-                      if (errors.includes("brand_id")) setErrors(errors.filter(err => err !== "brand_id"));
-                    }}
-                    className={`w-full bg-[#201f1f] border rounded-full p-4 text-[#e5e2e1] appearance-none focus:ring-2 focus:ring-primary/30 transition-all ${
-                    errors.includes("brand_id") ? "border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.2)]" : "border-white/5"
-                    }`}
-                  >
-                    <option value="">اختر العلامة التجارية</option>
-                    {brandsList.map(b => (
-                      <option key={b.id} value={b.id}>{b.name_ar}</option>
-                    ))}
-                  </select>
-                  <span className="absolute left-6 top-1/2 -translate-y-1/2 material-symbols-outlined pointer-events-none opacity-40">expand_more</span>
-                </div>
+                <ProductSelect label="العلامة التجارية" value={form.brand_id} placeholder="اختر العلامة التجارية"
+                  options={brandsList.map(b => ({ value: b.id, label: b.name_ar }))}
+                  invalid={errors.includes("brand_id")}
+                  onChange={value => {
+                    setForm(previous => ({ ...previous, brand_id: value }));
+                    setErrors(previous => previous.filter(error => error !== "brand_id"));
+                  }} />
               </div>
 
               {/* Active Status */}
-              <div className="col-span-2 space-y-5">
+              <div className="sm:col-span-2 space-y-5">
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">حالة المنتج</label>
                 <div className="flex items-center gap-4 bg-[#201f1f] border border-white/5 rounded-full p-4">
                   <div
@@ -654,7 +604,8 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
               </div>
 
               {/* Description */}
-              <div className="col-span-2 space-y-5">
+              <div className="sm:col-span-2 space-y-2"><label className="text-[#e2bfb0] text-sm font-semibold">مكان الصنف في المخزن / الرف · اختياري</label><input value={form.warehouseLocation} onChange={event => setForm({ ...form, warehouseLocation: event.target.value })} className="w-full bg-[#201f1f] border border-white/5 rounded-2xl p-4 text-white" /></div>
+              <div className="sm:col-span-2 space-y-5">
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">وصف تفصيلي</label>
                 <textarea
                   placeholder="أدخل هنا مواصفات المنتج، المؤلف، أو أي تفاصيل فنية..."
@@ -665,7 +616,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
               </div>
 
               {/* Image Upload */}
-              <div className="col-span-2 space-y-5">
+              <div className="sm:col-span-2 space-y-5">
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">صورة المنتج التعريفية</label>
                 <div 
                   className="relative border-2 border-dashed border-white/10 rounded-2xl p-10 flex flex-col items-center justify-center gap-4 bg-white/[0.01] hover:bg-white/[0.03] hover:border-primary/40 transition-all cursor-pointer group overflow-hidden min-h-[200px]"
@@ -716,13 +667,14 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
                 <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
                   <span className="material-symbols-outlined">layers</span>
                 </div>
-                <h3 className="text-2xl font-bold">إدارة الوحدات والمخزون</h3>
+                <h3 className="text-2xl font-bold">إدارة الوحدات</h3>
               </div>
               <div className="flex flex-col items-end gap-3">
                 <span className="bg-primary/20 text-primary px-4 py-1.5 rounded-full text-sm font-bold flex items-center gap-2">
                   <span className="material-symbols-outlined text-sm">inventory_2</span>
-                  إجمالي الرصيد: {totalBaseStock} قطعة
+                  الرصيد الحالي: {totalBaseStock} {units.find(unit => unit.isBase)?.name || "وحدة"}
                 </span>
+                <span className="text-xs text-[#e2bfb0]/70">تغيير الكمية يتم من استلام المخزون</span>
                 <button
                   onClick={addUnit}
                   className="flex items-center gap-2 text-primary font-bold text-sm bg-primary/10 px-6 py-3 rounded-full hover:bg-primary/20 transition-all border border-primary/20 whitespace-nowrap"
@@ -761,12 +713,12 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
               </div>
             </div>
 
-            <div className="bg-[#1c1b1b] rounded-2xl border border-white/5 overflow-x-auto custom-scrollbar">
-              <table className="w-full text-right min-w-[800px]">
+            <div className="product-units-scroll bg-[#1c1b1b] rounded-2xl border border-white/5 overflow-x-scroll custom-scrollbar">
+              <table className="product-units-table w-full min-w-[1040px]">
                 <thead>
                   <tr className="bg-white/5">
-                    {["نوع الوحدة", "عامل التحويل", "كمية المخزون", "الافتراضي", "إجراءات"].map((h) => (
-                      <th key={h} className="px-6 py-4 text-xs font-bold text-[#e2bfb0] uppercase tracking-wider whitespace-nowrap">
+                    {["نوع الوحدة", "عامل التحويل", "باركود الوحدة (اختياري)", "كمية المخزون", "إجراءات"].map((h) => (
+                      <th key={h} className="px-6 py-4 text-sm font-bold text-[#e2bfb0] whitespace-nowrap">
                         {h}
                       </th>
                     ))}
@@ -783,10 +735,13 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
                           </>
                         ) : (
                           <div className="flex items-center gap-2">
-                            <select
+                            <ProductSelect
+                              label={`وحدة ${unit.name}`}
                               value={unit.name}
-                              onChange={(e) => {
-                                const val = e.target.value;
+                              placeholder="اختر الوحدة"
+                              compact
+                              options={[...globalUnits.map(gu => ({ value: gu.name, label: gu.name })), { value: "__ADD_NEW__", label: "+ إضافة وحدة جديدة بالكامل" }]}
+                              onChange={(val) => {
                                 if (val === "__ADD_NEW__") {
                                   setShowNewUnitDialog(true);
                                 } else {
@@ -796,15 +751,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
                                     updateUnit(unit.id, "conversionFactor", selectedGlobal.conversion_factor);
                                   }
                                 }
-                              }}
-                              className="w-full bg-[#201f1f] border border-white/5 rounded-full px-4 py-2 text-sm text-right focus:ring-2 focus:ring-primary/30 transition-all appearance-none"
-                            >
-                              <option value="">اختر الوحدة</option>
-                              {globalUnits.map(gu => (
-                                <option key={gu.id} value={gu.name}>{gu.name}</option>
-                              ))}
-                              <option value="__ADD_NEW__">+ إضافة وحدة جديدة بالكامل</option>
-                            </select>
+                              }} />
                           </div>
                         )}
                       </td>
@@ -816,37 +763,17 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
                             type="number"
                             value={unit.conversionFactor || ""}
                             onChange={(e) => updateUnit(unit.id, "conversionFactor", parseFloat(e.target.value) || 0)}
-                            className="w-24 bg-[#201f1f] border border-white/5 rounded-full px-4 py-2 text-sm text-center focus:ring-2 focus:ring-primary/30 transition-all"
+                            className="product-unit-number"
                           />
                         )}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center gap-3">
-                          <input
-                            type="number"
-                            value={unit.stock === 0 ? "" : unit.stock}
-                            onChange={(e) => updateUnit(unit.id, "stock", parseFloat(e.target.value) || 0)}
-                            placeholder="0"
-                            className="w-24 bg-[#201f1f] border border-white/5 rounded-full px-4 py-2 text-sm text-center focus:ring-2 focus:ring-primary/30 transition-all"
-                          />
-                          {!unit.isBase && unit.stock > 0 && (
-                            <span className="text-xs text-[#e2bfb0] opacity-70 whitespace-nowrap">
-                              = {unit.stock * unit.conversionFactor} قطعة
-                            </span>
-                          )}
-                        </div>
+                      <td className="px-4 py-4">
+                        <UnitBarcodeField unitName={unit.name || "الوحدة"} value={unit.sku}
+                          readOnly={savedBarcodeIds.includes(unit.id)}
+                          onChange={value => updateUnit(unit.id, "sku", value)} />
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex justify-center">
-                          <div 
-                            onClick={() => setDefaultUnit(unit.id)}
-                            className={`w-10 h-6 rounded-full relative flex items-center px-1 cursor-pointer transition-colors ${
-                              unit.isDefault ? "bg-primary justify-end" : "bg-white/10 justify-start"
-                            }`}
-                          >
-                            <div className={`w-4 h-4 rounded-full ${unit.isDefault ? "bg-white" : "bg-white/40"}`} />
-                          </div>
-                        </div>
+                        <span className="text-xs text-[#e2bfb0]">{form.is_bundle ? "يُخصم من مكونات العرض" : unit.isBase ? `${totalBaseStock} ${unit.name}` : "يُعرض الرصيد بالوحدة الأساسية"}</span>
                       </td>
                       <td className="px-6 py-4 text-center whitespace-nowrap">
                         {unit.isBase ? (
@@ -867,6 +794,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
             </div>
           </section>
 
+          <BundleEditor enabled={form.is_bundle} onEnabledChange={enabled => setForm(prev => ({ ...prev, is_bundle: enabled }))} components={bundleComponents} onComponentsChange={setBundleComponents} products={productsList} productId={productId} />
           {/* Section 3: Pricing */}
           <section className="space-y-8 pt-8 border-t border-white/5 pb-12">
             <div className="flex items-center gap-4">
@@ -876,9 +804,9 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
               <h3 className="text-2xl font-bold">هيكل التسعير (ج.م)</h3>
             </div>
 
-            <div className="grid grid-cols-3 gap-8 bg-primary/[0.03] p-8 rounded-2xl border border-primary/10">
-              <div className="space-y-5">
-                <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">سعر الشراء (للوحدة الأساسية)</label>
+            <div className="product-pricing-grid flex flex-wrap gap-3 bg-primary/[0.03] p-4 rounded-2xl border border-primary/10">
+              <div className="space-y-5" style={{ flexBasis: `${Math.max(18, form.costPrice.length + 12)}ch` }}>
+                <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">تكلفة شراء القطعة الواحدة</label>
                 <div className="relative">
                   <input
                     type="number"
@@ -888,15 +816,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
                       setForm({ ...form, costPrice: newCost });
                       if (errors.includes("costPrice")) setErrors(errors.filter(err => err !== "costPrice"));
                       
-                      const margin = parseFloat(form.profitMargin) || 0;
-                      if (margin > 0) {
-                        const baseCost = parseFloat(newCost) || 0;
-                        const vat = parseFloat(form.vatRate) || 0;
-                        setUnits(units.map(u => ({
-                          ...u,
-                          retailPrice: (baseCost * u.conversionFactor * (1 + vat / 100) * (1 + margin / 100)).toFixed(2)
-                        })));
-                      }
+                      recalculatePrices(newCost, form.vatRate, form);
                     }}
                     className={`w-full bg-[#201f1f] border rounded-full p-5 text-2xl font-bold text-primary focus:ring-2 focus:ring-primary/30 transition-all ${
                       errors.includes("costPrice") ? "border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.2)]" : "border-white/5"
@@ -905,7 +825,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
                   <span className="absolute left-8 top-1/2 -translate-y-1/2 font-bold opacity-40">ج.م</span>
                 </div>
               </div>
-              <div className="space-y-5">
+              <div className="space-y-5" style={{ flexBasis: `${Math.max(18, form.vatRate.length + 12)}ch` }}>
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">نسبة ضريبة القيمة المضافة</label>
                 <div className="relative">
                   <input
@@ -916,15 +836,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
                       setForm({ ...form, vatRate: newVat });
                       if (errors.includes("vatRate")) setErrors(errors.filter(err => err !== "vatRate"));
                       
-                      const margin = parseFloat(form.profitMargin) || 0;
-                      if (margin > 0) {
-                        const baseCost = parseFloat(form.costPrice) || 0;
-                        const vat = parseFloat(newVat) || 0;
-                        setUnits(units.map(u => ({
-                          ...u,
-                          retailPrice: (baseCost * u.conversionFactor * (1 + vat / 100) * (1 + margin / 100)).toFixed(2)
-                        })));
-                      }
+                      recalculatePrices(form.costPrice, newVat, form);
                     }}
                     className={`w-full bg-[#201f1f] border rounded-full p-5 text-2xl font-bold text-[#e5e2e1] focus:ring-2 focus:ring-primary/30 transition-all ${
                       errors.includes("vatRate") ? "border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.2)]" : "border-white/5"
@@ -933,7 +845,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
                   <span className="absolute left-8 top-1/2 -translate-y-1/2 font-bold opacity-40">%</span>
                 </div>
               </div>
-              <div className="space-y-5">
+              <div className="space-y-5" style={{ flexBasis: `${Math.max(18, form.profitMargin.length + 12)}ch` }}>
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">هامش الربح (المستهلك)</label>
                 <div className="relative">
                   <input
@@ -942,105 +854,56 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
                     onChange={(e) => {
                       const newMargin = e.target.value;
                       setForm({ ...form, profitMargin: newMargin });
-                      const margin = parseFloat(newMargin) || 0;
-                      const baseCost = parseFloat(form.costPrice) || 0;
-                      const vat = parseFloat(form.vatRate) || 0;
-                      
-                      setUnits(units.map(u => ({
-                        ...u,
-                        retailPrice: (baseCost * u.conversionFactor * (1 + vat / 100) * (1 + margin / 100)).toFixed(2)
-                      })));
+                      recalculatePrices(form.costPrice, form.vatRate, { ...form, profitMargin: newMargin }, "retailPrice");
                     }}
                     className={`w-full bg-[#201f1f] border rounded-full p-5 text-2xl font-bold text-[#e5e2e1] focus:ring-2 focus:ring-primary/30 transition-all border-white/5`}
                   />
                   <span className="absolute left-8 top-1/2 -translate-y-1/2 font-bold opacity-40">%</span>
                 </div>
               </div>
+              {([
+                { key: "semiWholesaleMargin", tier: "semiWholesalePrice", label: "هامش الربح (نصف الجملة)" },
+                { key: "wholesaleMargin", tier: "wholesalePrice", label: "هامش الربح (الجملة)" },
+                { key: "superWholesaleMargin", tier: "superWholesalePrice", label: "هامش الربح (سوبر جملة)" },
+                { key: "vipMargin", tier: "vipPrice", label: "هامش الربح (كبار العملاء)" },
+              ] as const).map(({ key, tier, label }) => (
+                <div className="space-y-5" key={key} style={{ flexBasis: `${Math.max(18, form[key].length + 12)}ch` }}>
+                  <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">{label}</label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={form[key]}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setForm(previous => ({ ...previous, [key]: value }));
+                        recalculatePrices(form.costPrice, form.vatRate, { ...form, [key]: value }, tier);
+                      }}
+                      className="w-full bg-[#201f1f] border border-white/5 rounded-full p-5 text-2xl font-bold text-[#e5e2e1] focus:ring-2 focus:ring-primary/30"
+                    />
+                    <span className="absolute left-8 top-1/2 -translate-y-1/2 font-bold opacity-40">%</span>
+                  </div>
+                </div>
+              ))}
             </div>
+            <p className="text-xs text-[#e2bfb0]/70">تكلفة الشراء للقطعة. سعر الجملة في قسم الدستة هو سعر الدستة كاملة عندما يكون عامل التحويل 12.</p>
 
             <div className="space-y-8">
               {units.map((unit, index) => (
                 <div key={unit.id} className="space-y-6">
                   <p className="text-[#e2bfb0] text-sm font-bold flex items-center gap-2">
                     <span className="material-symbols-outlined text-lg text-primary">sell</span>
-                    توزيع أسعار البيع - شريحة الـ {unit.name || `وحدة مخصصة ${index + 1}`}
+                    أسعار {unit.name || `وحدة مخصصة ${index + 1}`} ({unit.conversionFactor} قطعة) · تكلفة الشراء {((parseFloat(form.costPrice) || 0) * unit.conversionFactor * (1 + (parseFloat(form.vatRate) || 0) / 100)).toFixed(2)} ج.م
                   </p>
 
-                  <div className="flex items-center gap-3 mt-4">
-                    <label className="text-sm font-medium text-[#e2bfb0]">هل هذا المنتج عرض مجمع؟</label>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input 
-                        type="checkbox" 
-                        checked={form.is_bundle}
-                        onChange={(e) => setForm({...form, is_bundle: e.target.checked})}
-                        className="sr-only peer" 
-                      />
-                      <div className="w-11 h-6 bg-[#353534] peer-focus:outline-none rounded-full peer peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:right-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
-                    </label>
-                  </div>
-                  
-                  {form.is_bundle && (
-                    <div className="mt-4 border-t border-white/10 pt-4">
-                      <div className="flex justify-between items-center mb-4">
-                        <h4 className="text-sm font-medium text-[#e2bfb0]">مكونات العرض</h4>
-                        <button
-                          type="button"
-                          onClick={addBundleComponent}
-                          className="app-secondary-button"
-                        >
-                          + إضافة مكون
-                        </button>
-                      </div>
-                      
-                      <div className="space-y-3">
-                        {bundleComponents.map((comp) => (
-                          <div key={comp.id} className="flex gap-3 items-end p-3 bg-white/5 rounded-2xl border border-white/5">
-                            <div className="flex-1">
-                              <label className="app-muted block text-xs font-medium mb-1">المنتج المكون</label>
-                              <select 
-                                value={comp.component_id} 
-                                onChange={(e) => updateBundleComponent(comp.id, "component_id", e.target.value)}
-                                className="app-field"
-                              >
-                                <option value="">-- اختر المنتج --</option>
-                                {productsList.filter(p => !p.is_bundle && p.id !== productId).map(p => (
-                                  <option key={p.id} value={p.id}>{p.name_ar}</option>
-                                ))}
-                              </select>
-                            </div>
-                            <div className="w-32">
-                              <label className="app-muted block text-xs font-medium mb-1">الكمية في العرض</label>
-                              <input 
-                                type="number" 
-                                min="1"
-                                value={comp.quantity}
-                                onChange={(e) => updateBundleComponent(comp.id, "quantity", parseInt(e.target.value))}
-                                className="app-field text-left"
-                              />
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => removeBundleComponent(comp.id)}
-                              className="text-red-500 hover:text-red-400 p-2 bg-red-500/10 rounded-lg transition-colors"
-                            >
-                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                            </button>
-                          </div>
-                        ))}
-                        {bundleComponents.length === 0 && (
-                          <div className="app-muted text-center p-4 text-sm bg-white/5 rounded-2xl border border-dashed border-white/10">
-                            لا يوجد مكونات مضافة حتى الآن.
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
 
                   <div className="border-t border-white/10 mt-6 pt-6"></div>
-                  <div className="grid grid-cols-3 gap-6">
+                  <div className="product-price-list flex flex-wrap gap-3">
                     {[
                       { label: "سعر المستهلك", key: "retailPrice" as const, highlight: false },
+                      { label: "سعر نصف الجملة", key: "semiWholesalePrice" as const, highlight: false },
                       { label: "سعر الجملة", key: "wholesalePrice" as const, highlight: false },
+                      { label: "سعر سوبر جملة", key: "superWholesalePrice" as const, highlight: false },
                       { label: "سعر كبار العملاء", key: "vipPrice" as const, highlight: true },
                     ].map((tier) => {
                       const salePrice = parseFloat(unit[tier.key]) || 0;
@@ -1058,7 +921,8 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
                       return (
                         <div
                           key={tier.label}
-                          className={`bg-[#1c1b1b] rounded-2xl p-6 space-y-3 border transition-colors ${
+                          style={{ flexBasis: `${Math.max(17, String(unit[tier.key]).length + 12)}ch` }}
+                          className={`product-price-card bg-[#1c1b1b] rounded-xl p-4 space-y-2 border transition-colors ${
                             errors.includes(errorKey)
                               ? "border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.2)]"
                               : tier.highlight
@@ -1066,7 +930,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
                                 : "border-white/5 hover:bg-[#201f1f]"
                           }`}
                         >
-                          <span className={`text-xs font-bold uppercase tracking-wider ${tier.highlight ? "text-primary" : "text-[#e2bfb0]"}`}>
+                          <span className={`text-sm font-bold ${tier.highlight ? "text-primary" : "text-[#e2bfb0]"}`}>
                             {tier.label}
                           </span>
                           <div className="relative">
@@ -1087,7 +951,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
                             <span className="material-symbols-outlined text-xs">
                               {margin >= 0 ? "trending_up" : "trending_down"}
                             </span>
-                            هامش ربح {Number(margin || 0).toFixed(0)}%
+                            {margin < 0 ? "خسارة" : "هامش ربح"} {Math.abs(margin).toFixed(2)}%
                           </div>
                         </div>
                       );
@@ -1100,7 +964,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
         </div>
 
         {/* Footer Actions */}
-        <footer className="px-16 py-8 bg-[#0e0e0e]/80 backdrop-blur-xl border-t border-white/5 flex items-center gap-6 sticky bottom-0">
+        <footer className="px-5 py-5 sm:px-8 xl:px-12 bg-[#0e0e0e]/80 backdrop-blur-xl border-t border-white/5 flex flex-wrap items-center gap-3 sticky bottom-0">
           <button 
             onClick={handleSave}
             disabled={isSaving || isLoading}

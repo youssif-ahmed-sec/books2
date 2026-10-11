@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from uuid import UUID
 
-from models.user import User, RoleEnum
+from models.user import User, RoleEnum, AuditLog
 from schemas.auth import UserProfileResponse, UserSyncRequest, UserRegisterRequest, TokenResponse
 from core.security import hash_password, verify_password, create_access_token
 from core.dependencies import get_current_user, require_admin
@@ -69,7 +69,19 @@ async def login(
         extra_claims={"role": user.role.value},
     )
 
+    db.add(AuditLog(user_id=user.id, action="LOGIN", entity_type="User", entity_id=str(user.id)))
+    await db.commit()
+
     return TokenResponse(access_token=token, user=user)
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    db.add(AuditLog(user_id=current_user.id, action="LOGOUT", entity_type="User", entity_id=str(current_user.id)))
+    await db.commit()
 
 
 # ── Register (Admin only in production) ─────────────────────────────────────

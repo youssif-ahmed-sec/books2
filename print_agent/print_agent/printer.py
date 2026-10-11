@@ -3,15 +3,14 @@ import queue
 import threading
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List
 
-import arabic_reshaper
 import qrcode
 import barcode
 from barcode.writer import ImageWriter
 import win32print
 import win32ui
-from bidi.algorithm import get_display
 from PIL import Image, ImageDraw, ImageFont, ImageWin
 
 from print_agent.config import config
@@ -32,23 +31,28 @@ def is_arabic(text: str) -> bool:
     )
 
 
-def rtl(text: Any) -> str:
-    if text is None:
-        return ""
-    text = str(text)
-    if not is_arabic(text):
-        return text
-    try:
-        return get_display(arabic_reshaper.reshape(text))
-    except Exception:
-        return text
-
-
 class PrinterManager:
     PAPER_WIDTH_PX = 576
     MARGIN = 16
     CONTENT_WIDTH = PAPER_WIDTH_PX - (MARGIN * 2)
     RENDER_SCALE = 2
+
+    @staticmethod
+    def _paste_store_logo(image: Image.Image, y: int, scale: int) -> int:
+        path = Path(__file__).resolve().parent / "assets" / "saud-logo.jpg"
+        if not path.is_file():
+            return y
+        with Image.open(path) as source:
+            logo = source.convert("RGB")
+        ink = logo.convert("L").point(lambda value: 255 if value < 230 else 0)
+        bounds = ink.getbbox()
+        if not bounds:
+            return y
+        logo = logo.crop(bounds)
+        mono = logo.convert("L").point(lambda value: 0 if value < 215 else 255).convert("RGB")
+        mono.thumbnail((240 * scale, 80 * scale), Image.Resampling.LANCZOS)
+        image.paste(mono, ((image.width - mono.width) // 2, y))
+        return y + mono.height + (8 * scale)
 
     def __init__(self):
         self._job_queue: "queue.Queue[Dict[str, Any]]" = queue.Queue()
@@ -89,6 +93,13 @@ class PrinterManager:
         if not order:
             log.warning("No order data provided to native printer.")
             return False
+        if receipt_type not in {"customer", "invoice", "barcode", "test"}:
+            raise ValueError("Unsupported print document type")
+        if receipt_type == "barcode":
+            copies = order.get("quantity", order.get("qty", 1))
+            if isinstance(copies, bool) or not isinstance(copies, int) or not 1 <= copies <= 20:
+                raise ValueError("Barcode quantity must be an integer from 1 to 20")
+            self._generate_barcode_image(order)
         self._last_order_id = order.get("id")
         self._last_order_data = order
         self._last_receipt_type = receipt_type
@@ -230,7 +241,7 @@ class PrinterManager:
 
         # Allocate enough vertical room for wrapped product names and addresses;
         # the image is cropped to the actual drawn height before printing.
-        height = u(900 + (len(items) * 190))
+        height = u(1050 + (len(items) * 190))
         if self._has_customer_info(order):
             height += u(300)
         image = Image.new("RGB", (width, height), "white")
@@ -238,12 +249,14 @@ class PrinterManager:
         y = margin
 
         def text_size(text: Any, font) -> tuple[int, int]:
-            shaped = rtl(text)
-            box = draw.textbbox((0, 0), shaped, font=font)
+            value = str(text)
+            box = draw.textbbox((0, 0), value, font=font, direction="rtl" if is_arabic(value) else "ltr")
             return box[2] - box[0], box[3] - box[1]
 
         def draw_text(text: Any, x: int, y_pos: int, font, anchor: str = "la", fill: str = "black"):
-            draw.text((x, y_pos), rtl(text), fill=fill, font=font, anchor=anchor)
+            value = str(text)
+            draw.text((x, y_pos), value, fill=fill, font=font, anchor=anchor,
+                      direction="rtl" if is_arabic(value) else "ltr")
 
         def draw_right(text: Any, y_pos: int, font, x: int = content_right):
             draw_text(text, x, y_pos, font, "ra")
@@ -263,7 +276,7 @@ class PrinterManager:
         def wrap_text(text: Any, font, max_width: int) -> list[str]:
             raw = str(text or "")
             if not raw:
-                return [rtl("")]
+                return [""]
 
             words = raw.split()
             if not words:
@@ -272,34 +285,37 @@ class PrinterManager:
             lines: list[str] = []
             current = ""
 
+            def measured(value: str) -> float:
+                return draw.textlength(value, font=font, direction="rtl" if is_arabic(value) else "ltr")
+
             def append_fitted_chunk(chunk: str):
                 piece = ""
                 for char in chunk:
                     candidate = piece + char
-                    if piece and draw.textlength(rtl(candidate), font=font) > max_width:
-                        lines.append(rtl(piece))
+                    if piece and measured(candidate) > max_width:
+                        lines.append(piece)
                         piece = char
                     else:
                         piece = candidate
                 if piece:
-                    lines.append(rtl(piece))
+                    lines.append(piece)
 
             for word in words:
                 candidate = f"{current} {word}".strip()
-                if draw.textlength(rtl(candidate), font=font) <= max_width:
+                if measured(candidate) <= max_width:
                     current = candidate
                     continue
                 if current:
-                    lines.append(rtl(current))
+                    lines.append(current)
                     current = ""
-                if draw.textlength(rtl(word), font=font) <= max_width:
+                if measured(word) <= max_width:
                     current = word
                 else:
                     append_fitted_chunk(word)
 
             if current:
-                lines.append(rtl(current))
-            return lines or [rtl(raw)]
+                lines.append(current)
+            return lines or [raw]
 
         full_order_number = self._value(order, "orderNumber", "order_number", "id", default="---")
         order_number = str(full_order_number).split("-")[-1] if "-" in str(full_order_number) else str(full_order_number)
@@ -308,6 +324,7 @@ class PrinterManager:
         formatted_date, formatted_time = self._format_date_parts(self._value(order, "created_at", "order_date"))
 
         # Saud El Shafie Library Header
+        y = self._paste_store_logo(image, y, scale)
         y += u(20)
         draw_center("مكتبة سعود الشافعي", y, fonts["order"])
         y += u(50)
@@ -315,8 +332,7 @@ class PrinterManager:
         draw_right(formatted_date, y + u(14), fonts["small"])
         draw_right(formatted_time, y + u(42), fonts["small"])
         order_text = f"رقم الفاتورة {order_number}"
-        shaped_order = rtl(order_text)
-        order_bbox = draw.textbbox((0, 0), shaped_order, font=fonts["order"])
+        order_bbox = draw.textbbox((0, 0), order_text, font=fonts["order"], direction="rtl")
         order_w = order_bbox[2] - order_bbox[0]
         order_h = order_bbox[3] - order_bbox[1]
         box_pad_x = u(14)
@@ -333,7 +349,7 @@ class PrinterManager:
         )
         text_x = box_left + box_pad_x - order_bbox[0]
         text_y = box_top + box_pad_y - order_bbox[1]
-        draw.text((text_x, text_y), shaped_order, fill="black", font=fonts["order"])
+        draw.text((text_x, text_y), order_text, fill="black", font=fonts["order"], direction="rtl")
 
         y += u(112) + u(8)
         line(y, dash=True)
@@ -375,8 +391,9 @@ class PrinterManager:
                     fill="black",
                     font=fonts["item"],
                     anchor="ra",
+                    direction="rtl" if is_arabic(line_text) else "ltr",
                 )
-            draw_text(f"{price:.0f}x", price_x, row_start_y, fonts["item"], "ma")
+            draw_text(f"{price:g}", price_x, row_start_y, fonts["item"], "ma")
             draw_text(f"{total:.0f}", total_x, row_start_y, fonts["item"], "ma")
             y += max(u(44), len(name_lines) * u(34) + u(10))
             draw.line((margin, y, content_right, y), fill="#eeeeee", width=scale)
@@ -404,12 +421,29 @@ class PrinterManager:
             draw_text(f"- {discount_amount:.2f}", margin, y, fonts["small"])
             y += u(34)
 
+        shipping_cost = self._number(self._value(order, "shipping_cost", default=0))
+        if shipping_cost > 0:
+            draw_right("الشحن:", y, fonts["small"])
+            draw_text(f"{shipping_cost:.2f}", margin, y, fonts["small"])
+            y += u(34)
+
+        tax_amount = self._number(self._value(order, "tax_amount", default=0))
+        if tax_amount > 0:
+            draw_right("ضريبة ضمن السعر:", y, fonts["small"])
+            draw_text(f"{tax_amount:.2f}", margin, y, fonts["small"])
+            y += u(34)
+
         y += u(2)
         line(y, dash=True)
         y += u(12)
         draw_right("الإجمالي النهائي:", y, fonts["grand"])
         draw_text(f"{grand_total:.2f} ج.م", margin, y, fonts["grand"])
         y += u(50)
+
+        payment_method = self._value(order, "payment_method", default="")
+        if receipt_type == "invoice" and payment_method:
+            draw_right(f"وسيلة الدفع: {payment_method}", y, fonts["small"])
+            y += u(34)
 
         y = self._draw_customer_info(order, image, draw, fonts, y, scale)
 
@@ -426,45 +460,40 @@ class PrinterManager:
         scale = self.RENDER_SCALE
         fonts = self._get_fonts(scale)
         width = self.PAPER_WIDTH_PX * scale
-        height = 400 * scale # Adjust based on label size
+        height = 270 * scale
         image = Image.new("RGB", (width, height), "white")
         draw = ImageDraw.Draw(image)
-        
-        def draw_center(text: Any, y_pos: int, font):
-            shaped = rtl(text)
-            draw.text((width // 2, y_pos), shaped, fill="black", font=font, anchor="ma")
 
-        y = 20 * scale
+        def draw_center(text: Any, y_pos: int, font):
+            value = str(text)
+            direction = "rtl" if is_arabic(value) else "ltr"
+            draw.text((width // 2, y_pos), value, fill="black", font=font, anchor="ma", direction=direction)
+
+        y = 12 * scale
         draw_center("مكتبة سعود الشافعي", y, fonts["small"])
-        y += 40 * scale
+        y += 30 * scale
         
         name = product.get("name_ar") or product.get("name") or ""
-        draw_center(name, y, fonts["item"])
-        y += 50 * scale
+        unit_name = product.get("unit_name") or ""
+        draw_center(f"{name} · {unit_name}" if unit_name else name, y, fonts["item"])
+        y += 36 * scale
         
+        barcode_value = str(product.get("barcode") or product.get("sku") or "")
+        if not barcode_value or len(barcode_value) > 64 or any(ord(char) < 32 or ord(char) > 126 for char in barcode_value):
+            raise ValueError("Barcode must contain 1-64 printable ASCII characters")
+        code128 = barcode.get_barcode_class("code128")
+        barcode_image = code128(barcode_value, writer=ImageWriter()).render(
+            {"write_text": False, "module_height": 7.0, "module_width": 0.25, "quiet_zone": 2.0}
+        ).convert("RGB")
+        if barcode_image.width > width - (self.MARGIN * 2 * scale):
+            raise ValueError("Barcode is too wide for the label; use a shorter code")
+        image.paste(barcode_image, ((width - barcode_image.width) // 2, y))
+        y += barcode_image.height + (5 * scale)
+        draw_center(barcode_value, y, fonts["tiny"])
+        y += 25 * scale
         price = product.get("sell_price") or product.get("price") or 0
         draw_center(f"السعر: {price} ج.م", y, fonts["small"])
-        y += 50 * scale
-        
-        barcode_value = str(product.get("barcode") or product.get("id") or "0000000000")
-        try:
-            code128 = barcode.get_barcode_class('code128')
-            writer = ImageWriter()
-            # Disable text under barcode if we want to draw it ourselves, but writer does it
-            writer.set_options({'write_text': True, 'module_height': 10.0, 'module_width': 0.3})
-            barcode_image = code128(barcode_value, writer=writer).render()
-            
-            # Resize barcode to fit the paper width
-            bc_w = int(width * 0.8)
-            bc_h = int(120 * scale)
-            barcode_image = barcode_image.resize((bc_w, bc_h))
-            
-            x = (width - bc_w) // 2
-            image.paste(barcode_image, (x, y))
-            y += bc_h + (20 * scale)
-        except Exception as e:
-            log.error(f"Failed to generate barcode image: {e}")
-            
+        y += 38 * scale
         return image.crop((0, 0, width, y))
 
     def _has_customer_info(self, order: Dict[str, Any]) -> bool:
@@ -496,10 +525,14 @@ class PrinterManager:
         y += u(14)
 
         def draw_center(text, y_pos, font):
-            draw.text(((self.PAPER_WIDTH_PX * scale) // 2, y_pos), rtl(text), fill="black", font=font, anchor="ma")
+            value = str(text)
+            draw.text(((self.PAPER_WIDTH_PX * scale) // 2, y_pos), value, fill="black", font=font,
+                      anchor="ma", direction="rtl" if is_arabic(value) else "ltr")
 
         def draw_right(text, y_pos, font):
-            draw.text((x2 - u(12), y_pos), rtl(text), fill="black", font=font, anchor="ra")
+            value = str(text)
+            draw.text((x2 - u(12), y_pos), value, fill="black", font=font,
+                      anchor="ra", direction="rtl" if is_arabic(value) else "ltr")
 
         draw_center("بيانات العميل", y, fonts["small"])
         y += u(37)

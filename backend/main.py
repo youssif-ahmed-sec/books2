@@ -4,8 +4,7 @@ from fastapi.responses import Response, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 import os
 from pathlib import Path
-from fastapi_cache import FastAPICache
-from fastapi_cache.backends.inmemory import InMemoryBackend
+from core.reference_cache import open_reference_cache, close_reference_cache
 
 from api.v1.products import router as products_router
 from api.v1.inventory import router as inventory_router
@@ -20,16 +19,22 @@ from api.v1.financials import router as financials_router
 from api.v1.webhooks import router as webhooks_router
 from api.v1.dashboards import router as dashboards_router
 from api.v1.reports import router as reports_router
+from api.v1.purchases import router as purchases_router
+from api.v1.inventory_ops import router as inventory_ops_router
+from api.v1.returns import router as returns_router
+from api.v1.cash_register import router as cash_register_router
+from api.v1.audit import router as audit_router
+from api.v1.warehouse_reports import router as warehouse_reports_router
+from core.feature_flags import warehouse_only_mode
 from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Initialize cache
-    FastAPICache.init(InMemoryBackend(), prefix="fastapi-cache")
-    print("✅ Cache initialized.")
-    yield
-    # Cleanup on shutdown (if any)
-    print("🛑 Shutting down.")
+    await open_reference_cache(os.getenv("REDIS_URL"))
+    try:
+        yield
+    finally:
+        await close_reference_cache()
 app = FastAPI(
     title="Souod El Shafie Bookstore API",
     description="""
@@ -89,16 +94,28 @@ app.add_middleware(
 app.include_router(auth_router,      prefix="/api/v1")
 app.include_router(products_router,  prefix="/api/v1")
 app.include_router(inventory_router, prefix="/api/v1")
-app.include_router(orders_router,    prefix="/api/v1")
 app.include_router(global_units_router, prefix="/api/v1")
 app.include_router(upload_router,    prefix="/api/v1")
 app.include_router(suppliers_router, prefix="/api/v1")
-app.include_router(customers_router, prefix="/api/v1")
-app.include_router(pos_router,       prefix="/api/v1")
-app.include_router(financials_router, prefix="/api/v1")
-app.include_router(webhooks_router,  prefix="/api/v1")
-app.include_router(dashboards_router, prefix="/api/v1")
-app.include_router(reports_router,    prefix="/api/v1")
+app.include_router(purchases_router,  prefix="/api/v1")
+app.include_router(inventory_ops_router, prefix="/api/v1")
+app.include_router(audit_router, prefix="/api/v1")
+
+# Temporary warehouse handoff mode. The full routers remain available in source
+# and can be restored by an explicit configuration change and frontend rebuild.
+WAREHOUSE_ONLY_MODE = warehouse_only_mode()
+if WAREHOUSE_ONLY_MODE:
+    app.include_router(warehouse_reports_router, prefix="/api/v1")
+else:
+    app.include_router(orders_router, prefix="/api/v1")
+    app.include_router(customers_router, prefix="/api/v1")
+    app.include_router(pos_router, prefix="/api/v1")
+    app.include_router(financials_router, prefix="/api/v1")
+    app.include_router(webhooks_router, prefix="/api/v1")
+    app.include_router(dashboards_router, prefix="/api/v1")
+    app.include_router(reports_router, prefix="/api/v1")
+    app.include_router(returns_router, prefix="/api/v1")
+    app.include_router(cash_register_router, prefix="/api/v1")
 
 
 @app.get("/health", tags=["Health"])

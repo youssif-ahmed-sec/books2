@@ -1,3 +1,5 @@
+import { notifyError, notifyOffline } from "@/lib/notifications";
+
 export const API_BASE_URL = "/api/v1";
 
 interface FetchOptions extends RequestInit {
@@ -25,12 +27,24 @@ export async function fetchApi(endpoint: string, options: FetchOptions = {}) {
 
   const url = `${API_BASE_URL}${endpoint}`;
   
-  const response = await fetch(url, {
-    headers: requestHeaders,
-    ...rest,
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: requestHeaders,
+      ...rest,
+    });
+  } catch (cause) {
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      notifyOffline();
+      throw new Error("انقطع الاتصال بالإنترنت. حاول مرة أخرى بعد عودة الاتصال.", { cause });
+    }
+    const message = "تعذر الاتصال بالخادم. حاول مرة أخرى بعد قليل.";
+    notifyError(message);
+    throw new Error(message, { cause });
+  }
 
   if (!response.ok) {
+    if (response.status >= 500) notifyError("حدث خطأ بالخادم. حاول مرة أخرى بعد قليل.");
     if (response.status === 401 && requireAuth) {
       if (typeof window !== "undefined") {
         localStorage.removeItem("access_token");
@@ -53,5 +67,11 @@ export async function fetchApi(endpoint: string, options: FetchOptions = {}) {
     return null;
   }
 
-  return response.json();
+  try {
+    return await response.json();
+  } catch (cause) {
+    const message = "تعذر قراءة رد الخادم. حاول مرة أخرى بعد قليل.";
+    notifyError(message);
+    throw new Error(message, { cause });
+  }
 }

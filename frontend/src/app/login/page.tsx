@@ -144,7 +144,7 @@ export default function LoginPage() {
               )}
             </button>
           </form>
-          <p className="app-muted mt-9 border-t border-white/10 pt-7 text-center text-xs leading-6">هذا النظام مخصص لفريق المكتبة. تواصل مع المدير إذا واجهت مشكلة في الدخول.</p>
+          <p className="app-muted mt-9 text-center text-xs leading-6">© 2026 جميع الحقوق محفوظة لمكتبة سعود الشافعي</p>
         </div>
       </main>
     </div>

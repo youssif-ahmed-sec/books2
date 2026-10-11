@@ -1,11 +1,13 @@
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import List, Optional
+from typing import Literal
 from uuid import UUID
 from datetime import datetime
 from decimal import Decimal
 
 from models.order import OrderStatusEnum, OrderSourceEnum
 from models.product import PriceLevelEnum
+from schemas.payment import PaymentMethod
 
 
 # ── Request Schemas ─────────────────────────────────────────────────────────
@@ -28,7 +30,7 @@ class OrderCreate(BaseModel):
     status:          OrderStatusEnum = OrderStatusEnum.CLOSED
     source:          Optional[str] = "Walk-In Customer"
     discount_amount: Decimal = Field(default=Decimal("0"), ge=0, allow_inf_nan=False)
-    payment_method:  str = "Cash"
+    payment_method:  PaymentMethod = "Cash"
     notes:           Optional[str] = None
     items:           List[OrderItemCreate]
     request_id:      UUID
@@ -50,11 +52,12 @@ class OrderCreate(BaseModel):
 class OrderDraftCreate(BaseModel):
     """ Used by OMS. Creates an order without instant deduction. """
     customer_id:     Optional[UUID] = None
+    lead_id:         Optional[UUID] = None
     source:          OrderSourceEnum = OrderSourceEnum.MANUAL
     status:          OrderStatusEnum = OrderStatusEnum.DRAFT
     discount_amount: Decimal = Field(default=Decimal("0"), ge=0, allow_inf_nan=False)
     shipping_cost:   Decimal = Field(default=Decimal("0"), ge=0, allow_inf_nan=False)
-    payment_method:  str = "Cash"
+    payment_method:  PaymentMethod = "Cash"
     notes:           Optional[str] = None
     assigned_to_id:  Optional[UUID] = None
     items:           List[OrderItemCreate]
@@ -77,6 +80,27 @@ class OrderStatusUpdate(BaseModel):
     status: OrderStatusEnum
     warehouse_id: Optional[UUID] = None # Required if transitioning to DELIVERED/CLOSED
 
+
+class OrderAssignmentUpdate(BaseModel):
+    user_id: UUID
+
+
+class PreparedItem(BaseModel):
+    order_item_id: UUID
+    picked_quantity: Decimal = Field(ge=0, allow_inf_nan=False)
+
+
+class OrderPreparation(BaseModel):
+    items: List[PreparedItem] = Field(min_length=1)
+    package_confirmed: bool
+
+
+class LeadCreate(BaseModel):
+    customer_id: Optional[UUID] = None
+    source: OrderSourceEnum = OrderSourceEnum.PHONE_CALL
+    notes: str = Field(min_length=2, max_length=5000)
+    priority: Literal["Low", "Normal", "High"] = "Normal"
+
 # ── Response Schemas ────────────────────────────────────────────────────────
 
 class OrderItemResponse(BaseModel):
@@ -90,6 +114,8 @@ class OrderItemResponse(BaseModel):
     price_level:        str
     unit_price:         float   # server-fetched — safe to expose in response
     total_price:        float   # server-computed
+    tax_rate:           Optional[float] = None
+    product_name:       Optional[str] = None
     created_at:         datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -103,6 +129,7 @@ class OrderResponse(BaseModel):
     status:          str
     allowed_next_statuses: List[str] = []
     source:          Optional[str] = None
+    priority:        str = "Normal"
     total_amount:    float
     tax_amount:      float
     discount_amount: float
@@ -114,3 +141,12 @@ class OrderResponse(BaseModel):
     items:           List[OrderItemResponse] = []
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class QuotationItemResponse(OrderItemResponse):
+    product_name: str
+
+
+class QuotationResponse(OrderResponse):
+    customer_name: Optional[str] = None
+    items: List[QuotationItemResponse]

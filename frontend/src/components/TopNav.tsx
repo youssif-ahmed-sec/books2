@@ -4,7 +4,9 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { fetchApi } from "@/lib/api";
+import { getCurrentUser } from "@/lib/currentUser";
 import ThemeToggle from "@/components/ThemeToggle";
+import { warehouseOnlyMode } from "@/lib/warehouseMode";
 
 interface TopNavProps { title: string }
 interface SearchProduct { id: string; name_ar: string; sku: string }
@@ -32,9 +34,9 @@ export default function TopNav({ title }: TopNavProps) {
   const accountRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetchApi("/auth/me").then((currentUser: CurrentUser) => {
+    getCurrentUser().then((currentUser: CurrentUser) => {
       setUser(currentUser);
-      if (currentUser.role === "ADMIN" || currentUser.role === "CASHIER_ORDERS") {
+      if (!warehouseOnlyMode && (currentUser.role === "ADMIN" || currentUser.role === "CASHIER_ORDERS")) {
         fetchApi("/dashboards/operational")
           .then((summary: { new_leads: number; active_orders: number }) => setHasOrderUpdates(summary.new_leads + summary.active_orders > 0))
           .catch(() => {});
@@ -68,6 +70,7 @@ export default function TopNav({ title }: TopNavProps) {
   }, [query]);
 
   const logout = () => {
+    fetchApi("/auth/logout", { method: "POST" }).catch(console.error);
     localStorage.removeItem("access_token");
     router.replace("/login");
   };
@@ -98,7 +101,7 @@ export default function TopNav({ title }: TopNavProps) {
       </div>
       <div className="app-top-spacer flex-1" aria-hidden="true" />
       <div className="flex shrink-0 items-center gap-3">
-        {(user?.role === "ADMIN" || user?.role === "CASHIER_ORDERS") && (
+        {!warehouseOnlyMode && (user?.role === "ADMIN" || user?.role === "CASHIER_ORDERS") && (
           <Link href="/inbox" aria-label="متابعة الطلبات والإشعارات" title="متابعة الطلبات" className="app-icon-button relative">
             <span className="material-symbols-outlined">notifications</span>
             {hasOrderUpdates && <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-primary" aria-hidden="true" />}

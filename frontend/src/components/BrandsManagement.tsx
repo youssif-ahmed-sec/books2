@@ -1,5 +1,7 @@
 "use client";
 
+import { notifyError } from "@/lib/notifications";
+
 import React, { useState, useEffect } from "react";
 import { fetchApi } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
@@ -19,7 +21,7 @@ export default function BrandsManagement() {
   useEffect(() => {
     fetchApi("/products/brands")
       .then(setBrands)
-      .catch((err) => console.error("Failed to load brands:", err))
+      .catch((err) => notifyError(errorMessage(err, "تعذر تحميل العلامات التجارية")))
       .finally(() => setLoading(false));
   }, []);
 
@@ -93,7 +95,7 @@ export default function BrandsManagement() {
       loadBrands();
     } catch (err) {
       console.error("Failed to delete brand:", err);
-      alert("تعذر الحذف، ربما تكون مرتبطة بمنتجات موجودة.");
+      notifyError("تعذر الحذف، ربما تكون مرتبطة بمنتجات موجودة.");
     }
   };
 
@@ -120,13 +122,13 @@ export default function BrandsManagement() {
           <table className="w-full text-right border-collapse min-w-[600px]">
             <thead>
               <tr className="bg-[#1a1918]/50 border-b border-white/5">
-                <th className="px-8 py-5 text-[11px] font-bold text-[#e2bfb0]/60 uppercase tracking-widest w-[40%]">
+                <th className="px-8 py-5 text-sm font-bold text-[#e2bfb0]/80 text-right w-[40%]">
                   الاسم (عربي)
                 </th>
-                <th className="px-8 py-5 text-[11px] font-bold text-[#e2bfb0]/60 uppercase tracking-widest w-[40%]">
+                <th className="px-8 py-5 text-sm font-bold text-[#e2bfb0]/80 text-right w-[40%]">
                   الاسم (إنجليزي)
                 </th>
-                <th className="px-8 py-5 text-[11px] font-bold text-[#e2bfb0]/60 uppercase tracking-widest text-center w-[20%]">
+                <th className="px-8 py-5 text-sm font-bold text-[#e2bfb0]/80 text-center w-[20%]">
                   إجراءات
                 </th>
               </tr>
@@ -203,7 +205,7 @@ export default function BrandsManagement() {
               {error && <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm text-center">{error}</div>}
               
               <div>
-                <label className="text-xs font-bold text-[#e2bfb0]/60 uppercase tracking-widest mb-2 block">
+                <label className="text-sm font-bold text-[#e2bfb0]/80 mb-2 block text-right">
                   الاسم بالعربية *
                 </label>
                 <input
@@ -217,7 +219,7 @@ export default function BrandsManagement() {
               </div>
 
               <div>
-                <label className="text-xs font-bold text-[#e2bfb0]/60 uppercase tracking-widest mb-2 block">
+                <label className="text-sm font-bold text-[#e2bfb0]/80 mb-2 block text-right">
                   الاسم بالإنجليزية · اختياري
                 </label>
                 <input

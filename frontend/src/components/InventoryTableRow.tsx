@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { createPortal } from "react-dom";
 import Image from "next/image";
-import Barcode from "react-barcode";
+import Link from "next/link";
+import BarcodePrintDialog, { type BarcodePrintUnit } from "@/components/BarcodePrintDialog";
 import { UserRole, canViewCost, canEditProduct } from "@/utils/auth";
 import { useHydrated } from "@/lib/useHydrated";
 
@@ -15,6 +15,11 @@ interface StockItem {
   sku: string;
   barcode: string;
   category: string;
+  subcategory: string;
+  brand: string;
+  supplier: string;
+  units: Array<{ id: string; unit_name: string; barcode: string; retailPrice: string }>;
+  baseUnit: string;
   retailPrice: string;
   wholesalePrice: string;
   stockQty: string;
@@ -32,6 +37,9 @@ interface InventoryTableRowProps {
 
 export function InventoryTableRow({ item, onEdit, userRole }: InventoryTableRowProps) {
   const [showBarcodeModal, setShowBarcodeModal] = useState(false);
+  const barcodeUnits: BarcodePrintUnit[] = item.units.filter(unit => unit.barcode).map(unit => ({
+    id: unit.id, name: unit.unit_name, barcode: unit.barcode, price: unit.retailPrice, copies: 1,
+  }));
   const mounted = useHydrated();
   const stockColor =
     item.stockStatus === "critical"
@@ -49,7 +57,7 @@ export function InventoryTableRow({ item, onEdit, userRole }: InventoryTableRowP
     <tr className="table-row-hover hover:bg-white/5 transition-all border-b border-white/5 last:border-0">
       {/* Product */}
       <td className="px-8 py-6 min-w-[250px]">
-        <div className="flex items-center gap-5">
+        <Link href={`/inventory/product?id=${encodeURIComponent(String(item.id))}`} className="flex items-center justify-center gap-5 group" aria-label={`تفاصيل ${item.nameAr}`}>
           <div className="w-14 h-14 rounded-2xl bg-[#2a2a2a] border border-white/5 flex-shrink-0 flex items-center justify-center overflow-hidden">
             {item.image ? (
               <Image src={item.image} alt={item.nameAr} width={56} height={56} className="object-cover w-full h-full" unoptimized />
@@ -57,43 +65,41 @@ export function InventoryTableRow({ item, onEdit, userRole }: InventoryTableRowP
               <span className="material-symbols-outlined text-[#e2bfb0]/60" aria-hidden="true">menu_book</span>
             )}
           </div>
-          <div>
-            <p className="font-bold text-[#e5e2e1]">{item.nameAr}</p>
+          <div className="text-right">
+            <span className="font-bold text-[#e5e2e1] group-hover:text-primary group-focus:text-primary">{item.nameAr}</span>
             <p className="text-[10px] text-[#e2bfb0]/60">{item.nameEn}</p>
-            {item.tag && (
-              <span className="text-[9px] bg-primary/10 text-primary px-2 py-0.5 rounded-full mt-1 inline-block border border-primary/20">
-                {item.tag}
-              </span>
-            )}
+            {item.brand && <p className="text-xs text-[#e2bfb0]/70">{item.brand}</p>}
+            {item.supplier && <p className="text-xs text-[#e2bfb0]/60">المورد: {item.supplier}</p>}
           </div>
-        </div>
+        </Link>
       </td>
 
       {/* Barcode */}
-      <td className="px-8 py-6 min-w-[150px] whitespace-nowrap">
-        <div className="flex flex-col gap-1">
-          <span className="font-mono text-primary font-bold text-xs">#{item.sku}</span>
-          <span className="font-mono text-[9px] opacity-40">{item.barcode}</span>
+      <td className="px-8 py-6 min-w-[150px] whitespace-nowrap text-center">
+        <div className="flex flex-col items-center gap-1">
+          <span className="font-mono text-primary font-bold text-xs" dir="ltr">{item.units.find(unit => unit.unit_name === item.baseUnit)?.barcode || item.barcode || "—"}</span>
+          <span className="text-[10px] opacity-60">باركود {item.baseUnit}</span>
+          <span className="font-mono text-[10px] opacity-50" dir="ltr">كود الصنف: {item.sku}</span>
         </div>
       </td>
 
       {/* Category */}
       <td className="px-8 py-6 text-center min-w-[150px] whitespace-nowrap">
-        <span className="px-4 py-1.5 bg-[#353534] text-[#e2bfb0]/80 rounded-full text-[10px] font-black tracking-wider uppercase border border-white/5">
-          {item.category}
+        <span className="px-4 py-1.5 bg-[#353534] text-[#e2bfb0]/80 rounded-full text-xs font-bold border border-white/5">
+          {item.category}{item.subcategory ? ` / ${item.subcategory}` : ""}
         </span>
       </td>
 
       {/* Price - Hidden conditionally */}
       {canViewCost(userRole) && (
         <td className="px-8 py-6 min-w-[150px] whitespace-nowrap">
-          <div className="text-[10px] leading-relaxed">
+          <div className="text-xs leading-relaxed text-center">
             <p>
-              <span className="opacity-50">تجزئة:</span>{" "}
+              <span className="opacity-50">تجزئة / {item.baseUnit}:</span>{" "}
               <span className="font-bold text-primary text-sm">{item.retailPrice}</span>
             </p>
             <p>
-              <span className="opacity-50">جملة:</span>{" "}
+              <span className="opacity-50">جملة / {item.baseUnit}:</span>{" "}
               <span className="font-bold">{item.wholesalePrice}</span>
             </p>
           </div>
@@ -102,8 +108,8 @@ export function InventoryTableRow({ item, onEdit, userRole }: InventoryTableRowP
 
       {/* Stock */}
       <td className="px-8 py-6 min-w-[200px] whitespace-nowrap">
-        <div className="w-full max-w-[200px]">
-          <div className="flex justify-between text-[10px] mb-2 font-bold">
+        <div className="mx-auto w-full max-w-[200px]">
+          <div className="flex justify-between text-xs mb-2 font-bold">
             <span className={item.stockStatus !== "normal" ? "text-[#ffb4ab]" : ""}>
               {item.stockQty} {item.stockUnit}
             </span>
@@ -129,8 +135,9 @@ export function InventoryTableRow({ item, onEdit, userRole }: InventoryTableRowP
         <div className="flex items-center justify-center gap-3 shrink-0">
           <button
             onClick={() => setShowBarcodeModal(true)}
+            disabled={!barcodeUnits.length}
             className="w-9 h-9 rounded-full glass flex items-center justify-center text-[#e2bfb0]/60 hover:text-primary hover:border-primary/30 transition-all"
-            title="طباعة الباركود"
+            title={barcodeUnits.length ? "طباعة باركودات الوحدات" : "لا توجد باركودات للوحدات"}
           >
             <span className="material-symbols-outlined text-[18px]">barcode</span>
           </button>
@@ -145,77 +152,18 @@ export function InventoryTableRow({ item, onEdit, userRole }: InventoryTableRowP
             </button>
           )}
 
-          {item.stockStatus !== "normal" ? (
-            <button
-              className="w-9 h-9 rounded-full glass flex items-center justify-center text-[#ffb4ab] border border-[#ffb4ab]/20 hover:bg-[#ffb4ab]/10 transition-all"
-              title="طلب شراء"
-            >
-              <span className="material-symbols-outlined text-[18px]">shopping_cart_checkout</span>
-            </button>
-          ) : userRole === "ADMIN" ? (
-            <button
-              className="w-9 h-9 rounded-full glass flex items-center justify-center text-[#e2bfb0]/60 hover:text-primary hover:border-primary/30 transition-all"
-              title="السجل"
-            >
-              <span className="material-symbols-outlined text-[18px]">history</span>
-            </button>
-          ) : null}
+          <Link href={`/inventory/product?id=${encodeURIComponent(String(item.id))}`}
+            className="w-9 h-9 rounded-full glass flex items-center justify-center text-[#e2bfb0]/60 hover:text-primary hover:border-primary/30 transition-all"
+            title="تفاصيل المنتج وسجله" aria-label={`تفاصيل ${item.nameAr}`}>
+            <span className="material-symbols-outlined text-[18px]">history</span>
+          </Link>
         </div>
       </td>
 
       {/* Barcode Modal */}
-      {showBarcodeModal && mounted && createPortal(
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="bg-[#1c1b1b] border border-white/10 rounded-3xl p-8 max-w-sm w-full relative flex flex-col items-center">
-            <button
-              onClick={() => setShowBarcodeModal(false)}
-              className="absolute top-4 right-4 text-[#e2bfb0]/40 hover:text-white"
-            >
-              <span className="material-symbols-outlined">close</span>
-            </button>
-            
-            <h3 className="text-xl font-bold mb-6 text-white text-center">طباعة الباركود</h3>
-            
-            {/* The printable area */}
-            <div id={`print-barcode-${item.sku}`} className="bg-white p-6 rounded-xl flex flex-col items-center justify-center w-full mb-6">
-              <Barcode value={item.barcode || item.sku} width={2} height={80} fontSize={16} />
-              <p className="text-black font-bold mt-2 text-sm text-center">{item.nameAr}</p>
-              {canViewCost(userRole) && (
-                 <p className="text-black/60 text-xs text-center mt-1">السعر: {item.retailPrice} ج.م</p>
-              )}
-            </div>
-
-            <button
-              onClick={() => {
-                const printContent = document.getElementById(`print-barcode-${item.sku}`)?.innerHTML;
-                if (printContent) {
-                  const printWindow = window.open('', '_blank');
-                  printWindow?.document.write(`
-                    <html dir="rtl">
-                      <head>
-                        <title>طباعة باركود - ${item.nameAr}</title>
-                        <style>
-                          body { display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; font-family: sans-serif; }
-                          .container { text-align: center; }
-                        </style>
-                      </head>
-                      <body>
-                        <div class="container">${printContent}</div>
-                        <script>window.print(); window.close();</script>
-                      </body>
-                    </html>
-                  `);
-                }
-              }}
-              className="w-full bg-primary text-white font-bold py-4 rounded-xl hover:brightness-110 active:scale-95 transition-all flex items-center justify-center gap-2"
-            >
-              <span className="material-symbols-outlined">print</span>
-              <span>طباعة</span>
-            </button>
-          </div>
-        </div>,
-        document.body
-      )}
+      {showBarcodeModal && mounted && <BarcodePrintDialog productName={item.nameAr}
+        units={barcodeUnits} selectByDefault={false} onClose={() => setShowBarcodeModal(false)}
+        quantityHint="حدد الوحدات وعدد الملصقات؛ الرصيد الإجمالي لا يحدد عدد كل نوع وحدة." />}
     </tr>
   );
 }

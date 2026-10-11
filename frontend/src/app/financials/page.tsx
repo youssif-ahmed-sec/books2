@@ -1,5 +1,7 @@
 "use client";
 
+import { notifyError } from "@/lib/notifications";
+
 import { useState, useEffect } from "react";
 import { fetchApi } from "@/lib/api";
 import { useForm, useWatch } from "react-hook-form";
@@ -95,7 +97,7 @@ function FinancialsContent() {
       setIsSlideoverOpen(false);
     } catch (err) {
       console.error("Failed to save transaction:", err);
-      alert("حدث خطأ أثناء الحفظ");
+      notifyError("حدث خطأ أثناء الحفظ");
     }
   };
 

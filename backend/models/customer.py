@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean, DateTime, Enum, Numeric, Integer, Text, JSON
+from sqlalchemy import Column, String, Boolean, DateTime, Enum, Numeric, Integer, Text, JSON, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 import uuid
@@ -32,6 +32,7 @@ class Customer(Base):
     price_level = Column(Enum(PriceLevelEnum, name="pricelevelenum", create_type=False), nullable=False, default=PriceLevelEnum.RETAIL)
     
     balance = Column(Numeric(12, 2), nullable=False, default=0) # For deferred payments/credit
+    credit_limit = Column(Numeric(12, 2), nullable=False, default=0)
     
     # CRM Fields
     tags = Column(JSON, nullable=True, default=[])
@@ -47,3 +48,15 @@ class Customer(Base):
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class CustomerInteraction(Base):
+    __tablename__ = "customer_interactions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    customer_id = Column(UUID(as_uuid=True), ForeignKey("customers.id"), nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    channel = Column(String, nullable=False)  # Phone Call, In Person, Other
+    note = Column(Text, nullable=False)
+    follow_up_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

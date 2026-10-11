@@ -2,9 +2,10 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { fetchApi } from "@/lib/api";
+import { cachedCurrentUser, getCurrentUser } from "@/lib/currentUser";
 import { roleHome } from "@/lib/roleHome";
 import type { UserRole } from "@/utils/auth";
+import SessionLoadingScreen from "@/components/SessionLoadingScreen";
 
 export default function RoleGate({
   allowedRoles,
@@ -14,11 +15,14 @@ export default function RoleGate({
   children: ReactNode;
 }) {
   const router = useRouter();
-  const [allowed, setAllowed] = useState(false);
+  const [allowed, setAllowed] = useState(() => {
+    const user = cachedCurrentUser();
+    return Boolean(user && allowedRoles.includes(user.role));
+  });
 
   useEffect(() => {
     let active = true;
-    fetchApi("/auth/me")
+    getCurrentUser()
       .then((user: { role: UserRole }) => {
         if (!active) return;
         if (allowedRoles.includes(user.role)) setAllowed(true);
@@ -30,5 +34,5 @@ export default function RoleGate({
     return () => { active = false; };
   }, [allowedRoles, router]);
 
-  return allowed ? <>{children}</> : null;
+  return allowed ? <>{children}</> : <SessionLoadingScreen />;
 }

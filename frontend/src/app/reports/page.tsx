@@ -21,6 +21,12 @@ interface InventoryReportRow {
   created_at: string;
 }
 
+interface FinancialSummary {
+  sales: number; returns: number; net_sales: number; gross_profit: number | null;
+  net_profit: number | null; expenses: number; other_income: number; cash_movement: number;
+  customer_debt: number; profit_incomplete: boolean;
+}
+
 export default function ReportsPage() {
   const [role, setRole] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"sales" | "inventory">("sales");
@@ -28,13 +34,15 @@ export default function ReportsPage() {
   const [endDate, setEndDate] = useState("");
   
   const [salesData, setSalesData] = useState<SalesReport | null>(null);
+  const [financialData, setFinancialData] = useState<FinancialSummary | null>(null);
   const [inventoryData, setInventoryData] = useState<InventoryReportRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     fetchApi("/auth/me").then(user => {
-      if (user.role === "ADMIN") {
+      if (["ADMIN", "SENIOR_SALES", "INVENTORY_CONTROLLER"].includes(user.role)) {
         setRole(user.role);
+        if (user.role === "INVENTORY_CONTROLLER") setActiveTab("inventory");
       }
       else window.location.href = roleHome(user.role);
     }).catch(() => setRole(null));
@@ -44,8 +52,14 @@ export default function ReportsPage() {
     if (!role) return;
     const queryParams = new URLSearchParams();
     if (startDate) queryParams.append("start_date", new Date(startDate).toISOString());
-    if (endDate) queryParams.append("end_date", new Date(endDate).toISOString());
+    if (endDate) {
+      const followingDay = new Date(`${endDate}T00:00:00`);
+      followingDay.setDate(followingDay.getDate() + 1);
+      queryParams.append("end_date", followingDay.toISOString());
+    }
     let active = true;
+    if (activeTab === "inventory" && role !== "ADMIN" && role !== "INVENTORY_CONTROLLER") return;
+    if (activeTab === "sales" && role === "INVENTORY_CONTROLLER") return;
     const endpoint = activeTab === "sales" ? "/reports/sales" : "/reports/inventory";
     fetchApi(`${endpoint}?${queryParams.toString()}`)
       .then(res => {
@@ -55,6 +69,9 @@ export default function ReportsPage() {
       })
       .catch(console.error)
       .finally(() => { if (active) setIsLoading(false); });
+    if (activeTab === "sales" && role === "ADMIN") {
+      fetchApi(`/reports/financial-summary?${queryParams.toString()}`).then(data => { if (active) setFinancialData(data); }).catch(console.error);
+    }
     return () => { active = false; };
   }, [role, activeTab, startDate, endDate]);
 
@@ -94,7 +111,7 @@ export default function ReportsPage() {
           </div>
 
           <div className="flex gap-4 border-b border-white/10">
-            {role === "ADMIN" && <button
+            {role !== "INVENTORY_CONTROLLER" && <button
               onClick={() => { setActiveTab("sales"); setIsLoading(true); }}
               className={`pb-4 px-2 text-sm font-medium transition-colors border-b-2 ${
                 activeTab === "sales"
@@ -104,7 +121,7 @@ export default function ReportsPage() {
             >
               تقرير المبيعات
             </button>}
-            <button
+            {(role === "ADMIN" || role === "INVENTORY_CONTROLLER") && <button
               onClick={() => { setActiveTab("inventory"); setIsLoading(true); }}
               className={`pb-4 px-2 text-sm font-medium transition-colors border-b-2 ${
                 activeTab === "inventory"
@@ -113,13 +130,23 @@ export default function ReportsPage() {
               }`}
             >
               حركات المخزون
-            </button>
+            </button>}
           </div>
 
           {isLoading ? (
             <div className="app-panel app-muted py-10 text-center">جاري التحميل...</div>
           ) : activeTab === "sales" && salesData ? (
             <div className="space-y-6">
+              {role === "ADMIN" && financialData && <div className="app-panel p-6 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                <div>مبيعات قبل المرتجعات<br /><strong>{financialData.sales.toFixed(2)} ج.م</strong></div>
+                <div>المرتجعات<br /><strong>{financialData.returns.toFixed(2)} ج.م</strong></div>
+                <div>صافي المبيعات<br /><strong>{financialData.net_sales.toFixed(2)} ج.م</strong></div>
+                <div>مجمل الربح<br /><strong>{financialData.gross_profit === null ? "غير مكتمل للبيانات القديمة" : `${financialData.gross_profit.toFixed(2)} ج.م`}</strong></div>
+                <div>صافي الربح<br /><strong>{financialData.net_profit === null ? "غير مكتمل للبيانات القديمة" : `${financialData.net_profit.toFixed(2)} ج.م`}</strong></div>
+                <div>المصروفات<br /><strong>{financialData.expenses.toFixed(2)} ج.م</strong></div>
+                <div>حركة النقدية المسجلة<br /><strong>{financialData.cash_movement.toFixed(2)} ج.م</strong></div>
+                <div>مديونية العملاء الحالية<br /><strong>{financialData.customer_debt.toFixed(2)} ج.م</strong></div>
+              </div>}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="app-panel p-8">
                   <h3 className="app-muted text-sm font-bold">إجمالي المبيعات</h3>

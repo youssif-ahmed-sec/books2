@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from uuid import UUID
 import uuid
 from typing import List, Optional
-from models.product import Product, ProductUnit, ProductPrice, Category, Subcategory, Brand, Supplier
+from models.product import Product, ProductUnit, ProductPrice, ProductBundleComponent, Category, Subcategory, Brand, Supplier
 from models.user import AuditLog, User
 from models.inventory import InventoryBalance, InventoryTransaction, Warehouse, TransactionTypeEnum
 from schemas.product import (
@@ -16,7 +16,7 @@ from schemas.product import (
     BrandResponse, BrandCreate, BrandUpdate,
     SupplierResponse, PaginatedProductResponse
 )
-from fastapi_cache.decorator import cache
+from core.reference_cache import cached_reference, invalidate_reference
 from core.dependencies import get_current_user, require_admin, require_basic_staff_access, require_inventory_access
 from core.product_access import visible_product
 from database import get_db
@@ -24,12 +24,12 @@ from database import get_db
 router = APIRouter(prefix="/products", tags=["Products"], dependencies=[Depends(require_basic_staff_access)])
 
 @router.get("/categories", response_model=List[CategoryResponse])
-@cache(expire=60)
 async def get_categories(db: AsyncSession = Depends(get_db)):
     """Get all active categories."""
-    query = select(Category).where(Category.is_deleted == False)
-    result = await db.execute(query)
-    return result.scalars().all()
+    async def load():
+        result = await db.execute(select(Category).where(Category.is_deleted == False))
+        return [CategoryResponse.model_validate(row).model_dump(mode="json") for row in result.scalars().all()]
+    return await cached_reference("categories", load)
 
 @router.post("/categories", response_model=CategoryResponse, status_code=status.HTTP_201_CREATED)
 async def create_category(
@@ -39,7 +39,10 @@ async def create_category(
 ):
     new_cat = Category(**category_in.model_dump())
     db.add(new_cat)
+    await db.flush()
+    db.add(AuditLog(user_id=current_user.id, action="CREATE_CATEGORY", entity_type="Category", entity_id=str(new_cat.id)))
     await db.commit()
+    await invalidate_reference("categories")
     await db.refresh(new_cat)
     return new_cat
 
@@ -56,7 +59,9 @@ async def update_category(
         raise HTTPException(status_code=404, detail="Category not found")
     for k, v in category_in.model_dump(exclude_unset=True).items():
         setattr(cat, k, v)
+    db.add(AuditLog(user_id=current_user.id, action="UPDATE_CATEGORY", entity_type="Category", entity_id=str(category_id)))
     await db.commit()
+    await invalidate_reference("categories")
     await db.refresh(cat)
     return cat
 
@@ -71,14 +76,17 @@ async def delete_category(
     if not cat:
         raise HTTPException(status_code=404, detail="Category not found")
     cat.is_deleted = True
+    db.add(AuditLog(user_id=current_user.id, action="ARCHIVE_CATEGORY", entity_type="Category", entity_id=str(category_id)))
     await db.commit()
+    await invalidate_reference("categories")
 
 @router.get("/subcategories", response_model=List[SubcategoryResponse])
 async def get_subcategories(db: AsyncSession = Depends(get_db)):
     """Get all active subcategories."""
-    query = select(Subcategory).where(Subcategory.is_deleted == False)
-    result = await db.execute(query)
-    return result.scalars().all()
+    async def load():
+        result = await db.execute(select(Subcategory).where(Subcategory.is_deleted == False))
+        return [SubcategoryResponse.model_validate(row).model_dump(mode="json") for row in result.scalars().all()]
+    return await cached_reference("subcategories", load)
 
 @router.post("/subcategories", response_model=SubcategoryResponse, status_code=status.HTTP_201_CREATED)
 async def create_subcategory(
@@ -88,7 +96,10 @@ async def create_subcategory(
 ):
     new_sub = Subcategory(**sub_in.model_dump())
     db.add(new_sub)
+    await db.flush()
+    db.add(AuditLog(user_id=current_user.id, action="CREATE_SUBCATEGORY", entity_type="Subcategory", entity_id=str(new_sub.id)))
     await db.commit()
+    await invalidate_reference("subcategories")
     await db.refresh(new_sub)
     return new_sub
 
@@ -105,7 +116,9 @@ async def update_subcategory(
         raise HTTPException(status_code=404, detail="Subcategory not found")
     for k, v in sub_in.model_dump(exclude_unset=True).items():
         setattr(sub, k, v)
+    db.add(AuditLog(user_id=current_user.id, action="UPDATE_SUBCATEGORY", entity_type="Subcategory", entity_id=str(sub_id)))
     await db.commit()
+    await invalidate_reference("subcategories")
     await db.refresh(sub)
     return sub
 
@@ -120,14 +133,17 @@ async def delete_subcategory(
     if not sub:
         raise HTTPException(status_code=404, detail="Subcategory not found")
     sub.is_deleted = True
+    db.add(AuditLog(user_id=current_user.id, action="ARCHIVE_SUBCATEGORY", entity_type="Subcategory", entity_id=str(sub_id)))
     await db.commit()
+    await invalidate_reference("subcategories")
 
 @router.get("/brands", response_model=List[BrandResponse])
 async def get_brands(db: AsyncSession = Depends(get_db)):
     """Get all active brands."""
-    query = select(Brand).where(Brand.is_deleted == False)
-    result = await db.execute(query)
-    return result.scalars().all()
+    async def load():
+        result = await db.execute(select(Brand).where(Brand.is_deleted == False))
+        return [BrandResponse.model_validate(row).model_dump(mode="json") for row in result.scalars().all()]
+    return await cached_reference("brands", load)
 
 @router.post("/brands", response_model=BrandResponse, status_code=status.HTTP_201_CREATED)
 async def create_brand(
@@ -137,7 +153,10 @@ async def create_brand(
 ):
     new_brand = Brand(**brand_in.model_dump())
     db.add(new_brand)
+    await db.flush()
+    db.add(AuditLog(user_id=current_user.id, action="CREATE_BRAND", entity_type="Brand", entity_id=str(new_brand.id)))
     await db.commit()
+    await invalidate_reference("brands")
     await db.refresh(new_brand)
     return new_brand
 
@@ -154,7 +173,9 @@ async def update_brand(
         raise HTTPException(status_code=404, detail="Brand not found")
     for k, v in brand_in.model_dump(exclude_unset=True).items():
         setattr(brand, k, v)
+    db.add(AuditLog(user_id=current_user.id, action="UPDATE_BRAND", entity_type="Brand", entity_id=str(brand_id)))
     await db.commit()
+    await invalidate_reference("brands")
     await db.refresh(brand)
     return brand
 
@@ -169,7 +190,9 @@ async def delete_brand(
     if not brand:
         raise HTTPException(status_code=404, detail="Brand not found")
     brand.is_deleted = True
+    db.add(AuditLog(user_id=current_user.id, action="ARCHIVE_BRAND", entity_type="Brand", entity_id=str(brand_id)))
     await db.commit()
+    await invalidate_reference("brands")
 
 @router.get("/suppliers", response_model=List[SupplierResponse])
 async def get_suppliers(db: AsyncSession = Depends(get_db), current_user: User = Depends(require_inventory_access)):
@@ -234,7 +257,10 @@ async def get_products(
             (Product.sku.ilike(search_pattern)) | 
             (Product.barcode.ilike(search_pattern)) | 
             (Product.name_en.ilike(search_pattern)) |
-            (Product.name_ar.ilike(search_pattern))
+            (Product.name_ar.ilike(search_pattern)) |
+            (Product.id.in_(select(ProductUnit.product_id).where(
+                ProductUnit.barcode.ilike(search_pattern), ProductUnit.is_deleted == False,
+            )))
         )
     
     # Get total count
@@ -244,9 +270,12 @@ async def get_products(
 
     # Get data
     query = base_query.options(
-        selectinload(Product.units.and_(ProductUnit.is_deleted == False)).selectinload(ProductUnit.prices),
+        selectinload(Product.units.and_(ProductUnit.is_deleted == False)).selectinload(ProductUnit.prices.and_(ProductPrice.is_deleted == False)),
         selectinload(Product.category),
-        selectinload(Product.bundle_components)
+        selectinload(Product.subcategory),
+        selectinload(Product.brand),
+        selectinload(Product.supplier),
+        selectinload(Product.bundle_components.and_(ProductBundleComponent.is_deleted == False))
     ).offset(skip).limit(limit)
     
     result = await db.execute(query)
@@ -255,6 +284,21 @@ async def get_products(
     return {"data": [visible_product(product, current_user.role) for product in products], "total": total_count}
 
 from services.product_service import ProductService
+
+@router.get("/{product_id}/history")
+async def get_product_history(
+    product_id: UUID,
+    limit: int = 100,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_inventory_access),
+):
+    if not (await db.execute(select(Product.id).where(Product.id == product_id, Product.is_deleted == False))).scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Product not found")
+    rows = (await db.execute(select(AuditLog).where(
+        AuditLog.entity_type == "Product", AuditLog.entity_id == str(product_id),
+    ).order_by(AuditLog.created_at.desc()).limit(min(max(limit, 1), 100)))).scalars().all()
+    return [{"id": row.id, "action": row.action, "created_at": row.created_at,
+             "user_id": row.user_id} for row in rows]
 
 @router.get("/{product_id}", response_model=ProductResponse)
 async def get_product(product_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_basic_staff_access)):
@@ -273,7 +317,7 @@ from models.product import Product, ProductUnit, ProductPrice, Category, Subcate
 async def create_product(
     product_in: ProductCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_inventory_access),
+    current_user: User = Depends(require_admin),
 ):
     """
     Create a new product with multiple units, prices, and optionally bundle components.
@@ -289,7 +333,7 @@ async def update_product(
     product_id: UUID,
     product_in: ProductUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_inventory_access),
+    current_user: User = Depends(require_admin),
 ):
     """
     Update a product. For simplicity, units and prices replacement strategy can be used.
@@ -306,12 +350,15 @@ async def update_product(
 async def delete_product(
     product_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_inventory_access),
+    current_user: User = Depends(require_admin),
 ):
     """
     Soft-delete a product.
     """
-    success = await ProductService.delete_product(db, product_id, current_user.id)
+    try:
+        success = await ProductService.delete_product(db, product_id, current_user.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not success:
         raise HTTPException(status_code=404, detail="Product not found")
 

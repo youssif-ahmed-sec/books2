@@ -1,4 +1,5 @@
 import React, { forwardRef } from 'react';
+import Image from 'next/image';
 
 interface ReceiptPrintProps {
   order: {
@@ -18,7 +19,7 @@ interface ReceiptPrintProps {
 
 export const ReceiptPrint = forwardRef<HTMLDivElement, ReceiptPrintProps>(({ order, items }, ref) => {
   return (
-    <div style={{ display: 'none' }}>
+    <div>
       <div 
         ref={ref} 
         style={{ 
@@ -34,6 +35,10 @@ export const ReceiptPrint = forwardRef<HTMLDivElement, ReceiptPrintProps>(({ ord
         }}
       >
         <div style={{ textAlign: 'center', marginBottom: '15px' }}>
+          <div style={{ width: 100, height: 42, overflow: 'hidden', margin: '0 auto 5px', position: 'relative' }}>
+            <Image src="/brand/saud-logo.jpg" alt="" width={140} height={140} unoptimized
+              style={{ position: 'absolute', width: 140, height: 140, maxWidth: 'none', top: -42, left: -20 }} />
+          </div>
           <h2 style={{ fontSize: '18px', fontWeight: 'bold', margin: '0 0 5px 0' }}>مكتبة سعود الشافعي</h2>
           <p style={{ margin: '0' }}>رقم الطلب: {order?.id?.split('-')[0]}</p>
           <p style={{ margin: '0' }}>التاريخ: {new Date().toLocaleDateString('ar-EG')} {new Date().toLocaleTimeString('ar-EG')}</p>

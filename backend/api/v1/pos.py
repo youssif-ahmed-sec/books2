@@ -6,7 +6,7 @@ from sqlalchemy import func, or_
 from typing import List, Optional
 
 from database import get_db
-from models.product import Product, ProductUnit, PriceLevelEnum
+from models.product import Product, ProductUnit, ProductPrice, ProductBundleComponent, PriceLevelEnum
 from models.inventory import InventoryBalance
 from schemas.product import ProductResponse
 from models.user import User
@@ -42,7 +42,7 @@ async def search_pos_products(
     Fast product search for POS by barcode, SKU, or name.
     Returns products with units, prices, and current stock.
     """
-    base_query = select(Product).where(Product.is_deleted == False)
+    base_query = select(Product).where(Product.is_deleted == False, Product.is_active == True)
     
     if q:
         search_pattern = f"%{q}%"
@@ -50,7 +50,8 @@ async def search_pos_products(
         # To search by unit barcode, we can join ProductUnit or use an exists subquery
         unit_exists = select(ProductUnit.product_id).where(
             (ProductUnit.product_id == Product.id) & 
-            (ProductUnit.barcode.ilike(search_pattern))
+            (ProductUnit.barcode.ilike(search_pattern)) &
+            (ProductUnit.is_deleted == False)
         ).exists()
         
         base_query = base_query.where(
@@ -64,9 +65,9 @@ async def search_pos_products(
         )
         
     query = base_query.options(
-        selectinload(Product.units.and_(ProductUnit.is_deleted == False)).selectinload(ProductUnit.prices),
+        selectinload(Product.units.and_(ProductUnit.is_deleted == False)).selectinload(ProductUnit.prices.and_(ProductPrice.is_deleted == False)),
         selectinload(Product.category),
-        selectinload(Product.bundle_components),
+        selectinload(Product.bundle_components.and_(ProductBundleComponent.is_deleted == False)),
     ).limit(limit)
     
     result = await db.execute(query)

@@ -145,7 +145,10 @@ def print_order(job: PrintJob):
         raise HTTPException(status_code=400, detail="Order data is required")
     if not config.printer_names:
         raise HTTPException(status_code=409, detail="No printer selected")
-    accepted = thermal_printer.print_receipt(job.order, job.receipt_type)
+    try:
+        accepted = thermal_printer.print_receipt(job.order, job.receipt_type)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not accepted:
         raise HTTPException(status_code=500, detail="Print job was not accepted")
     return {"ok": True, "queued": True}

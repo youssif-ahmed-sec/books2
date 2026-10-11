@@ -53,9 +53,15 @@ async def setup_test_db():
     import uuid
     
     async with engine.begin() as conn:
-        # Create types just like main.py
-        await conn.execute(sqlalchemy.text("DO $$ BEGIN CREATE TYPE roleenum AS ENUM ('ADMIN', 'CASHIER_ORDERS', 'SENIOR_SALES', 'INVENTORY_CONTROLLER', 'SALES_ASSISTANT'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;"))
-        await conn.execute(sqlalchemy.text("DO $$ BEGIN CREATE TYPE paymentmethodenum AS ENUM ('Cash', 'Bank Transfer', 'Check', 'Other'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;"))
+        # These enums are referenced before SQLAlchemy reaches the tables that
+        # would otherwise create them. Use the persisted enum member names.
+        for enum_sql in (
+            "CREATE TYPE roleenum AS ENUM ('ADMIN', 'CASHIER_ORDERS', 'SENIOR_SALES', 'INVENTORY_CONTROLLER', 'SALES_ASSISTANT')",
+            "CREATE TYPE paymentmethodenum AS ENUM ('CASH', 'BANK_TRANSFER', 'CHECK', 'OTHER')",
+            "CREATE TYPE customertypeenum AS ENUM ('RETAIL', 'STUDENT', 'TEACHER', 'SCHOOL', 'NURSERY', 'SPEECH_THERAPY', 'WHOLESALE', 'SUPER_WHOLESALE', 'VIP')",
+            "CREATE TYPE pricelevelenum AS ENUM ('RETAIL', 'SEMI_WHOLESALE', 'WHOLESALE', 'SUPER_WHOLESALE', 'VIP')",
+        ):
+            await conn.execute(sqlalchemy.text(f"DO $$ BEGIN {enum_sql}; EXCEPTION WHEN duplicate_object THEN NULL; END $$;"))
         
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
@@ -74,6 +80,8 @@ async def setup_test_db():
     
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
+        for enum_name in ("customertypeenum", "pricelevelenum", "roleenum", "paymentmethodenum"):
+            await conn.execute(sqlalchemy.text(f"DROP TYPE IF EXISTS {enum_name}"))
     await engine.dispose()
 
 @pytest_asyncio.fixture

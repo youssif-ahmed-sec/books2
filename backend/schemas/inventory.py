@@ -16,7 +16,7 @@ class InventoryTransactionBase(BaseModel):
     product_id: UUID
     warehouse_id: UUID
     transaction_type: TransactionTypeEnum
-    quantity_changed: Decimal = Field(allow_inf_nan=False)
+    quantity_changed: Decimal = Field(max_digits=18, decimal_places=2, allow_inf_nan=False)
     reference_document: Optional[str] = None
     notes: Optional[str] = None
 
@@ -56,4 +56,32 @@ class InventoryTransactionRecentResponse(InventoryTransactionResponse):
 class PaginatedInventoryTransactionResponse(BaseModel):
     data: List[InventoryTransactionRecentResponse]
     total: int
+
+
+class InventoryTransferCreate(BaseModel):
+    product_id: UUID
+    source_warehouse_id: UUID
+    target_warehouse_id: UUID
+    quantity: Decimal = Field(gt=0, max_digits=18, decimal_places=2, allow_inf_nan=False)
+    request_id: UUID
+
+
+class InventoryCountCreate(BaseModel):
+    product_id: UUID
+    warehouse_id: UUID
+    observed_quantity: Decimal = Field(ge=0, max_digits=18, decimal_places=2, allow_inf_nan=False)
+    request_id: UUID
+
+
+class InventoryCountResponse(BaseModel):
+    id: UUID
+    product_id: UUID
+    warehouse_id: UUID
+    user_id: UUID
+    expected_quantity: Decimal
+    observed_quantity: Decimal
+    difference: Decimal
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
 

@@ -6,10 +6,11 @@ from typing import List
 from uuid import UUID
 
 from database import get_db
-from models.user import User
+from models.user import User, AuditLog
 from models.product import GlobalUnit
 from schemas.product import GlobalUnitCreate, GlobalUnitResponse
 from core.dependencies import get_current_user, require_inventory_access
+from core.reference_cache import cached_reference, invalidate_reference
 
 router = APIRouter(
     prefix="/global-units",
@@ -21,10 +22,10 @@ async def list_global_units(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    query = select(GlobalUnit).where(GlobalUnit.is_deleted == False)
-    result = await db.execute(query)
-    units = result.scalars().all()
-    return units
+    async def load():
+        result = await db.execute(select(GlobalUnit).where(GlobalUnit.is_deleted == False))
+        return [GlobalUnitResponse.model_validate(row).model_dump(mode="json") for row in result.scalars().all()]
+    return await cached_reference("global_units", load)
 
 @router.post("", response_model=GlobalUnitResponse, status_code=status.HTTP_201_CREATED)
 async def create_global_unit(
@@ -50,7 +51,10 @@ async def create_global_unit(
     db.add(new_unit)
     
     try:
+        await db.flush()
+        db.add(AuditLog(user_id=current_user.id, action="CREATE_GLOBAL_UNIT", entity_type="GlobalUnit", entity_id=str(new_unit.id)))
         await db.commit()
+        await invalidate_reference("global_units")
     except IntegrityError:
         await db.rollback()
         raise HTTPException(

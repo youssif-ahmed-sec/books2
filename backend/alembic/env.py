@@ -14,6 +14,8 @@ import models.inventory
 import models.order
 import models.customer
 import models.financial
+import models.purchase
+import models.returns
 from database import engine, DATABASE_URL
 
 config = context.config
@@ -50,7 +52,11 @@ async def run_async_migrations() -> None:
     await engine.dispose()
 
 def run_migrations_online() -> None:
-    asyncio.run(run_async_migrations())
+    connection = config.attributes.get("connection")
+    if connection is not None:
+        do_run_migrations(connection)
+    else:
+        asyncio.run(run_async_migrations())
 
 if context.is_offline_mode():
     run_migrations_offline()

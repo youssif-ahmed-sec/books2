@@ -5,7 +5,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('print_agent/assets/saud-logo.jpg', 'print_agent/assets')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

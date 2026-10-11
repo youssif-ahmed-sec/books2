@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { notifyError } from "@/lib/notifications";
+
+import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
 import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
 import { InventoryTableRow } from "@/components/InventoryTableRow";
+import { ProductSelect } from "@/components/ProductSelect";
 import { AddProductPanel } from "@/components/AddProductPanel";
 import { EditProductPanel } from "@/components/EditProductPanel";
 import InventoryMovementsModal from "@/components/InventoryMovementsModal";
@@ -21,6 +24,11 @@ interface InventoryItem {
   sku: string;
   barcode: string;
   category: string;
+  subcategory: string;
+  brand: string;
+  supplier: string;
+  units: Array<{ id: string; unit_name: string; barcode: string; retailPrice: string }>;
+  baseUnit: string;
   retailPrice: string;
   wholesalePrice: string;
   stockQty: string;
@@ -37,7 +45,10 @@ interface CatalogProduct {
   id: string; sku: string; barcode: string; name_ar: string; name_en: string;
   base_unit: string; image_url?: string; max_stock_level: string; min_stock_level: string;
   category?: { name_ar: string };
-  units: Array<{ unit_name: string; prices: Array<{ price_level: string; price: string }> }>;
+  subcategory?: { name_ar: string };
+  brand?: { name_ar: string };
+  supplier?: { name: string };
+  units: Array<{ id: string; unit_name: string; barcode: string; prices: Array<{ price_level: string; price: string }> }>;
 }
 interface Balance { product_id: string; current_stock: string }
 interface RecentTransaction { transaction_type: string; product_name?: string; created_at: string }
@@ -81,11 +92,10 @@ export default function InventoryPage() {
     fetchApi("/products/categories").then(res => setCategories(res.data || res)).catch(console.error);
   }, []);
 
-  useEffect(() => {
+  const loadData = useCallback(async (showLoading = true) => {
     if (!userRole) return;
-    const loadData = async () => {
       try {
-        setLoading(true);
+        if (showLoading) setLoading(true);
         
         const params = new URLSearchParams({ skip: ((page - 1) * limit).toString(), limit: limit.toString() });
         if (selectedSupplier) params.append("supplier_id", selectedSupplier);
@@ -97,7 +107,7 @@ export default function InventoryPage() {
           fetchApi(`/products?${params.toString()}`),
           fetchApi("/inventory/balances"),
           fetchApi("/inventory/stats"),
-          userRole === "ADMIN" ? fetchApi("/inventory/transactions/recent") : Promise.resolve([]),
+          fetchApi("/inventory/transactions/recent"),
         ]);
 
         setTotalItems(productsRes.total || 0);
@@ -114,7 +124,7 @@ export default function InventoryPage() {
           let unitName = product.base_unit || "قطعة";
           
           if (product.units && product.units.length > 0) {
-             const baseUnit = product.units[0];
+             const baseUnit = product.units.find(unit => unit.unit_name === product.base_unit) || product.units[0];
              if (baseUnit.unit_name) {
                unitName = baseUnit.unit_name;
              }
@@ -159,6 +169,16 @@ export default function InventoryPage() {
               sku: product.sku,
               barcode: product.barcode,
               category: product.category?.name_ar || "غير مصنف",
+              subcategory: product.subcategory?.name_ar || "",
+              brand: product.brand?.name_ar || "",
+              supplier: product.supplier?.name || "",
+              units: product.units.map(unit => ({
+                id: unit.id,
+                unit_name: unit.unit_name,
+                barcode: unit.barcode || "",
+                retailPrice: Number(unit.prices.find(price => price.price_level === "Retail")?.price || 0).toFixed(2),
+              })),
+              baseUnit: product.base_unit,
               retailPrice,
               wholesalePrice,
               stockQty,
@@ -215,23 +235,27 @@ export default function InventoryPage() {
 
       } catch (error) {
         console.error("Failed to load inventory data:", error);
+        notifyError(error instanceof Error ? error.message : "تعذر تحميل بيانات المخزون");
       } finally {
         setLoading(false);
       }
-    };
-    
-    loadData();
   }, [page, limit, selectedSupplier, selectedCategory, selectedStockStatus, userRole]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const refreshData = useCallback(() => { void loadData(false); }, [loadData]);
 
   const handleDelete = async (item: InventoryItem) => {
     if (confirm(`هل أنت متأكد من حذف المنتج "${item.nameAr}"؟`)) {
       try {
         await fetchApi(`/products/${item.id}`, { method: 'DELETE' });
-        // Since the backend returns 204 No Content, we can just reload
-        window.location.reload();
+        setShowEditPanel(false);
+        await loadData(false);
       } catch (err) {
         console.error("Failed to delete product:", err);
-        alert("حدث خطأ أثناء الحذف.");
+        notifyError("حدث خطأ أثناء الحذف.");
       }
     }
   };
@@ -250,15 +274,11 @@ export default function InventoryPage() {
         <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
           <div>
             <h3 className="app-heading">قائمة المنتجات</h3>
-            <p className="text-[#e2bfb0]/70 mt-2 text-lg">
-              إجمالي المسجل:{" "}
-              {loading ? (
-                <span className="text-primary font-bold">...</span>
-              ) : (
-                <span className="text-primary font-bold">{inventoryItems.length.toLocaleString()}</span>
-              )}{" "}
-              صنف متاح
-            </p>
+            {loading ? <span className="app-skeleton mt-3 h-5 w-40" aria-label="جاري تحميل عدد المنتجات" /> : (
+              <p className="text-[#e2bfb0]/70 mt-2 text-lg">
+                إجمالي المسجل: <span className="text-primary font-bold">{inventoryItems.length.toLocaleString()}</span> صنف متاح
+              </p>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-4">
             {canEditProduct(userRole) && (
@@ -283,24 +303,31 @@ export default function InventoryPage() {
         </div>
 
         {/* Stats Row */}
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
-          {statCards.map((card, i) => (
-            <div key={i} className="glass p-8 rounded-2xl hi-fi-shadow flex flex-col gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5" aria-label={loading ? "جاري تحميل إحصاءات المخزون" : undefined}>
+          {(loading && userRole === "ADMIN" && statCards.length === 3
+            ? [{ icon: "trending_up", iconColor: "text-primary", label: "حركات اليوم", value: "", sub: "", subColor: "text-green-400" }, ...statCards]
+            : statCards).map((card, i) => (
+            <div key={card.label} className={`glass p-8 rounded-2xl hi-fi-shadow flex flex-col gap-4 text-right ${loading ? "inventory-stat-loading" : ""}`}>
               <div className="flex items-center justify-between">
+                <span className="text-sm font-bold text-[#e2bfb0]/80">{card.label}</span>
                 <span className={`material-symbols-outlined ${card.iconColor} text-3xl`}>{card.icon}</span>
-                <span className="text-[10px] font-bold text-[#e2bfb0]/60 uppercase tracking-widest">{card.label}</span>
               </div>
               <div>
-                {card.valueExtra ? (
+                {loading ? (
+                  <div aria-label={`جاري تحميل ${card.label}`}>
+                    <span className="app-skeleton h-8 w-24" />
+                    <span className="app-skeleton mt-2 h-3 w-20" />
+                  </div>
+                ) : card.valueExtra ? (
                   <div className="flex items-baseline gap-2">
                     <span className={`text-3xl font-black ${card.valueColor || "text-[#e5e2e1]"}`}>
-                      {loading ? "..." : card.value}
+                      {card.value}
                     </span>
                     <span className="text-xs text-primary font-bold">{card.valueExtra}</span>
                   </div>
                 ) : (
                   <span className={`text-3xl font-black ${card.valueColor || "text-[#e5e2e1]"}`}>
-                    {loading ? "..." : card.value}
+                    {card.value}
                   </span>
                 )}
                 <span className={`text-xs ${card.subColor} block mt-1 font-bold`}>{card.sub}</span>
@@ -316,87 +343,87 @@ export default function InventoryPage() {
             {/* Filters */}
             <div className="glass p-8 rounded-2xl grid grid-cols-1 md:grid-cols-3 gap-6 hi-fi-shadow">
               <div className="flex flex-col gap-3">
-                <label className="text-[11px] font-bold text-[#e2bfb0]/60 uppercase tracking-widest px-4">
+                <label className="text-sm font-bold text-[#e2bfb0]/80 px-4">
                   الفئة المستهدفة
                 </label>
-                <select 
+                <ProductSelect
+                  label="الفئة المستهدفة"
                   value={selectedCategory}
-                  onChange={(e) => { setSelectedCategory(e.target.value); setPage(1); }}
-                  className="bg-[#1c1b1b]/50 border border-white/5 rounded-full px-6 py-3 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none transition-all appearance-none cursor-pointer text-[#e5e2e1]"
-                >
-                  <option value="">جميع الفئات</option>
-                  {categories.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name_ar}</option>
-                  ))}
-                </select>
+                  onChange={(value) => { setSelectedCategory(value); setPage(1); }}
+                  placeholder="جميع الفئات"
+                  options={categories.map((c) => ({ value: c.id, label: c.name_ar }))}
+                  filter
+                />
               </div>
 
               <div className="flex flex-col gap-3">
-                <label className="text-[11px] font-bold text-[#e2bfb0]/60 uppercase tracking-widest px-4">
+                <label className="text-sm font-bold text-[#e2bfb0]/80 px-4">
                   المورد الرئيسي
                 </label>
-                <select 
+                <ProductSelect
+                  label="المورد الرئيسي"
                   value={selectedSupplier}
-                  onChange={(e) => { setSelectedSupplier(e.target.value); setPage(1); }}
-                  className="bg-[#1c1b1b]/50 border border-white/5 rounded-full px-6 py-3 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none transition-all appearance-none cursor-pointer text-[#e5e2e1]"
-                >
-                  <option value="">كافة الموردين</option>
-                  {suppliers.map((s) => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
-                </select>
+                  onChange={(value) => { setSelectedSupplier(value); setPage(1); }}
+                  placeholder="كافة الموردين"
+                  options={suppliers.map((s) => ({ value: s.id, label: s.name }))}
+                  filter
+                />
               </div>
 
               <div className="flex flex-col gap-3">
-                <label className="text-[11px] font-bold text-[#e2bfb0]/60 uppercase tracking-widest px-4">
+                <label className="text-sm font-bold text-[#e2bfb0]/80 px-4">
                   حالة المخزون
                 </label>
-                <select 
+                <ProductSelect
+                  label="حالة المخزون"
                   value={selectedStockStatus}
-                  onChange={(e) => { setSelectedStockStatus(e.target.value); setPage(1); }}
-                  className="bg-[#1c1b1b]/50 border border-white/5 rounded-full px-6 py-3 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none transition-all appearance-none cursor-pointer text-[#e5e2e1]"
-                >
-                  <option value="">الكل</option>
-                  <option value="low">مخزون منخفض</option>
-                  <option value="critical">مخزون حرج (صفر)</option>
-                </select>
+                  onChange={(value) => { setSelectedStockStatus(value); setPage(1); }}
+                  placeholder="الكل"
+                  options={[{ value: "low", label: "مخزون منخفض" }, { value: "critical", label: "مخزون حرج (صفر)" }]}
+                  filter
+                />
               </div>
             </div>
 
             {/* Table */}
-            <div className="glass rounded-2xl hi-fi-shadow">
+            <div className="glass rounded-2xl overflow-hidden hi-fi-shadow">
               <div className="w-full overflow-x-auto pb-4 [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-track]:bg-white/5 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/10 hover:[&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb]:rounded-full">
-                <table className="w-full text-right border-collapse min-w-[1100px]">
+                <table className="inventory-products-table w-full text-right border-collapse min-w-[1100px]">
                   <thead>
                     <tr className="bg-white/5">
                       {["المنتج", "الباركود", "التصنيف"].map(
                         (h) => (
-                          <th key={h} className="px-8 py-5 text-[11px] font-bold text-[#e2bfb0]/60 uppercase ">
+                          <th key={h} className="px-8 py-5 text-sm font-bold text-[#e2bfb0]/80 text-center">
                             {h}
                           </th>
                         )
                       )}
                       {canViewCost(userRole) && (
-                        <th className="px-8 py-5 text-[11px] font-bold text-[#e2bfb0]/60 uppercase ">
+                        <th className="px-8 py-5 text-sm font-bold text-[#e2bfb0]/80 text-center">
                           التسعير
                         </th>
                       )}
-                      <th className="px-8 py-5 text-[11px] font-bold text-[#e2bfb0]/60 uppercase ">
+                      <th className="px-8 py-5 text-sm font-bold text-[#e2bfb0]/80 text-center">
                         الرصيد الحالي
                       </th>
-                      <th className="px-8 py-5 text-[11px] font-bold text-[#e2bfb0]/60 uppercase text-center">
+                      <th className="px-8 py-5 text-sm font-bold text-[#e2bfb0]/80 text-center">
                         العمليات
                       </th>
                     </tr>
                   </thead>
                   <tbody>
                     {loading ? (
-                      <tr>
-                        <td colSpan={6} className="text-center py-10 text-[#e2bfb0]/60">جاري تحميل المنتجات...</td>
-                      </tr>
+                      Array.from({ length: 4 }, (_, index) => <tr key={`loading-${index}`} className="inventory-row-skeleton table-row-hover border-b border-white/5" aria-hidden={index !== 0}>
+                        <td className="px-8 py-6 min-w-[250px]"><div className="flex items-center justify-center gap-5"><span className="app-skeleton h-14 w-14 shrink-0 rounded-2xl" /><span className="flex flex-col gap-2"><span className="app-skeleton h-4 w-28" /><span className="app-skeleton h-3 w-20" /></span></div>{index === 0 && <span className="sr-only">جاري تحميل المنتجات</span>}</td>
+                        <td className="px-8 py-6 min-w-[150px]"><span className="app-skeleton mx-auto h-4 w-24" /><span className="app-skeleton mx-auto mt-2 h-3 w-20" /></td>
+                        <td className="px-8 py-6 min-w-[150px] text-center"><span className="app-skeleton mx-auto h-6 w-24" /></td>
+                        {canViewCost(userRole) && <td className="px-8 py-6 min-w-[150px]"><span className="app-skeleton mx-auto h-4 w-24" /><span className="app-skeleton mx-auto mt-2 h-4 w-20" /></td>}
+                        <td className="px-8 py-6 min-w-[200px]"><div className="mx-auto max-w-[200px]"><div className="flex justify-between"><span className="app-skeleton h-3 w-12" /><span className="app-skeleton h-3 w-8" /></div><span className="app-skeleton mt-2 h-1.5 w-full" /></div></td>
+                        <td className="px-8 py-6"><div className="flex justify-center gap-3"><span className="app-skeleton h-9 w-9" /><span className="app-skeleton h-9 w-9" /><span className="app-skeleton h-9 w-9" /></div></td>
+                      </tr>)
                     ) : inventoryItems.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="text-center py-10 text-[#e2bfb0]/60">لا يوجد منتجات متاحة</td>
+                        <td colSpan={canViewCost(userRole) ? 6 : 5} className="text-center py-10 text-[#e2bfb0]/60">لا يوجد منتجات متاحة</td>
                       </tr>
                     ) : (
                       inventoryItems.map((item) => (
@@ -470,14 +497,16 @@ export default function InventoryPage() {
                     <tr>
                       <th className="pb-3 font-bold text-xs px-2">المنتج</th>
                       <th className="pb-3 font-bold text-center text-xs">النوع</th>
-                      <th className="pb-3 font-bold text-left text-xs px-2">التاريخ</th>
+                      <th className="pb-3 font-bold text-right text-xs px-2">التاريخ</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/5">
                     {loading ? (
-                      <tr>
-                        <td colSpan={3} className="text-center py-4 text-[#e2bfb0]/60">جاري التحميل...</td>
-                      </tr>
+                      Array.from({ length: 3 }, (_, index) => <tr key={`movement-loading-${index}`} className="inventory-row-skeleton" aria-hidden={index !== 0}>
+                        <td className="py-4 px-2"><span className="app-skeleton h-4 w-24" />{index === 0 && <span className="sr-only">جاري تحميل الحركات</span>}</td>
+                        <td className="py-4"><span className="app-skeleton mx-auto h-5 w-12" /></td>
+                        <td className="py-4 px-2"><span className="app-skeleton h-4 w-16" /></td>
+                      </tr>)
                     ) : stockMovements.length === 0 ? (
                       <tr>
                         <td colSpan={3} className="text-center py-4 text-[#e2bfb0]/60">لا يوجد حركات قريبة</td>
@@ -491,7 +520,7 @@ export default function InventoryPage() {
                               {move.type}
                             </span>
                           </td>
-                          <td className="py-4 text-left text-[#e2bfb0]/60 text-[10px] px-2 whitespace-nowrap">
+                          <td className="py-4 text-right text-[#e2bfb0]/80 text-xs px-2 whitespace-nowrap">
                             {move.date}
                           </td>
                         </tr>
@@ -506,13 +535,15 @@ export default function InventoryPage() {
             <div className="glass rounded-2xl hi-fi-shadow p-6">
               <div className="flex items-center justify-between mb-6 px-2">
                 <h4 className="font-bold text-lg text-[#e5e2e1] flex items-center gap-2">
-                  <span className="material-symbols-outlined text-[#ffb4ab]">shopping_cart_checkout</span>
-                  تحتاج أمر شراء
+                  <span>تحتاج أمر شراء</span>
+                  <span className="material-symbols-outlined text-[#ffb4ab]" aria-hidden="true">shopping_cart_checkout</span>
                 </h4>
               </div>
               <div className="space-y-4">
                 {loading ? (
-                  <div className="text-center py-4 text-[#e2bfb0]/60">جاري التحميل...</div>
+                  <div className="inventory-row-skeleton space-y-4 py-2" aria-label="جاري تحميل الأصناف التي تحتاج أمر شراء">
+                    {[0, 1, 2].map((index) => <div key={index} className="flex items-center gap-3"><span className="app-skeleton h-10 w-10 shrink-0 rounded-xl" /><span className="app-skeleton h-4 w-32" /><span className="app-skeleton mr-auto h-5 w-12" /></div>)}
+                  </div>
                 ) : purchaseNeeded.length === 0 ? (
                   <div className="text-center py-4 text-[#e2bfb0]/60">جميع المنتجات متوفرة بمخزون كافٍ</div>
                 ) : (
@@ -531,7 +562,7 @@ export default function InventoryPage() {
                         </div>
                         <div>
                           <p className="text-sm font-bold">{item.name}</p>
-                          <p className="text-[10px] text-[#ffb4ab]">مخزون: {item.stock}</p>
+                          <p className="text-xs text-[#ffb4ab]">مخزون: {item.stock}</p>
                         </div>
                       </div>
                     </div>
@@ -544,18 +575,18 @@ export default function InventoryPage() {
       </main>
 
       {/* Panels */}
-      {showAddPanel && <AddProductPanel onClose={() => { setShowAddPanel(false); window.location.reload(); }} />}
+      {showAddPanel && <AddProductPanel onClose={() => setShowAddPanel(false)} onSaved={refreshData} />}
       {showEditPanel && selectedItem && (
         <EditProductPanel
           productId={selectedItem.id}
           onClose={() => setShowEditPanel(false)}
-          onSuccess={() => window.location.reload()}
+          onSuccess={refreshData}
           onDelete={() => handleDelete(selectedItem)}
         />
       )}
       {/* Modals */}
       {userRole === "ADMIN" && showMovementsModal && <InventoryMovementsModal onClose={() => setShowMovementsModal(false)} />}
-      {showReceivePanel && <ReceiveStockPanel onClose={() => setShowReceivePanel(false)} onSaved={() => window.location.reload()} />}
+      {showReceivePanel && <ReceiveStockPanel onClose={() => setShowReceivePanel(false)} onSaved={refreshData} />}
     </div>
   );
 }

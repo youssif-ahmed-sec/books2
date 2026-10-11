@@ -3,7 +3,7 @@ from typing import List, Optional
 from uuid import UUID
 from datetime import datetime
 from decimal import Decimal
-from models.product import PriceLevelEnum
+from models.product import PriceLevelEnum, PaymentMethodEnum
 
 class ProductPriceBase(BaseModel):
     price_level: PriceLevelEnum
@@ -52,6 +52,8 @@ class ProductUnitResponse(ProductUnitBase):
 class ProductBundleComponentBase(BaseModel):
     component_id: UUID
     quantity: Decimal = Field(gt=0, allow_inf_nan=False)
+    unit_id: Optional[UUID] = None
+    price_level: Optional[PriceLevelEnum] = None
 
 class ProductBundleComponentCreate(ProductBundleComponentBase):
     pass
@@ -65,7 +67,7 @@ class ProductBundleComponentResponse(ProductBundleComponentBase):
 class ProductBase(BaseModel):
     sku: str
     barcode: Optional[str] = None
-    name_en: str = ""
+    name_en: Optional[str] = ""
     name_ar: str
     category_id: Optional[UUID] = None
     subcategory_id: Optional[UUID] = None
@@ -79,13 +81,18 @@ class ProductBase(BaseModel):
     max_stock_level: Decimal = Decimal("0")
     description: Optional[str] = None
     image_url: Optional[str] = None
+    warehouse_location: Optional[str] = None
     is_bundle: bool = False
     is_active: bool = True
 
 class ProductCreate(ProductBase):
+    category_id: UUID
+    subcategory_id: UUID
+    brand_id: UUID
+    supplier_id: UUID
     units: List[ProductUnitCreate] = []
     bundle_components: List[ProductBundleComponentCreate] = []
-    initial_stock: Decimal = Field(default=Decimal("0"), ge=0, allow_inf_nan=False)
+    initial_stock: Decimal = Field(default=Decimal("0"), ge=0, max_digits=18, decimal_places=2, allow_inf_nan=False)
 
 class ProductUpdate(BaseModel):
     sku: Optional[str] = None
@@ -104,12 +111,13 @@ class ProductUpdate(BaseModel):
     max_stock_level: Optional[Decimal] = None
     description: Optional[str] = None
     image_url: Optional[str] = None
+    warehouse_location: Optional[str] = None
     is_bundle: Optional[bool] = None
     is_active: Optional[bool] = None
     
     units: Optional[List[ProductUnitCreate]] = None
     bundle_components: Optional[List[ProductBundleComponentCreate]] = None
-    total_stock: Optional[Decimal] = Field(default=None, ge=0, allow_inf_nan=False)
+    model_config = ConfigDict(extra="forbid")
 
 class CategoryBase(BaseModel):
     name_ar: str
@@ -191,8 +199,9 @@ class SupplierResponse(SupplierBase):
     model_config = ConfigDict(from_attributes=True)
 
 class SupplierPaymentCreate(BaseModel):
+    request_id: UUID
     amount: Decimal = Field(gt=0, allow_inf_nan=False)
-    payment_method: str = "Cash"
+    payment_method: PaymentMethodEnum = PaymentMethodEnum.CASH
     reference_number: Optional[str] = None
     notes: Optional[str] = None
 
@@ -220,6 +229,13 @@ class PaginatedSupplierResponse(BaseModel):
     data: List[SupplierResponse]
     total: int
 
+class ProductSupplierSummary(BaseModel):
+    id: UUID
+    name: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ProductResponse(ProductBase):
     cost: Optional[Decimal] = Field(default=None, ge=0, allow_inf_nan=False)
     id: UUID
@@ -229,6 +245,9 @@ class ProductResponse(ProductBase):
     units: List[ProductUnitResponse] = []
     bundle_components: List[ProductBundleComponentResponse] = []
     category: Optional[CategoryResponse] = None
+    subcategory: Optional[SubcategoryResponse] = None
+    brand: Optional[BrandResponse] = None
+    supplier: Optional[ProductSupplierSummary] = None
     current_stock: Decimal = Decimal("0")
 
     model_config = ConfigDict(from_attributes=True)

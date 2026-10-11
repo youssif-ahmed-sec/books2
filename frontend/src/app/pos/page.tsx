@@ -1,13 +1,16 @@
 "use client";
 
+import { notifyError } from "@/lib/notifications";
+
 import { useEffect, useState, useRef, useCallback } from "react";
 import Image from "next/image";
 import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
 import { fetchApi } from "@/lib/api";
 import { ReceiptPrint } from "@/components/pos/ReceiptPrint";
-import { useReactToPrint } from "react-to-print";
+import { sendLocalPrint } from "@/lib/localPrint";
 import { errorMessage } from "@/lib/errors";
+import { getUserRole, type UserRole } from "@/utils/auth";
 
 interface CheckoutPayload {
   warehouse_id: string;
@@ -20,7 +23,7 @@ interface CheckoutPayload {
   request_id?: string;
 }
 
-interface PrintedOrder { id: string; subtotal: number; discount: number; totalAmount: number }
+interface PrintedOrder { id: string; subtotal: number; discount: number; totalAmount: number; customerName?: string }
 
 interface ProductUnit {
   id: string;
@@ -38,6 +41,7 @@ interface Product {
   name_en: string;
   image_url: string;
   current_stock: number;
+  base_unit: string;
   units: ProductUnit[];
   category: { id: string; name_ar: string };
 }
@@ -63,34 +67,48 @@ export default function POSPage() {
   const [loading, setLoading] = useState(false);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [availablePriceLevels, setAvailablePriceLevels] = useState<{value: string, label: string}[]>([]);
-  const [customers, setCustomers] = useState<{ id: string; name: string }[]>([]);
+  const [customers, setCustomers] = useState<{ id: string; name: string; price_level: string; balance: number; credit_limit: number }[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState("");
+  const [userRole, setUserRole] = useState<UserRole | null>(null);
   const [discount, setDiscount] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState("Cash");
+  const [warehouses, setWarehouses] = useState<{ id: string; name: string }[]>([]);
+  const [warehouseId, setWarehouseId] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
 
   // For printing
-  const printRef = useRef<HTMLDivElement>(null);
   const checkoutRequest = useRef<{ fingerprint: string; id: string } | null>(null);
   const [lastOrder, setLastOrder] = useState<PrintedOrder | null>(null);
+  const [lastPrintJob, setLastPrintJob] = useState<Record<string, unknown> | null>(null);
+  const [receiptItems, setReceiptItems] = useState<CartItem[]>([]);
+  const [printStatus, setPrintStatus] = useState("");
+  const [isSendingReceipt, setIsSendingReceipt] = useState(false);
 
-  const handlePrint = useReactToPrint({
-    contentRef: printRef,
-    onAfterPrint: () => {
-      setCart([]);
-      setDiscount(0);
-      setLastOrder(null);
-      checkoutRequest.current = null;
+  const reprintReceipt = async () => {
+    if (!lastPrintJob || isSendingReceipt) return;
+    setIsSendingReceipt(true);
+    setPrintStatus("جاري إرسال الفاتورة لتطبيق الطباعة المحلي...");
+    try {
+      await sendLocalPrint(lastPrintJob, "customer");
+      setPrintStatus("أُرسلت الفاتورة لتطبيق الطباعة. راجع الطباعة الفعلية.");
+    } catch (cause) {
+      setPrintStatus(errorMessage(cause, "تعذر إرسال الفاتورة لتطبيق الطباعة المحلي."));
+    } finally {
+      setIsSendingReceipt(false);
     }
-  });
+  };
 
   useEffect(() => {
+    setUserRole(getUserRole());
     const loadData = async () => {
       try {
-        const [customersData, priceLevelsData] = await Promise.all([
+        const [customersData, priceLevelsData, warehouseData] = await Promise.all([
           fetchApi("/customers"),
-          fetchApi("/pos/price-levels")
+          fetchApi("/pos/price-levels"),
+          fetchApi("/inventory/warehouses")
         ]);
+        setWarehouses(warehouseData);
+        if (warehouseData.length === 1) setWarehouseId(warehouseData[0].id);
 
         if (Array.isArray(customersData)) {
           setCustomers(customersData);
@@ -113,34 +131,57 @@ export default function POSPage() {
     return p ? Number(p.price) : 0;
   }, []);
 
+  const applyCustomerPrice = (customerId: string) => {
+    const level = customers.find(customer => customer.id === customerId)?.price_level || "Retail";
+    if (cart.some(item => !item.availableUnits.find(candidate => candidate.id === item.unitId)?.prices.some(price => price.price_level === level))) {
+      notifyError("بعض الأصناف في السلة لا تحتوي على سعر لشريحة هذا العميل. أضف السعر أولًا أو اطلب تدخل المدير.");
+      return;
+    }
+    setSelectedCustomer(customerId);
+    if (!customerId && paymentMethod === "Deferred Payment") setPaymentMethod("Cash");
+    setCart(previous => previous.map(item => {
+      const unit = item.availableUnits.find(candidate => candidate.id === item.unitId);
+      const price = unit?.prices.find(candidate => candidate.price_level === level);
+      return price
+        ? { ...item, priceLevel: level, unitPrice: Number(price.price), totalPrice: item.quantity * Number(price.price) }
+        : item;
+    }));
+  };
+
   const addToCart = useCallback((product: Product, selectedUnitId?: string) => {
     const unit = selectedUnitId 
-      ? product.units.find(u => u.id === selectedUnitId) || product.units[0] 
-      : product.units[0];
+      ? product.units.find(u => u.id === selectedUnitId) || product.units.find(u => u.unit_name === product.base_unit) || product.units[0]
+      : product.units.find(u => u.unit_name === product.base_unit) || product.units[0];
 
     if (!unit) return;
 
-    let targetLevel = unit.prices.find(p => p.price_level === "Retail")?.price_level;
+    const customerLevel = customers.find(customer => customer.id === selectedCustomer)?.price_level || "Retail";
+    let targetLevel = unit.prices.find(p => p.price_level === customerLevel)?.price_level;
+    if (!targetLevel && userRole !== "ADMIN") {
+      notifyError("لا يوجد سعر لهذه الوحدة في شريحة العميل المحددة.");
+      return;
+    }
     if (!targetLevel && unit.prices.length > 0) {
       targetLevel = unit.prices[0].price_level;
     }
 
     if (!targetLevel) {
-      alert("لا يوجد أسعار لهذه الوحدة.");
+      notifyError("لا يوجد أسعار لهذه الوحدة.");
       return;
     }
 
     const unitPrice = getPrice(unit, targetLevel);
     if (unitPrice === 0) {
-      alert("السعر صفر لهذه الوحدة.");
+      notifyError("السعر صفر لهذه الوحدة.");
       return;
     }
 
     setCart(prev => {
       const existing = prev.find(item => item.productId === product.id && item.unitId === unit.id);
       if (existing) {
-        if ((existing.quantity + 1) * existing.conversionFactor > product.current_stock) {
-          alert("لا يوجد مخزون كافٍ.");
+        const reserved = prev.filter(item => item.productId === product.id).reduce((sum, item) => sum + item.quantity * item.conversionFactor, 0);
+        if (reserved + unit.conversion_factor > product.current_stock) {
+          notifyError("لا يوجد مخزون كافٍ.");
           return prev;
         }
         return prev.map(item => 
@@ -149,8 +190,9 @@ export default function POSPage() {
             : item
         );
       } else {
-        if (unit.conversion_factor > product.current_stock) {
-          alert("لا يوجد مخزون كافٍ.");
+        const reserved = prev.filter(item => item.productId === product.id).reduce((sum, item) => sum + item.quantity * item.conversionFactor, 0);
+        if (reserved + unit.conversion_factor > product.current_stock) {
+          notifyError("لا يوجد مخزون كافٍ.");
           return prev;
         }
         return [...prev, {
@@ -169,7 +211,7 @@ export default function POSPage() {
         }];
       }
     });
-  }, [getPrice]);
+  }, [getPrice, customers, selectedCustomer, userRole]);
 
   const searchProducts = useCallback(async (query: string) => {
     if (!query) {
@@ -181,10 +223,18 @@ export default function POSPage() {
       const res = await fetchApi(`/pos/search?q=${encodeURIComponent(query)}&limit=20`);
       const dataArr: Product[] = res.data || res || [];
       setProducts(dataArr);
-      if (dataArr.length === 1 && (dataArr[0].barcode === query || dataArr[0].sku === query)) {
-        addToCart(dataArr[0]);
+      const exactUnitMatches = dataArr.flatMap(product => product.units.filter(unit => unit.barcode === query).map(unit => ({ product, unit })));
+      const exactProductMatches = dataArr.filter(product => product.barcode === query || product.sku === query);
+      if (exactUnitMatches.length === 1 && exactProductMatches.length === 0) {
+        addToCart(exactUnitMatches[0].product, exactUnitMatches[0].unit.id);
         setSearchQuery("");
         setProducts([]);
+      } else if (exactUnitMatches.length === 0 && exactProductMatches.length === 1) {
+        addToCart(exactProductMatches[0]);
+        setSearchQuery("");
+        setProducts([]);
+      } else if (exactUnitMatches.length + exactProductMatches.length > 1) {
+        notifyError("الباركود مطابق لأكثر من منتج أو وحدة. راجع الباركود المسجل قبل البيع.");
       }
     } catch (error) {
       console.error(error);
@@ -213,12 +263,13 @@ export default function POSPage() {
 
         const unitPrice = getPrice(newUnit, targetLevel);
         if (unitPrice === 0) {
-          alert("لا يوجد أسعار لهذه الوحدة.");
+          notifyError("لا يوجد أسعار لهذه الوحدة.");
           return item;
         }
 
-        if (item.quantity * newUnit.conversion_factor > item.maxStock) {
-          alert("لا يوجد مخزون كافٍ لهذه الوحدة بالكمية المحددة.");
+        const reservedOtherUnits = prev.filter(other => other.productId === item.productId && other.id !== id).reduce((sum, other) => sum + other.quantity * other.conversionFactor, 0);
+        if (reservedOtherUnits + item.quantity * newUnit.conversion_factor > item.maxStock) {
+          notifyError("لا يوجد مخزون كافٍ لهذه الوحدة بالكمية المحددة.");
           return item;
         }
 
@@ -257,14 +308,16 @@ export default function POSPage() {
   };
 
   const updateCartItemQuantity = (id: string, newQty: number) => {
+    if (!Number.isInteger(newQty)) return;
     if (newQty <= 0) {
       setCart(prev => prev.filter(item => item.id !== id));
       return;
     }
     setCart(prev => prev.map(item => {
       if (item.id === id) {
-        if (newQty * item.conversionFactor > item.maxStock) {
-          alert("لا يوجد مخزون كافٍ.");
+        const reservedOtherUnits = prev.filter(other => other.productId === item.productId && other.id !== id).reduce((sum, other) => sum + other.quantity * other.conversionFactor, 0);
+        if (reservedOtherUnits + newQty * item.conversionFactor > item.maxStock) {
+          notifyError("لا يوجد مخزون كافٍ.");
           return item;
         }
         return { ...item, quantity: newQty, totalPrice: newQty * item.unitPrice };
@@ -282,11 +335,12 @@ export default function POSPage() {
 
   const handleCheckout = async () => {
     if (cart.length === 0) return;
+    if (!warehouseId) { notifyError("اختر المخزن قبل إتمام البيع"); return; }
     try {
       setIsProcessing(true);
       
       const payload: CheckoutPayload = {
-        warehouse_id: "00000000-0000-0000-0000-000000000000", // Will be overridden or ignored if single warehouse
+        warehouse_id: warehouseId,
         status: "Delivered",
         source: "Walk-In Customer",
         discount_amount: discount,
@@ -303,9 +357,6 @@ export default function POSPage() {
         payload.customer_id = selectedCustomer;
       }
 
-      // Let backend auto-resolve the warehouse with sufficient stock
-      payload.warehouse_id = "00000000-0000-0000-0000-000000000000";
-
       const fingerprint = JSON.stringify(payload);
       if (checkoutRequest.current?.fingerprint !== fingerprint) {
         checkoutRequest.current = { fingerprint, id: crypto.randomUUID() };
@@ -321,44 +372,47 @@ export default function POSPage() {
         id: res.id,
         subtotal,
         discount,
-        totalAmount
+        totalAmount,
+        customerName: customers.find(customer => customer.id === selectedCustomer)?.name,
       });
-      // Auto-print to local agent
-      try {
-        const printResponse = await fetch("http://127.0.0.1:8199/api/print", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            order: {
-              id: res.id,
-              order_number: res.id,
-              cashier_name: "الكاشير",
-              subtotal: subtotal,
-              discount_amount: discount,
-              total_amount: totalAmount,
-              cart: cart.map(c => ({
-                qty: c.quantity,
-                price: c.unitPrice,
-                name: c.nameAr || "صنف غير معروف",
-              }))
-            },
-            receipt_type: "customer"
-          })
-        });
-        if (!printResponse.ok) throw new Error("Print agent rejected receipt");
-        setCart([]);
-        setDiscount(0);
-        setLastOrder(null);
-        checkoutRequest.current = null;
-      } catch (printErr) {
-        console.warn("Print agent failed, falling back to browser print", printErr);
-        setTimeout(() => {
-          handlePrint();
-        }, 100);
+      setReceiptItems(cart.map(item => ({ ...item })));
+      setPrintStatus("جاري إرسال الفاتورة للطابعة...");
+
+      if (paymentMethod === "Deferred Payment" && selectedCustomer) {
+        fetchApi("/customers").then(setCustomers).catch(console.error);
       }
+      const receiptJob = {
+        id: res.id,
+        order_number: res.id,
+        created_at: new Date().toISOString(),
+        cashier_name: "الكاشير",
+        subtotal,
+        discount_amount: discount,
+        total_amount: totalAmount,
+        cart: cart.map(c => ({
+          qty: c.quantity,
+          price: c.unitPrice,
+          name: `${c.nameAr || "صنف غير معروف"} (${c.unitName})`,
+        })),
+      };
+      setLastPrintJob(receiptJob);
+      // Auto-print to local agent
+      setIsSendingReceipt(true);
+      try {
+        await sendLocalPrint(receiptJob, "customer");
+        setPrintStatus("أُرسلت الفاتورة للطابعة. راجع الطباعة الفعلية.");
+      } catch (printErr) {
+        console.warn("Print agent failed", printErr);
+        setPrintStatus(errorMessage(printErr, "تعذر إرسال الفاتورة لتطبيق الطباعة المحلي."));
+      } finally {
+        setIsSendingReceipt(false);
+      }
+      setCart([]);
+      setDiscount(0);
+      checkoutRequest.current = null;
 
     } catch (error: unknown) {
-      alert("فشل إتمام الطلب: " + errorMessage(error, "تأكد من المخزون"));
+      notifyError("فشل إتمام الطلب: " + errorMessage(error, "تأكد من المخزون"));
     } finally {
       setIsProcessing(false);
     }
@@ -380,15 +434,14 @@ export default function POSPage() {
               <span className="material-symbols-outlined text-primary">person</span>
               بيانات العميل
             </h3>
+            <label className="text-sm">مخزن البيع<select className="mt-2 w-full rounded-xl bg-black p-3" value={warehouseId} onChange={event => setWarehouseId(event.target.value)}><option value="">اختر المخزن</option>{warehouses.map(warehouse => <option key={warehouse.id} value={warehouse.id}>{warehouse.name}</option>)}</select></label>
             
             <div className="flex flex-col gap-3">
               <div className="flex flex-col gap-2">
-                <label className="text-[11px] font-bold text-[#e2bfb0]/60 uppercase">العميل</label>
+                <label className="text-sm font-bold text-[#e2bfb0]/80">العميل</label>
                 <select 
                   value={selectedCustomer}
-                  onChange={(e) => {
-                    setSelectedCustomer(e.target.value);
-                  }}
+                  onChange={(e) => applyCustomerPrice(e.target.value)}
                   className="bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none transition-all cursor-pointer text-white"
                 >
                   <option value="" className="bg-[#1c1b1b] text-white">بدون عميل (عميل نقدي)</option>
@@ -431,8 +484,9 @@ export default function POSPage() {
                       </div>
                       
                       {/* Middle Row: Dropdowns */}
-                      <div className="flex flex-wrap items-center gap-2">
-                        <select 
+                      <div className="flex flex-wrap items-end gap-2">
+                        <label className="flex flex-1 min-w-[90px] flex-col gap-1 text-xs text-[#e2bfb0]">الوحدة
+                        <select
                           value={item.unitId}
                           onChange={(e) => updateCartItemUnit(item.id, e.target.value)}
                           className="bg-black/40 border border-white/10 rounded-lg px-3 py-1.5 text-[11.5px] font-medium text-white/90 focus:outline-none focus:ring-1 focus:ring-primary/50 cursor-pointer transition-colors hover:bg-black/60 flex-1 min-w-[80px]"
@@ -442,10 +496,12 @@ export default function POSPage() {
                               {u.unit_name}
                             </option>
                           ))}
-                        </select>
-                        <select 
+                        </select></label>
+                        <label className="flex flex-1 min-w-[120px] flex-col gap-1 text-xs text-[#e2bfb0]">فئة السعر
+                        <select
                           value={item.priceLevel}
                           onChange={(e) => updateCartItemPriceLevel(item.id, e.target.value)}
+                          disabled={userRole !== "ADMIN"}
                           className="bg-black/40 border border-white/10 rounded-lg px-3 py-1.5 text-[11.5px] font-medium text-white/90 focus:outline-none focus:ring-1 focus:ring-primary/50 cursor-pointer transition-colors hover:bg-black/60 flex-1 min-w-[120px]"
                         >
                           {item.availableUnits.find(u => u.id === item.unitId)?.prices.map(p => {
@@ -456,21 +512,24 @@ export default function POSPage() {
                               </option>
                             );
                           })}
-                        </select>
+                        </select></label>
                       </div>
                       
                       {/* Bottom Row: Quantity & Total */}
                       <div className="flex items-center justify-between mt-1 pt-3 border-t border-white/5">
-                        <div className="flex items-center gap-3 bg-[#131313] p-1.5 rounded-lg border border-white/10 shadow-inner">
-                          <button onClick={() => updateCartItemQuantity(item.id, item.quantity - 1)} className="w-8 h-8 flex items-center justify-center hover:bg-white/10 text-white/70 hover:text-white rounded-md transition-colors">
-                            <span className="material-symbols-outlined text-sm">remove</span>
+                        <div className="flex items-center gap-2 bg-[#131313] p-1.5 rounded-lg border border-white/10 shadow-inner">
+                          <button type="button" aria-label={`تقليل كمية ${item.nameAr}`} onClick={() => updateCartItemQuantity(item.id, item.quantity - 1)} className="w-10 h-10 flex items-center justify-center hover:bg-white/10 text-white rounded-md transition-colors">
+                            <span className="material-symbols-outlined text-lg">remove</span>
                           </button>
-                          <span className="text-[15px] font-bold w-6 text-center text-primary">{item.quantity}</span>
-                          <button onClick={() => updateCartItemQuantity(item.id, item.quantity + 1)} className="w-8 h-8 flex items-center justify-center hover:bg-white/10 text-white/70 hover:text-white rounded-md transition-colors">
-                            <span className="material-symbols-outlined text-sm">add</span>
+                          <input type="number" inputMode="numeric" min="1" step="1" aria-label={`كمية ${item.nameAr} بال${item.unitName}`} value={item.quantity} onFocus={event => event.currentTarget.select()} onBlur={event => { event.currentTarget.value = String(item.quantity); }} onChange={event => {
+                            const quantity = Number(event.target.value);
+                            if (Number.isInteger(quantity) && quantity > 0) updateCartItemQuantity(item.id, quantity);
+                          }} className="w-16 h-10 rounded-md border border-white/20 bg-[#201f1f] text-center text-lg font-bold text-primary focus:ring-2 focus:ring-primary/50" />
+                          <button type="button" aria-label={`زيادة كمية ${item.nameAr}`} onClick={() => updateCartItemQuantity(item.id, item.quantity + 1)} className="w-10 h-10 flex items-center justify-center hover:bg-white/10 text-white rounded-md transition-colors">
+                            <span className="material-symbols-outlined text-lg">add</span>
                           </button>
                         </div>
-                        <span className="font-bold text-lg text-white tracking-wide">{item.totalPrice.toFixed(2)} <span className="text-xs text-white/50 font-normal">ج.م</span></span>
+                        <span className="font-bold text-lg text-white tracking-wide">{item.totalPrice.toFixed(2)} <span className="text-xs text-white/50 font-normal">ج.م · {item.unitPrice.toFixed(2)} / {item.unitName}</span></span>
                       </div>
                     </div>
                   ))}
@@ -492,6 +551,7 @@ export default function POSPage() {
                     type="number" 
                     value={discount || ""}
                     onChange={(e) => setDiscount(Number(e.target.value))}
+                    disabled={userRole !== "ADMIN"}
                     className="w-full bg-[#131313] border border-white/10 rounded-lg py-1 px-3 text-sm text-center focus:ring-1 focus:ring-primary focus:outline-none"
                     placeholder="0"
                   />
@@ -505,19 +565,25 @@ export default function POSPage() {
               </div>
 
               <div className="grid grid-cols-2 gap-2 mt-2">
-                <button 
-                  onClick={() => setPaymentMethod("Cash")}
-                  className={`py-2 rounded-lg text-sm font-bold transition-all ${paymentMethod === 'Cash' ? 'bg-white/20 text-white' : 'glass text-[#e2bfb0]/60 hover:bg-white/10'}`}
-                >
-                  نقدي
-                </button>
-                <button 
-                  onClick={() => setPaymentMethod("Credit Card")}
-                  className={`py-2 rounded-lg text-sm font-bold transition-all ${paymentMethod === 'Credit Card' ? 'bg-white/20 text-white' : 'glass text-[#e2bfb0]/60 hover:bg-white/10'}`}
-                >
-                  بطاقة
-                </button>
+                {([
+                  ["Cash", "نقدي"], ["Credit Card", "بطاقة"],
+                  ["Vodafone Cash", "فودافون كاش"], ["Instapay", "إنستاباي"],
+                  ["Bank Transfer", "تحويل بنكي"], ["Deferred Payment", "بيع آجل"],
+                ] as const).map(([method, label]) => (
+                  <button
+                    key={method}
+                    type="button"
+                    onClick={() => setPaymentMethod(method)}
+                    disabled={method === "Deferred Payment" && !selectedCustomer}
+                    className={`py-2 rounded-lg text-sm font-bold transition-all disabled:opacity-40 ${paymentMethod === method ? "bg-white/20 text-white" : "glass text-[#e2bfb0]/60 hover:bg-white/10"}`}
+                  >{label}</button>
+                ))}
               </div>
+              {selectedCustomer && paymentMethod === "Deferred Payment" && (() => {
+                const customer = customers.find(candidate => candidate.id === selectedCustomer);
+                const available = Number(customer?.credit_limit || 0) - Number(customer?.balance || 0);
+                return <p className="text-xs app-muted">المتاح من حد العميل: {available.toFixed(2)} ج.م</p>;
+              })()}
 
               <button 
                 onClick={handleCheckout}
@@ -570,7 +636,7 @@ export default function POSPage() {
                     className="bg-white/5 border border-white/5 rounded-2xl p-4 hover:bg-white/10 hover:border-primary/30 transition-all cursor-pointer group flex flex-col gap-3 relative overflow-hidden"
                   >
                     {product.current_stock <= 0 && (
-                      <div className="absolute top-0 right-0 left-0 bg-[#ffb4ab]/20 text-[#ffb4ab] text-[10px] text-center font-bold py-0.5">
+                      <div className="absolute top-0 right-0 left-0 bg-[#ffb4ab]/20 text-[#ffb4ab] text-xs text-center font-bold py-0.5">
                         نفد المخزون
                       </div>
                     )}
@@ -585,14 +651,14 @@ export default function POSPage() {
                     
                     <div className="flex-1 flex flex-col">
                       <h4 className="font-bold text-sm text-white line-clamp-2 leading-snug">{product.name_ar}</h4>
-                      <p className="text-[10px] text-[#e2bfb0]/60 mt-1">{product.category?.name_ar || "عام"}</p>
+                      <p className="text-xs text-[#e2bfb0]/80 mt-1">{product.category?.name_ar || "عام"}</p>
                     </div>
 
                     <div className="flex items-center justify-between mt-2 pt-2 border-t border-white/5">
                       <span className="font-bold text-primary">
-                        {product.units[0]?.prices.find(p => p.price_level === "Retail")?.price || product.units[0]?.prices[0]?.price || 0} ج
+                        {(() => { const baseUnit = product.units.find(unit => unit.unit_name === product.base_unit) || product.units[0]; return baseUnit?.prices.find(price => price.price_level === "Retail")?.price || baseUnit?.prices[0]?.price || 0; })()} ج.م / {product.base_unit}
                       </span>
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${product.current_stock > 0 ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                      <span className={`text-xs font-bold px-2 py-0.5 rounded-md ${product.current_stock > 0 ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
                         {product.current_stock}
                       </span>
                     </div>
@@ -614,8 +680,21 @@ export default function POSPage() {
 
       </main>
 
-      {/* Hidden Print Component */}
-      <ReceiptPrint ref={printRef} order={lastOrder} items={cart} />
+      {lastOrder && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-4" role="dialog" aria-modal="true" aria-label="فاتورة البيع">
+          <div className="flex max-h-[90vh] w-full max-w-md flex-col rounded-2xl bg-[#1c1b1b] p-5 text-white shadow-2xl">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h2 className="text-lg font-bold">فاتورة البيع</h2>
+              <button type="button" onClick={() => { setLastOrder(null); setLastPrintJob(null); setReceiptItems([]); }} aria-label="إغلاق الفاتورة" className="rounded-lg p-2 hover:bg-white/10">✕</button>
+            </div>
+            <div className="overflow-y-auto rounded-xl bg-white p-3 text-black">
+              <ReceiptPrint order={lastOrder} items={receiptItems} />
+            </div>
+            <p className="mt-3 text-sm text-[#e2bfb0]">{printStatus}</p>
+            <button type="button" onClick={reprintReceipt} disabled={!lastPrintJob || isSendingReceipt} className="mt-3 rounded-xl bg-primary px-5 py-3 font-bold text-white disabled:opacity-50">{isSendingReceipt ? "جارٍ الإرسال..." : "إرسال الفاتورة لتطبيق الطباعة"}</button>
+          </div>
+        </div>
+      )}
       
     </div>
   );

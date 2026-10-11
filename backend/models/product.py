@@ -89,6 +89,7 @@ class Product(Base):
     max_stock_level = Column(Numeric(18, 2), nullable=False, default=0)
     description = Column(String, nullable=True)
     image_url = Column(String, nullable=True)
+    warehouse_location = Column(String, nullable=True)
     
     is_bundle = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
@@ -161,6 +162,10 @@ class ProductBundleComponent(Base):
     bundle_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
     component_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
     quantity = Column(Numeric(10, 2), nullable=False)  # Quantity in the component's base_unit
+    unit_id = Column(UUID(as_uuid=True), ForeignKey("product_units.id"), nullable=True)
+    price_level = Column(Enum(PriceLevelEnum), nullable=True)
+    is_deleted = Column(Boolean, nullable=False, default=False)
     
     bundle = relationship("Product", foreign_keys=[bundle_id], back_populates="bundle_components")
     component = relationship("Product", foreign_keys=[component_id])
+    unit = relationship("ProductUnit", foreign_keys=[unit_id])

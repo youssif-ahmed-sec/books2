@@ -3,14 +3,55 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from uuid import UUID
 from typing import List
+from decimal import Decimal
+from sqlalchemy.exc import IntegrityError
 
-from core.dependencies import get_current_user, require_basic_staff_access
+from core.dependencies import require_admin, require_basic_staff_access, require_pos_orders_access
 from database import get_db
 from models.customer import Customer
-from models.user import User
-from schemas.customer import CustomerCreate, CustomerUpdate, CustomerResponse
+from models.financial import Payment
+from models.user import AuditLog
+from models.user import User, RoleEnum
+from models.customer import CustomerTypeEnum
+from models.customer import CustomerInteraction
+from models.product import PriceLevelEnum
+from models.order import Order
+from schemas.customer import CustomerCreate, CustomerUpdate, CustomerResponse, CreditLimitUpdate, InteractionCreate, InteractionResponse
+from schemas.payment import CustomerPaymentCreate, PaymentResponse
+from services.cash_register_service import open_shift
 
 router = APIRouter(prefix="/customers", tags=["Customers"])
+
+
+@router.get("/segments", response_model=List[CustomerResponse])
+async def marketing_segment(
+    customer_type: CustomerTypeEnum | None = None,
+    tag: str | None = None,
+    min_purchases: Decimal = Decimal("0"),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_admin),
+):
+    query = select(Customer).where(Customer.is_deleted == False, Customer.is_active == True, Customer.total_purchases >= min_purchases)
+    if customer_type:
+        query = query.where(Customer.customer_type == customer_type)
+    customers = (await db.execute(query.order_by(Customer.total_purchases.desc()))).scalars().all()
+    return [customer for customer in customers if not tag or tag in (customer.tags or [])]
+
+
+def default_price_level(customer_type: CustomerTypeEnum) -> PriceLevelEnum:
+    return {
+        CustomerTypeEnum.WHOLESALE: PriceLevelEnum.WHOLESALE,
+        CustomerTypeEnum.SUPER_WHOLESALE: PriceLevelEnum.SUPER_WHOLESALE,
+        CustomerTypeEnum.VIP: PriceLevelEnum.VIP,
+    }.get(customer_type, PriceLevelEnum.RETAIL)
+
+
+def visible_customer(customer: Customer, role: RoleEnum) -> CustomerResponse:
+    response = CustomerResponse.model_validate(customer)
+    if role not in (RoleEnum.ADMIN, RoleEnum.CASHIER_ORDERS):
+        response.balance = None
+        response.credit_limit = None
+    return response
 
 @router.get("", response_model=List[CustomerResponse])
 async def get_customers(
@@ -19,7 +60,7 @@ async def get_customers(
 ):
     query = select(Customer).where(Customer.is_deleted == False).order_by(Customer.name)
     result = await db.execute(query)
-    return result.scalars().all()
+    return [visible_customer(customer, current_user.role) for customer in result.scalars().all()]
 
 @router.post("", response_model=CustomerResponse, status_code=status.HTTP_201_CREATED)
 async def create_customer(
@@ -27,11 +68,16 @@ async def create_customer(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_basic_staff_access)
 ):
-    new_customer = Customer(**customer_in.model_dump())
+    values = customer_in.model_dump()
+    if current_user.role != RoleEnum.ADMIN:
+        values["price_level"] = default_price_level(customer_in.customer_type)
+    new_customer = Customer(**values)
     db.add(new_customer)
+    await db.flush()
+    db.add(AuditLog(user_id=current_user.id, action="CREATE_CUSTOMER", entity_type="Customer", entity_id=str(new_customer.id)))
     await db.commit()
     await db.refresh(new_customer)
-    return new_customer
+    return visible_customer(new_customer, current_user.role)
 
 @router.put("/{customer_id}", response_model=CustomerResponse)
 async def update_customer(
@@ -44,13 +90,18 @@ async def update_customer(
     customer = result.scalar_one_or_none()
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
+    if current_user.role != RoleEnum.ADMIN and "price_level" in customer_in.model_fields_set:
+        raise HTTPException(status_code=403, detail="Admin access required to change customer pricing")
         
-    for k, v in customer_in.model_dump(exclude_unset=True).items():
+    changes = customer_in.model_dump(exclude_unset=True)
+    if current_user.role != RoleEnum.ADMIN and "customer_type" in changes:
+        changes["price_level"] = default_price_level(changes["customer_type"])
+    for k, v in changes.items():
         setattr(customer, k, v)
-        
+    db.add(AuditLog(user_id=current_user.id, action="UPDATE_CUSTOMER", entity_type="Customer", entity_id=str(customer_id), new_value={"fields": list(changes)}))
     await db.commit()
     await db.refresh(customer)
-    return customer
+    return visible_customer(customer, current_user.role)
 
 @router.delete("/{customer_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_customer(
@@ -64,4 +115,121 @@ async def delete_customer(
         raise HTTPException(status_code=404, detail="Customer not found")
         
     customer.is_deleted = True
+    db.add(AuditLog(user_id=current_user.id, action="ARCHIVE_CUSTOMER", entity_type="Customer", entity_id=str(customer_id)))
     await db.commit()
+
+
+@router.patch("/{customer_id}/credit-limit", response_model=CustomerResponse)
+async def set_credit_limit(
+    customer_id: UUID,
+    update: CreditLimitUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    customer = (await db.execute(select(Customer).where(
+        Customer.id == customer_id, Customer.is_deleted == False,
+    ).with_for_update())).scalar_one_or_none()
+    if customer is None:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    old_limit = Decimal(str(customer.credit_limit or 0))
+    customer.credit_limit = update.credit_limit
+    db.add(AuditLog(
+        user_id=current_user.id, action="SET_CUSTOMER_CREDIT_LIMIT", entity_type="Customer",
+        entity_id=str(customer_id), old_value={"credit_limit": str(old_limit)},
+        new_value={"credit_limit": str(update.credit_limit)},
+    ))
+    await db.commit()
+    await db.refresh(customer)
+    return visible_customer(customer, current_user.role)
+
+
+@router.post("/{customer_id}/payments", response_model=PaymentResponse, status_code=status.HTTP_201_CREATED)
+async def collect_customer_payment(
+    customer_id: UUID,
+    payment_in: CustomerPaymentCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_pos_orders_access),
+):
+    existing = (await db.execute(select(Payment).where(Payment.id == payment_in.request_id))).scalar_one_or_none()
+    if existing is not None:
+        if existing.customer_id != customer_id or existing.user_id != current_user.id or existing.kind != "COLLECTION" or existing.method != payment_in.method or Decimal(str(existing.amount)) != payment_in.amount:
+            raise HTTPException(status_code=409, detail="Payment request ID was already used differently")
+        return existing
+    customer = (await db.execute(select(Customer).where(
+        Customer.id == customer_id, Customer.is_deleted == False,
+    ).with_for_update())).scalar_one_or_none()
+    if customer is None:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    amount = Decimal(str(payment_in.amount))
+    if amount > Decimal(str(customer.balance or 0)):
+        raise HTTPException(status_code=400, detail="Payment exceeds the customer balance")
+    customer.balance = Decimal(str(customer.balance)) - amount
+    try:
+        shift_id = (await open_shift(db, current_user.id)).id if payment_in.method == "Cash" else None
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    payment = Payment(
+        id=payment_in.request_id,
+        customer_id=customer_id, user_id=current_user.id,
+        shift_id=shift_id, amount=amount, method=payment_in.method, kind="COLLECTION",
+    )
+    db.add(payment)
+    db.add(AuditLog(user_id=current_user.id, action="COLLECT_CUSTOMER_DEBT", entity_type="Customer", entity_id=str(customer_id), new_value={"amount": str(amount), "method": payment_in.method}))
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        replay = (await db.execute(select(Payment).where(Payment.id == payment_in.request_id))).scalar_one_or_none()
+        if replay is None or replay.customer_id != customer_id or replay.user_id != current_user.id or replay.kind != "COLLECTION" or replay.method != payment_in.method or Decimal(str(replay.amount)) != amount:
+            raise HTTPException(status_code=409, detail="Payment request ID was already used differently")
+        return replay
+    await db.refresh(payment)
+    return payment
+
+
+@router.get("/{customer_id}/payments", response_model=List[PaymentResponse])
+async def customer_payment_history(
+    customer_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_pos_orders_access),
+):
+    return (await db.execute(select(Payment).where(Payment.customer_id == customer_id).order_by(Payment.created_at.desc()))).scalars().all()
+
+
+@router.get("/{customer_id}/interactions", response_model=List[InteractionResponse])
+async def interaction_history(
+    customer_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_basic_staff_access),
+):
+    return (await db.execute(select(CustomerInteraction).where(CustomerInteraction.customer_id == customer_id).order_by(CustomerInteraction.created_at.desc()))).scalars().all()
+
+
+@router.post("/{customer_id}/interactions", response_model=InteractionResponse, status_code=status.HTTP_201_CREATED)
+async def record_interaction(
+    customer_id: UUID,
+    payload: InteractionCreate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_basic_staff_access),
+):
+    exists = (await db.execute(select(Customer.id).where(Customer.id == customer_id, Customer.is_deleted == False))).scalar_one_or_none()
+    if exists is None:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    entry = CustomerInteraction(customer_id=customer_id, user_id=user.id, **payload.model_dump())
+    db.add(entry)
+    await db.flush()
+    db.add(AuditLog(user_id=user.id, action="RECORD_CUSTOMER_INTERACTION", entity_type="Customer", entity_id=str(customer_id), new_value={"interaction_id": str(entry.id), "channel": payload.channel}))
+    await db.commit()
+    await db.refresh(entry)
+    return entry
+
+
+@router.get("/{customer_id}/orders")
+async def customer_order_history(
+    customer_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_basic_staff_access),
+):
+    rows = (await db.execute(select(Order).where(Order.customer_id == customer_id).order_by(Order.created_at.desc()))).scalars().all()
+    return [{"id": order.id, "status": order.status, "total_amount": float(order.total_amount),
+             "created_at": order.created_at, "source": order.source} for order in rows]

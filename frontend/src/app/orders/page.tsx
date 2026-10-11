@@ -4,10 +4,11 @@ import Head from "next/head";
 import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
 import { fetchApi } from "@/lib/api";
-import { ToastContainer, toast } from 'react-toastify';
-import 'react-toastify/dist/ReactToastify.css';
+import { toast } from 'react-toastify';
 import { errorMessage } from "@/lib/errors";
+import { printOrderInvoice } from "@/lib/localPrint";
 import { orderSourceLabels, orderStatusLabels } from "@/lib/orderLabels";
+import { getUserRole, type UserRole } from "@/utils/auth";
 
 // ── Types ─────────────────────────────────────────────────────────────
 interface Product {
@@ -37,7 +38,9 @@ interface Customer {
   id: string;
   name: string;
   phone: string;
+  price_level: string;
 }
+interface Preparer { id: string; email: string; role: string }
 
 interface OrderItem {
   id: string;
@@ -91,7 +94,7 @@ const ORDER_SOURCES = [
   "Messenger", "Phone Call", "Walk-In Customer", "Manual Entry"
 ];
 
-const STATUS_TABS = ["All", "Draft Order", "Waiting Quotation", "Approved", "Preparing", "Ready", "Delivered", "Closed", "Cancelled"];
+const STATUS_TABS = ["All", "New Lead", "Draft Order", "Waiting Quotation", "Approved", "Preparing", "Ready", "Delivered", "Closed", "Returned", "Cancelled"];
 
 const STATUS_MAP = orderStatusLabels;
 const SOURCE_MAP = orderSourceLabels;
@@ -110,15 +113,32 @@ export default function OrdersPage() {
 
   const [cart, setCart] = useState<CartItem[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [preparers, setPreparers] = useState<Preparer[]>([]);
+  const [warehouses, setWarehouses] = useState<{ id: string; name: string }[]>([]);
+  const [deliveryWarehouse, setDeliveryWarehouse] = useState<Record<string, string>>({});
+  const [paymentMethod, setPaymentMethod] = useState("Cash");
+  const [leadId, setLeadId] = useState<string | null>(null);
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
+  const [userRole, setUserRole] = useState<UserRole | null>(null);
   const [selectedSource, setSelectedSource] = useState("Manual Entry");
   const [shippingCost, setShippingCost] = useState<number>(0);
   const [notes, setNotes] = useState("");
   const [availablePriceLevels, setAvailablePriceLevels] = useState<{value: string, label: string}[]>([]);
 
   useEffect(() => {
-    fetchApi("/orders").then(setOrders).catch(console.error).finally(() => setLoading(false));
+    setUserRole(getUserRole());
+    fetchApi("/orders").then((data: Order[]) => {
+      setOrders(data);
+      const requestedLead = new URLSearchParams(window.location.search).get("lead_id");
+      const lead = data.find(order => order.id === requestedLead && order.status === "New Lead");
+      if (lead) {
+        setLeadId(lead.id); setSelectedCustomerId(lead.customer_id || "");
+        setSelectedSource(lead.source); setNotes(lead.notes || ""); setIsSlideOverOpen(true);
+      }
+    }).catch(console.error).finally(() => setLoading(false));
     fetchApi("/customers").then(setCustomers).catch(console.error);
+    fetchApi("/orders/preparers").then(setPreparers).catch(console.error);
+    fetchApi("/inventory/warehouses").then(setWarehouses).catch(console.error);
     fetchApi("/pos/price-levels").then(setAvailablePriceLevels).catch(() => {
       setAvailablePriceLevels([
         { value: "Retail", label: "قطاعي" },
@@ -173,7 +193,11 @@ export default function OrdersPage() {
     }
     
     const unit = product.units[0];
-    const initialPriceLevel = unit.prices?.[0]?.price_level || "Retail"; 
+    const customerLevel = customers.find(customer => customer.id === selectedCustomerId)?.price_level || "Retail";
+    if (!unit.prices?.some(price => price.price_level === customerLevel) && userRole !== "ADMIN") {
+      toast.error("لا يوجد سعر لهذه الوحدة في شريحة العميل المحددة"); return;
+    }
+    const initialPriceLevel = unit.prices?.find(price => price.price_level === customerLevel)?.price_level || "Retail";
     const priceObj = unit.prices?.find(p => p.price_level === initialPriceLevel);
     const unitPrice = priceObj ? Number(priceObj.price) : 0;
 
@@ -265,6 +289,21 @@ export default function OrdersPage() {
     }));
   };
 
+  const applyCustomerPrice = (customerId: string) => {
+    const level = customers.find(customer => customer.id === customerId)?.price_level || "Retail";
+    if (cart.some(item => !item.availableUnits.find(candidate => candidate.id === item.unitId)?.prices.some(price => price.price_level === level))) {
+      toast.error("بعض الأصناف لا تحتوي على سعر لشريحة هذا العميل"); return;
+    }
+    setSelectedCustomerId(customerId);
+    setCart(previous => previous.map(item => {
+      const unit = item.availableUnits.find(candidate => candidate.id === item.unitId);
+      const price = unit?.prices.find(candidate => candidate.price_level === level);
+      return price
+        ? { ...item, priceLevel: level, unitPrice: Number(price.price), totalPrice: item.quantity * Number(price.price) }
+        : item;
+    }));
+  };
+
   const cartSubtotal = cart.reduce((sum, item) => sum + item.totalPrice, 0);
   const cartTotal = cartSubtotal + Number(shippingCost);
 
@@ -275,10 +314,12 @@ export default function OrdersPage() {
     }
     try {
       const payload = {
+        lead_id: leadId,
         customer_id: selectedCustomerId || null,
         source: selectedSource,
         status: "Draft Order",
         shipping_cost: Number(shippingCost),
+        payment_method: paymentMethod,
         notes: notes,
         items: cart.map(item => ({
           product_id: item.productId,
@@ -298,6 +339,9 @@ export default function OrdersPage() {
       setCart([]);
       setNotes("");
       setShippingCost(0);
+      setPaymentMethod("Cash");
+      setLeadId(null);
+      window.history.replaceState({}, "", "/orders");
       fetchOrders();
     } catch (err: unknown) {
       toast.error(errorMessage(err, "حدث خطأ أثناء إنشاء الطلب"));
@@ -307,18 +351,8 @@ export default function OrdersPage() {
   const handleStatusChange = async (orderId: string, newStatus: string) => {
     let warehouse_id = null;
     if (newStatus === "Delivered" || newStatus === "Closed") {
-      try {
-        const wData = await fetchApi("/inventory/warehouses");
-        if (wData.length > 0) {
-          warehouse_id = wData[0].id;
-        } else {
-          toast.error("لا يوجد مخازن متاحة لصرف المخزون");
-          return;
-        }
-      } catch {
-        toast.error("Error fetching warehouses");
-        return;
-      }
+      warehouse_id = deliveryWarehouse[orderId] || (warehouses.length === 1 ? warehouses[0].id : null);
+      if (!warehouse_id) { toast.error("اختر مخزن التسليم أولًا"); return; }
     }
 
     try {
@@ -335,6 +369,14 @@ export default function OrdersPage() {
     } catch (err: unknown) {
       toast.error(errorMessage(err, "حدث خطأ"));
     }
+  };
+
+  const assignOrder = async (orderId: string, userId: string) => {
+    if (!userId) return;
+    try {
+      await fetchApi(`/orders/${orderId}/assign`, { method: "PATCH", body: JSON.stringify({ user_id: userId }) });
+      toast.success("تم إسناد تجهيز الطلب"); fetchOrders();
+    } catch (error) { toast.error(errorMessage(error, "تعذر إسناد الطلب")); }
   };
 
   const filteredOrders = activeTab === "All" ? orders : orders.filter(o => o.status === activeTab);
@@ -368,7 +410,6 @@ export default function OrdersPage() {
       <Head>
         <title>إدارة الطلبات | نظام المكتبة</title>
       </Head>
-      <ToastContainer position="top-right" theme="dark" rtl={true} />
 
       <SideNav />
       <TopNav title="إدارة الطلبات" />
@@ -459,6 +500,18 @@ export default function OrdersPage() {
                         {new Date(order.created_at).toLocaleDateString('ar-EG', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                       </td>
                       <td className="px-6 py-4 text-center relative">
+                        {order.status === "Approved" && <select className="bg-black border border-white/10 rounded-lg text-xs p-2" defaultValue="" onChange={event => assignOrder(order.id, event.target.value)}><option value="">إسناد التجهيز</option>{preparers.map(user => <option key={user.id} value={user.id}>{user.email || user.role}</option>)}</select>}
+                        {order.status === "Ready" && <select aria-label={`مخزن تسليم الطلب ${order.id}`} className="bg-black border border-white/10 rounded-lg text-xs p-2" value={deliveryWarehouse[order.id] || (warehouses.length === 1 ? warehouses[0].id : "")} onChange={event => setDeliveryWarehouse(previous => ({ ...previous, [order.id]: event.target.value }))}><option value="">مخزن التسليم</option>{warehouses.map(warehouse => <option key={warehouse.id} value={warehouse.id}>{warehouse.name}</option>)}</select>}
+                        {["Delivered", "Closed", "Returned"].includes(order.status) && (
+                          <button className="app-secondary-button mr-2 text-xs" onClick={async () => {
+                            try {
+                              await printOrderInvoice(order.id);
+                              toast.success("أُرسلت الفاتورة لتطبيق الطباعة. راجع الطباعة الفعلية.");
+                            } catch (cause) {
+                              toast.error(errorMessage(cause, "تعذر إرسال الفاتورة لتطبيق الطباعة المحلي."));
+                            }
+                          }}>طباعة الفاتورة</button>
+                        )}
                         <select
                           className="bg-[#131313] border border-white/10 rounded-lg text-xs px-2 py-1.5 text-white focus:outline-none focus:border-primary transition-colors cursor-pointer"
                           value={order.status}
@@ -466,7 +519,7 @@ export default function OrdersPage() {
                           onChange={(e) => handleStatusChange(order.id, e.target.value)}
                         >
                           <option value={order.status}>{STATUS_MAP[order.status] || order.status}</option>
-                          {order.allowed_next_statuses?.map(s => (
+                          {order.allowed_next_statuses?.filter(s => !["Preparing", "Ready"].includes(s)).map(s => (
                             <option key={s} value={s}>{STATUS_MAP[s] || s}</option>
                           ))}
                         </select>
@@ -486,7 +539,7 @@ export default function OrdersPage() {
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsSlideOverOpen(false)}></div>
           <div className="w-[500px] h-full glass border-r border-white/5 shadow-2xl relative z-10 flex flex-col transform transition-transform duration-300">
             <div className="h-[80px] border-b border-white/5 flex items-center justify-between px-6 shrink-0 bg-black/20">
-              <h2 className="text-xl font-bold text-white">إنشاء مسودة طلب</h2>
+              <h2 className="text-xl font-bold text-white">{leadId ? "تحويل الاستفسار إلى مسودة" : "إنشاء مسودة طلب"}</h2>
               <button onClick={() => setIsSlideOverOpen(false)} className="w-10 h-10 rounded-full hover:bg-white/10 flex items-center justify-center transition-colors">
                 <span className="material-symbols-outlined text-[#e2bfb0]/80">close</span>
               </button>
@@ -500,7 +553,7 @@ export default function OrdersPage() {
                   <label className="block text-xs text-[#e2bfb0]/60 mb-1.5">العميل</label>
                   <select 
                     value={selectedCustomerId}
-                    onChange={(e) => setSelectedCustomerId(e.target.value)}
+                    onChange={(e) => applyCustomerPrice(e.target.value)}
                     className="w-full bg-black border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-primary transition-colors"
                   >
                     <option value="">-- إختر عميل --</option>
@@ -517,6 +570,7 @@ export default function OrdersPage() {
                     {ORDER_SOURCES.map(s => <option key={s} value={s}>{SOURCE_MAP[s] || s}</option>)}
                   </select>
                 </div>
+                <div><label className="block text-xs text-[#e2bfb0]/60 mb-1.5">وسيلة الدفع عند التسليم</label><select className="w-full bg-black border border-white/10 rounded-xl px-3 py-2.5" value={paymentMethod} onChange={event => setPaymentMethod(event.target.value)}>{["Cash", "Credit Card", "Vodafone Cash", "Instapay", "Bank Transfer", "Deferred Payment"].map(method => <option key={method}>{method}</option>)}</select></div>
               </div>
 
               {/* Product Search */}
@@ -590,6 +644,7 @@ export default function OrdersPage() {
                         <select 
                           value={item.priceLevel}
                           onChange={(e) => updateCartItemPriceLevel(item.id, e.target.value)}
+                          disabled={userRole !== "ADMIN"}
                           className="bg-black/40 border border-white/10 rounded-lg px-2 py-1.5 text-[11px] font-medium text-white/90 focus:outline-none focus:border-primary flex-1 min-w-[100px]"
                         >
                           {item.availableUnits?.find(u => u.id === item.unitId)?.prices?.map(p => {

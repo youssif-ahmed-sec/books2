@@ -9,7 +9,9 @@ from models.user import User, RoleEnum
 from models.product import Product, ProductUnit, ProductPrice
 from models.inventory import Warehouse, InventoryBalance, InventoryTransaction
 from models.order import Order
-from schemas.order import OrderCreate, OrderDraftCreate, OrderStatusUpdate
+from models.order import OrderItem
+from models.financial import CashShift
+from schemas.order import OrderCreate, OrderDraftCreate, OrderStatusUpdate, OrderPreparation
 from models.order import OrderStatusEnum
 from services.order_service import OrderService
 
@@ -24,6 +26,7 @@ async def test_concurrent_checkout_retry_creates_one_order_and_one_issue():
             Product(id=product_id, sku=f"CON-{product_id.hex[:8]}", name_en="Book", name_ar="كتاب", base_unit="Piece"),
         ])
         await db.flush()
+        db.add(CashShift(user_id=user_id, opening_cash=0, status="OPEN"))
         db.add_all([
             ProductUnit(id=unit_id, product_id=product_id, unit_name="Piece", conversion_factor=1),
             InventoryBalance(product_id=product_id, warehouse_id=warehouse_id, current_stock=2),
@@ -53,14 +56,16 @@ async def test_concurrent_checkout_retry_creates_one_order_and_one_issue():
 
 @pytest.mark.asyncio
 async def test_draft_delivery_requires_pipeline_and_issues_stock_once():
-    user_id, warehouse_id, product_id, unit_id = [uuid4() for _ in range(4)]
+    user_id, preparer_id, warehouse_id, product_id, unit_id = [uuid4() for _ in range(5)]
     async with AsyncSessionLocal() as db:
         db.add_all([
             User(id=user_id, role=RoleEnum.CASHIER_ORDERS),
+            User(id=preparer_id, role=RoleEnum.SALES_ASSISTANT),
             Warehouse(id=warehouse_id, name="Workflow Test"),
             Product(id=product_id, sku=f"FLOW-{product_id.hex[:8]}", name_en="Book", name_ar="كتاب", base_unit="Piece"),
         ])
         await db.flush()
+        db.add(CashShift(user_id=user_id, opening_cash=0, status="OPEN"))
         db.add_all([
             ProductUnit(id=unit_id, product_id=product_id, unit_name="Piece", conversion_factor=1),
             InventoryBalance(product_id=product_id, warehouse_id=warehouse_id, current_stock=2),
@@ -81,9 +86,16 @@ async def test_draft_delivery_requires_pipeline_and_issues_stock_once():
         for status in (
             OrderStatusEnum.WAITING_QUOTATION, OrderStatusEnum.QUOTATION_SENT,
             OrderStatusEnum.WAITING_APPROVAL, OrderStatusEnum.APPROVED,
-            OrderStatusEnum.PREPARING, OrderStatusEnum.READY,
         ):
             await OrderService.update_order_status(db, draft["id"], OrderStatusUpdate(status=status), user_id)
+        await OrderService.assign_preparer(db, draft["id"], preparer_id, user_id)
+        item_id = (await db.execute(select(OrderItem.id).where(OrderItem.order_id == draft["id"]))).scalar_one()
+        preparer = (await db.execute(select(User).where(User.id == preparer_id))).scalar_one()
+        await OrderService.complete_preparation(
+            db, draft["id"],
+            OrderPreparation(items=[{"order_item_id": item_id, "picked_quantity": 1}], package_confirmed=True),
+            preparer,
+        )
         delivered = await OrderService.update_order_status(
             db, draft["id"], OrderStatusUpdate(status=OrderStatusEnum.DELIVERED, warehouse_id=warehouse_id), user_id
         )

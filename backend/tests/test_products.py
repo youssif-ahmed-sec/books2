@@ -12,15 +12,21 @@ async def override_get_current_user():
     user.role = RoleEnum.ADMIN
     return user
 
-app.dependency_overrides[get_current_user] = override_get_current_user
-
 import pytest_asyncio
 
 @pytest_asyncio.fixture
 async def async_client():
     app.router.on_startup.clear()
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        yield ac
+    previous = app.dependency_overrides.get(get_current_user)
+    app.dependency_overrides[get_current_user] = override_get_current_user
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            yield ac
+    finally:
+        if previous is None:
+            app.dependency_overrides.pop(get_current_user, None)
+        else:
+            app.dependency_overrides[get_current_user] = previous
 
 @pytest.mark.asyncio
 async def test_read_products_empty(async_client):

@@ -9,7 +9,8 @@ from models.order import Order, OrderStatusEnum
 from models.inventory import InventoryTransaction
 from models.customer import Customer
 from models.user import User
-from core.dependencies import require_admin
+from core.dependencies import require_admin, require_sales_reporting_access, require_inventory_access
+from services.analytics_service import financial_summary, stock_alerts
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
 
@@ -18,7 +19,7 @@ async def get_sales_report(
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_sales_reporting_access),
 ):
     """
     Get aggregated sales report (orders).
@@ -28,15 +29,16 @@ async def get_sales_report(
     if start_date:
         query = query.where(Order.created_at >= start_date)
     if end_date:
-        query = query.where(Order.created_at <= end_date)
+        query = query.where(Order.created_at < end_date)
         
     query = query.order_by(Order.created_at.desc())
     
     result = await db.execute(query)
     rows = result.all()
     
-    completed_statuses = {OrderStatusEnum.DELIVERED.value, OrderStatusEnum.CLOSED.value}
-    total_revenue = sum(float(order.total_amount) for order, _ in rows if order.status in completed_statuses)
+    completed_statuses = {OrderStatusEnum.DELIVERED.value, OrderStatusEnum.CLOSED.value, OrderStatusEnum.RETURNED.value}
+    summary = await financial_summary(db, start_date, end_date)
+    total_revenue = summary["net_sales"]
     completed_orders = sum(1 for order, _ in rows if order.status in completed_statuses)
     
     # Return raw orders and aggregation
@@ -58,12 +60,30 @@ async def get_sales_report(
         ]
     }
 
+
+@router.get("/financial-summary", summary="Net sales, profit and cash movements")
+async def get_financial_summary(
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_admin),
+):
+    return await financial_summary(db, start_date, end_date)
+
+
+@router.get("/stock-alerts", summary="Low and out of stock products")
+async def get_stock_alerts(
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_inventory_access),
+):
+    return await stock_alerts(db)
+
 @router.get("/inventory", summary="Get inventory movements report")
 async def get_inventory_report(
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_inventory_access),
 ):
     """
     Get inventory movements (transactions).
@@ -73,7 +93,7 @@ async def get_inventory_report(
     if start_date:
         query = query.where(InventoryTransaction.created_at >= start_date)
     if end_date:
-        query = query.where(InventoryTransaction.created_at <= end_date)
+        query = query.where(InventoryTransaction.created_at < end_date)
         
     result = await db.execute(query)
     transactions = result.scalars().all()

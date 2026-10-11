@@ -31,5 +31,5 @@ export function canViewCost(role: UserRole | null): boolean {
 }
 
 export function canEditProduct(role: UserRole | null): boolean {
-  return role === "ADMIN" || role === "INVENTORY_CONTROLLER";
+  return role === "ADMIN";
 }

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import update
@@ -8,11 +8,11 @@ from typing import List
 
 from models.inventory import InventoryTransaction, InventoryBalance, Warehouse
 from models.product import Product, ProductUnit, ProductPrice, Supplier
-from models.user import User, RoleEnum
+from models.user import User, RoleEnum, AuditLog
 from schemas.inventory import InventoryTransactionCreate, InventoryTransactionResponse, InventoryBalanceResponse, InventoryStatsResponse, InventoryTransactionRecentResponse, PaginatedInventoryTransactionResponse
 from sqlalchemy import func, desc
 from datetime import date
-from core.dependencies import get_current_user, require_admin, require_inventory_access, require_warehouse_access
+from core.dependencies import require_inventory_access, require_warehouse_access
 from core.idempotency import request_fingerprint
 from database import get_db
 from services.inventory_service import InventoryService
@@ -60,6 +60,14 @@ async def create_inventory_transaction(
             raise HTTPException(status_code=409, detail="Request ID was already used for a different movement")
         return existing
 
+    # Keep product archival and movements ordered by the same product lock.
+    product_query = select(Product.id).where(
+        Product.id == transaction_in.product_id,
+        Product.is_deleted == False,
+    ).with_for_update()
+    if (await db.execute(product_query)).scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Product not found")
+
     # Serializes first-time balance creation within a warehouse.
     warehouse_query = select(Warehouse).where(
         Warehouse.id == transaction_in.warehouse_id,
@@ -69,12 +77,6 @@ async def create_inventory_transaction(
     if warehouse is None:
         raise HTTPException(status_code=404, detail="Active warehouse not found")
 
-    product_query = select(Product.id).where(
-        Product.id == transaction_in.product_id,
-        Product.is_deleted == False,
-    )
-    if (await db.execute(product_query)).scalar_one_or_none() is None:
-        raise HTTPException(status_code=404, detail="Product not found")
     if is_receipt:
         supplier_query = select(Supplier.id).where(
             Supplier.id == transaction_in.supplier_id,
@@ -115,8 +117,11 @@ async def create_inventory_transaction(
         request_id=transaction_in.request_id,
         request_fingerprint=fingerprint,
     )
+    if is_receipt:
+        product = (await db.execute(select(Product).where(Product.id == transaction_in.product_id).with_for_update())).scalar_one()
+        product.cost = transaction_in.unit_cost
     
-    # In a real scenario, AuditLog would also be created here
+    db.add(AuditLog(user_id=current_user.id, action="INVENTORY_MOVEMENT", entity_type="Product", entity_id=str(transaction_in.product_id), new_value={"quantity": str(quantity), "type": transaction_in.transaction_type.value if hasattr(transaction_in.transaction_type, "value") else transaction_in.transaction_type, "warehouse_id": str(transaction_in.warehouse_id)}))
     
     try:
         await db.commit()
@@ -221,13 +226,9 @@ async def get_inventory_stats(
     )
     critical_stock = (await db.execute(critical_stock_query)).scalar() or 0
 
-    # 3. Total value (sum of current_stock * retail_price of base unit)
-    value_query = select(func.sum(InventoryBalance.current_stock * ProductPrice.price)).join(
+    # Purchase-cost valuation; retail prices are sales potential, not inventory value.
+    value_query = select(func.sum(InventoryBalance.current_stock * Product.cost)).join(
         Product, InventoryBalance.product_id == Product.id
-    ).join(
-        ProductUnit, (ProductUnit.product_id == Product.id) & (ProductUnit.unit_name == Product.base_unit)
-    ).join(
-        ProductPrice, (ProductPrice.unit_id == ProductUnit.id) & (ProductPrice.price_level == 'Retail')
     ).where(Product.is_deleted == False)
     total_value = (await db.execute(value_query)).scalar() or 0
 
@@ -241,15 +242,18 @@ async def get_inventory_stats(
 @router.get("/transactions", response_model=PaginatedInventoryTransactionResponse,
            summary="Get paginated inventory transactions")
 async def get_inventory_transactions(
-    page: int = 1,
-    limit: int = 20,
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    product_id: UUID | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_inventory_access),
 ):
     offset = (page - 1) * limit
     
     # Get total count
     total_query = select(func.count(InventoryTransaction.id))
+    if product_id is not None:
+        total_query = total_query.where(InventoryTransaction.product_id == product_id)
     total = (await db.execute(total_query)).scalar() or 0
 
     # Get paginated data with product names
@@ -260,6 +264,8 @@ async def get_inventory_transactions(
         .offset(offset)
         .limit(limit)
     )
+    if product_id is not None:
+        query = query.where(InventoryTransaction.product_id == product_id)
     result = await db.execute(query)
     rows = result.all()
     
@@ -275,9 +281,9 @@ async def get_inventory_transactions(
 @router.get("/transactions/recent", response_model=List[InventoryTransactionRecentResponse],
            summary="⏳ Recent inventory transactions")
 async def get_recent_transactions(
-    limit: int = 5,
+    limit: int = Query(5, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_inventory_access),
 ):
     """
     Get the most recent inventory transactions.

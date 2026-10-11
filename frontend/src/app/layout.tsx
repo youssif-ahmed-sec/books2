@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import WarehouseModeGate from "@/components/WarehouseModeGate";
+import NotificationCenter from "@/components/NotificationCenter";
 
 export const metadata: Metadata = {
   title: "مكتبة سعود الشافعي | إدارة المكتبة",
@@ -35,7 +37,8 @@ export default function RootLayout({
         />
       </head>
       <body className="overflow-x-hidden antialiased">
-        {children}
+        <WarehouseModeGate>{children}</WarehouseModeGate>
+        <NotificationCenter />
       </body>
     </html>
   );

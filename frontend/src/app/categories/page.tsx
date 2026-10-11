@@ -1,12 +1,15 @@
 "use client";
 
+import { notifyError } from "@/lib/notifications";
+
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { useForm } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
+import { ProductSelect } from "@/components/ProductSelect";
 import { fetchApi } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
 import { useHydrated } from "@/lib/useHydrated";
@@ -64,7 +67,7 @@ function CategoryModal({
       }
       onSuccess();
       onClose();
-    } catch (err) { alert(errorMessage(err, "حدث خطأ أثناء الحفظ")); }
+    } catch (err) { notifyError(errorMessage(err, "حدث خطأ أثناء الحفظ")); }
   };
 
   if (!mounted) return null;
@@ -112,7 +115,7 @@ function SubcategoryModal({
   onSuccess: () => void;
 }) {
   const mounted = useHydrated();
-  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<SubcategoryFormValues>({
+  const { register, control, handleSubmit, formState: { errors, isSubmitting } } = useForm<SubcategoryFormValues>({
     resolver: zodResolver(subcategorySchema),
     defaultValues: {
       name_ar: existing?.name_ar || "",
@@ -130,7 +133,7 @@ function SubcategoryModal({
       }
       onSuccess();
       onClose();
-    } catch (err) { alert(errorMessage(err, "حدث خطأ أثناء الحفظ")); }
+    } catch (err) { notifyError(errorMessage(err, "حدث خطأ أثناء الحفظ")); }
   };
 
   if (!mounted) return null;
@@ -145,10 +148,11 @@ function SubcategoryModal({
         <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
           <div>
             <label className="text-xs text-[#e2bfb0]/60 mb-1 block">التصنيف الرئيسي *</label>
-            <select {...register("category_id")} className={`w-full glass rounded-xl px-4 py-3 text-sm text-white bg-[#1c1b1b] border ${errors.category_id ? "border-red-500/50" : "border-white/10"} focus:outline-none focus:border-primary/50`}>
-              <option value="">اختر تصنيف رئيسي</option>
-              {categories.map(c => <option key={c.id} value={c.id}>{c.name_ar}</option>)}
-            </select>
+            <Controller control={control} name="category_id" render={({ field }) =>
+              <ProductSelect label="التصنيف الرئيسي" value={field.value || ""} onChange={field.onChange}
+                placeholder="اختر تصنيف رئيسي" invalid={!!errors.category_id}
+                options={categories.map(category => ({ value: category.id, label: category.name_ar }))} />
+            } />
             {errors.category_id && <p className="text-red-400 text-xs mt-1">{errors.category_id.message}</p>}
           </div>
           <div>
@@ -196,7 +200,9 @@ export default function CategoriesPage() {
       setSubcategories(subs);
       // Auto-expand all categories
       setExpandedCats(new Set(cats.map((c: Category) => c.id)));
-    } catch { } finally { setLoading(false); }
+    } catch (error) {
+      notifyError(errorMessage(error, "تعذر تحميل التصنيفات"));
+    } finally { setLoading(false); }
   };
 
   useEffect(() => {
@@ -224,7 +230,7 @@ export default function CategoriesPage() {
     try {
       await fetchApi(`/products/categories/${id}`, { method: "DELETE" });
       loadAll();
-    } catch (err) { alert(errorMessage(err, "تعذر حذف التصنيف")); }
+    } catch (err) { notifyError(errorMessage(err, "تعذر حذف التصنيف")); }
   };
 
   const deleteSubcategory = async (id: string) => {
@@ -232,7 +238,7 @@ export default function CategoriesPage() {
     try {
       await fetchApi(`/products/subcategories/${id}`, { method: "DELETE" });
       loadAll();
-    } catch (err) { alert(errorMessage(err, "تعذر حذف التصنيف الفرعي")); }
+    } catch (err) { notifyError(errorMessage(err, "تعذر حذف التصنيف الفرعي")); }
   };
 
   const getSubsForCategory = (catId: string) => subcategories.filter(s => s.category_id === catId);
@@ -261,26 +267,26 @@ export default function CategoriesPage() {
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-2 gap-4 mb-8">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
           <div className="glass rounded-2xl p-6">
-            <div className="flex items-center gap-4">
+            <div className="flex items-center justify-between gap-4 text-right">
+              <div>
+                <p className="text-[#e2bfb0]/80 text-sm font-semibold">التصنيفات الرئيسية</p>
+                <p className="text-2xl font-bold text-primary">{categories.length}</p>
+              </div>
               <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center">
                 <span className="material-symbols-outlined text-primary">category</span>
-              </div>
-              <div>
-                <p className="text-[#e2bfb0]/60 text-xs">التصنيفات الرئيسية</p>
-                <p className="text-2xl font-bold text-primary">{categories.length}</p>
               </div>
             </div>
           </div>
           <div className="glass rounded-2xl p-6">
-            <div className="flex items-center gap-4">
+            <div className="flex items-center justify-between gap-4 text-right">
+              <div>
+                <p className="text-[#e2bfb0]/80 text-sm font-semibold">التصنيفات الفرعية</p>
+                <p className="text-2xl font-bold text-white">{subcategories.length}</p>
+              </div>
               <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center">
                 <span className="material-symbols-outlined text-[#e2bfb0]/60">subdirectory_arrow_right</span>
-              </div>
-              <div>
-                <p className="text-[#e2bfb0]/60 text-xs">التصنيفات الفرعية</p>
-                <p className="text-2xl font-bold text-white">{subcategories.length}</p>
               </div>
             </div>
           </div>
@@ -322,7 +328,7 @@ export default function CategoriesPage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <button onClick={() => setSubModal({ mode: "add", defaultCatId: cat.id })} className="flex items-center gap-1 px-3 py-1.5 glass rounded-full text-[10px] font-bold text-[#e2bfb0]/60 hover:text-primary transition-all border border-white/5 hover:border-primary/30">
+                      <button onClick={() => setSubModal({ mode: "add", defaultCatId: cat.id })} className="flex items-center gap-1 px-3 py-1.5 glass rounded-full text-xs font-bold text-[#e2bfb0]/80 hover:text-primary transition-all border border-white/5 hover:border-primary/30">
                         <span className="material-symbols-outlined text-[14px]">add</span>
                         فرعي
                       </button>

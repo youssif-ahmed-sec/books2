@@ -1,12 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { notifyError } from "@/lib/notifications";
+
+import { useEffect, useState, useRef } from "react";
 import { createPortal } from "react-dom";
-import { useForm } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import SideNav from "@/components/SideNav";
+import { warehouseOnlyMode } from "@/lib/warehouseMode";
 import TopNav from "@/components/TopNav";
+import { ProductSelect } from "@/components/ProductSelect";
 import { fetchApi } from "@/lib/api";
 import BrandsManagement from "@/components/BrandsManagement";
 import { errorMessage } from "@/lib/errors";
@@ -72,7 +76,7 @@ interface Payment {
 
 // ─── Add Supplier Panel ───────────────────────────────────────────────────────
 function AddSupplierPanel({ onClose, onSuccess, isAdmin }: { onClose: () => void; onSuccess: () => void; isAdmin: boolean }) {
-  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<SupplierFormValues>({
+  const { register, control, handleSubmit, formState: { errors, isSubmitting } } = useForm<SupplierFormValues>({
     resolver: zodResolver(supplierSchema),
     defaultValues: { opening_balance: "0", payment_terms_days: "COD" },
   });
@@ -93,7 +97,7 @@ function AddSupplierPanel({ onClose, onSuccess, isAdmin }: { onClose: () => void
       onSuccess();
       onClose();
     } catch (err: unknown) {
-      alert(errorMessage(err, "فشل إنشاء المورد"));
+      notifyError(errorMessage(err, "فشل إنشاء المورد"));
     }
   };
 
@@ -115,7 +119,7 @@ function AddSupplierPanel({ onClose, onSuccess, isAdmin }: { onClose: () => void
         <form onSubmit={handleSubmit(onSubmit)} className="p-8 flex flex-col gap-6 flex-1">
           {/* Basic Info */}
           <div>
-            <p className="text-xs font-bold text-primary uppercase tracking-widest mb-4">البيانات الأساسية</p>
+            <p className="text-sm font-bold text-primary mb-4 text-right">البيانات الأساسية</p>
             <div className="flex flex-col gap-4">
               <div>
                 <label className="text-xs text-[#e2bfb0]/60 mb-1 block">اسم المورد *</label>
@@ -142,7 +146,7 @@ function AddSupplierPanel({ onClose, onSuccess, isAdmin }: { onClose: () => void
 
           {/* Financial */}
           <div>
-            <p className="text-xs font-bold text-primary uppercase tracking-widest mb-4">البيانات المالية</p>
+            <p className="text-sm font-bold text-primary mb-4 text-right">البيانات المالية</p>
             <div className="flex flex-col gap-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -151,14 +155,10 @@ function AddSupplierPanel({ onClose, onSuccess, isAdmin }: { onClose: () => void
                 </div>
                 <div>
                   <label className="text-xs text-[#e2bfb0]/60 mb-1 block">شروط الدفع</label>
-                  <select {...register("payment_terms_days")} className="w-full glass rounded-xl px-4 py-3 text-sm text-white bg-[#1c1b1b] border border-white/10 focus:outline-none focus:border-primary/50">
-                    <option value="COD">نقداً عند الاستلام</option>
-                    <option value="7">7 أيام</option>
-                    <option value="15">15 يوم</option>
-                    <option value="30">30 يوم</option>
-                    <option value="60">60 يوم</option>
-                    <option value="90">90 يوم</option>
-                  </select>
+                  <Controller control={control} name="payment_terms_days" render={({ field }) =>
+                    <ProductSelect label="شروط الدفع" value={field.value || "COD"} onChange={field.onChange}
+                      placeholder="اختر شروط الدفع" options={[{ value: "COD", label: "نقداً عند الاستلام" }, ...[7, 15, 30, 60, 90].map(days => ({ value: String(days), label: `${days} يوم` }))]} />
+                  } />
                 </div>
               </div>
               {isAdmin && <div className="grid grid-cols-2 gap-4">
@@ -176,7 +176,7 @@ function AddSupplierPanel({ onClose, onSuccess, isAdmin }: { onClose: () => void
 
           {/* Notes */}
           <div>
-            <p className="text-xs font-bold text-primary uppercase tracking-widest mb-4">ملاحظات</p>
+            <p className="text-sm font-bold text-primary mb-4 text-right">ملاحظات</p>
             <textarea {...register("notes")} placeholder="ملاحظات إضافية..." rows={3} className="w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border border-white/10 focus:outline-none focus:border-primary/50 resize-none" />
           </div>
 
@@ -194,16 +194,17 @@ function AddSupplierPanel({ onClose, onSuccess, isAdmin }: { onClose: () => void
 
 // ─── Edit / Detail Panel ──────────────────────────────────────────────────────
 function EditSupplierPanel({ supplierId, onClose, onSuccess, isAdmin }: { supplierId: string; onClose: () => void; onSuccess: () => void; isAdmin: boolean }) {
+  const paymentRequest = useRef<{ fingerprint: string; id: string } | null>(null);
   const [detail, setDetail] = useState<SupplierDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"info" | "statement" | "payment">("info");
   const mounted = useHydrated();
 
-  const { register, handleSubmit, reset, formState: { errors, isSubmitting } } = useForm<SupplierFormValues>({
+  const { register, control, handleSubmit, reset, formState: { errors, isSubmitting } } = useForm<SupplierFormValues>({
     resolver: zodResolver(supplierSchema),
   });
 
-  const { register: regPay, handleSubmit: handlePaySubmit, reset: resetPay, formState: { errors: payErrors, isSubmitting: paySubmitting } } = useForm<PaymentFormValues>({
+  const { register: regPay, control: payControl, handleSubmit: handlePaySubmit, reset: resetPay, formState: { errors: payErrors, isSubmitting: paySubmitting } } = useForm<PaymentFormValues>({
     resolver: zodResolver(paymentSchema),
     defaultValues: { payment_method: "Cash" },
   });
@@ -242,20 +243,24 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess, isAdmin }: { suppli
       });
       onSuccess();
       onClose();
-    } catch (err: unknown) { alert(errorMessage(err, "فشل تحديث المورد")); }
+    } catch (err: unknown) { notifyError(errorMessage(err, "فشل تحديث المورد")); }
   };
 
   const onPaySubmit = async (data: PaymentFormValues) => {
     try {
+      const payment = { ...data, amount: parseFloat(data.amount) };
+      const fingerprint = JSON.stringify(payment);
+      if (paymentRequest.current?.fingerprint !== fingerprint) paymentRequest.current = { fingerprint, id: crypto.randomUUID() };
       await fetchApi(`/suppliers/${supplierId}/payments`, {
         method: "POST",
-        body: JSON.stringify({ ...data, amount: parseFloat(data.amount) }),
+        body: JSON.stringify({ ...payment, request_id: paymentRequest.current.id }),
       });
+      paymentRequest.current = null;
       const updated = await fetchApi(`/suppliers/${supplierId}`);
       setDetail(updated);
       resetPay({ payment_method: "Cash" });
       setActiveTab("statement");
-    } catch (err: unknown) { alert(errorMessage(err, "فشل تسجيل الدفعة")); }
+    } catch (err: unknown) { notifyError(errorMessage(err, "فشل تسجيل الدفعة")); }
   };
 
   if (!mounted) return null;
@@ -277,28 +282,28 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess, isAdmin }: { suppli
 
         {/* Balance Cards */}
         {isAdmin && detail && (
-          <div className="grid grid-cols-4 gap-4 p-6 border-b border-white/10">
-            <div className="glass rounded-2xl p-4 text-center">
-              <p className="text-[10px] text-[#e2bfb0]/60 mb-1">الرصيد الافتتاحي</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 p-6 border-b border-white/10">
+            <div className="glass rounded-2xl p-4 text-right">
+              <p className="text-sm text-[#e2bfb0]/80 mb-1">الرصيد الافتتاحي</p>
               <p className="text-lg font-bold text-white">{Number(detail.opening_balance || 0).toLocaleString()}</p>
-              <p className="text-[10px] text-[#e2bfb0]/40">ج.م</p>
+              <p className="text-xs text-[#e2bfb0]/60">ج.م</p>
             </div>
-            <div className="glass rounded-2xl p-4 text-center">
-              <p className="text-[10px] text-[#e2bfb0]/60 mb-1">إجمالي المشتريات</p>
+            <div className="glass rounded-2xl p-4 text-right">
+              <p className="text-sm text-[#e2bfb0]/80 mb-1">إجمالي المشتريات</p>
               <p className="text-lg font-bold text-white">{Number(detail.total_purchases).toLocaleString()}</p>
-              <p className="text-[10px] text-[#e2bfb0]/40">{detail.statement_incomplete ? "مشتريات موثقة فقط" : "ج.م"}</p>
+              <p className="text-xs text-[#e2bfb0]/60">{detail.statement_incomplete ? "مشتريات موثقة فقط" : "ج.م"}</p>
             </div>
-            <div className="glass rounded-2xl p-4 text-center">
-              <p className="text-[10px] text-[#e2bfb0]/60 mb-1">إجمالي المدفوعات</p>
+            <div className="glass rounded-2xl p-4 text-right">
+              <p className="text-sm text-[#e2bfb0]/80 mb-1">إجمالي المدفوعات</p>
               <p className="text-lg font-bold text-green-400">{Number(detail.total_payments).toLocaleString()}</p>
-              <p className="text-[10px] text-[#e2bfb0]/40">ج.م</p>
+              <p className="text-xs text-[#e2bfb0]/60">ج.م</p>
             </div>
-            <div className={`glass rounded-2xl p-4 text-center ${detail.balance !== null && detail.credit_limit && Number(detail.balance) > Number(detail.credit_limit) ? 'border border-red-500/50 shadow-[0_0_10px_rgba(239,68,68,0.2)]' : ''}`}>
-              <p className="text-[10px] text-[#e2bfb0]/60 mb-1">الرصيد المستحق</p>
+            <div className={`glass rounded-2xl p-4 text-right ${detail.balance !== null && detail.credit_limit && Number(detail.balance) > Number(detail.credit_limit) ? 'border border-red-500/50 shadow-[0_0_10px_rgba(239,68,68,0.2)]' : ''}`}>
+              <p className="text-sm text-[#e2bfb0]/80 mb-1">الرصيد المستحق</p>
               <p className={`text-lg font-bold ${detail.balance !== null && detail.balance > 0 ? "text-[#ffb4ab]" : "text-green-400"}`}>{detail.balance === null ? "غير معروف" : Number(detail.balance).toLocaleString()}</p>
-              <p className="text-[10px] text-[#e2bfb0]/40">{detail.balance === null ? "يلزم تسوية الحركات القديمة" : "ج.م"}</p>
+              <p className="text-xs text-[#e2bfb0]/60">{detail.balance === null ? "يلزم تسوية الحركات القديمة" : "ج.م"}</p>
               {detail.credit_limit ? (
-                <p className={`text-[9px] mt-1 border-t border-white/5 pt-1 ${detail.balance !== null && Number(detail.balance) > Number(detail.credit_limit) ? 'text-red-400 font-bold' : 'text-[#e2bfb0]/40'}`}>
+                <p className={`text-xs mt-1 border-t border-white/5 pt-1 ${detail.balance !== null && Number(detail.balance) > Number(detail.credit_limit) ? 'text-red-400 font-bold' : 'text-[#e2bfb0]/60'}`}>
                   حد الائتمان: {Number(detail.credit_limit).toLocaleString()}
                 </p>
               ) : null}
@@ -352,14 +357,10 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess, isAdmin }: { suppli
                 </div>
                 <div>
                   <label className="text-xs text-[#e2bfb0]/60 mb-1 block">شروط الدفع</label>
-                  <select {...register("payment_terms_days")} className="w-full glass rounded-xl px-4 py-3 text-sm text-white bg-[#1c1b1b] border border-white/10 focus:outline-none focus:border-primary/50">
-                    <option value="COD">نقداً عند الاستلام</option>
-                    <option value="7">7 أيام</option>
-                    <option value="15">15 يوم</option>
-                    <option value="30">30 يوم</option>
-                    <option value="60">60 يوم</option>
-                    <option value="90">90 يوم</option>
-                  </select>
+                  <Controller control={control} name="payment_terms_days" render={({ field }) =>
+                    <ProductSelect label="شروط الدفع" value={field.value || "COD"} onChange={field.onChange}
+                      placeholder="اختر شروط الدفع" options={[{ value: "COD", label: "نقداً عند الاستلام" }, ...[7, 15, 30, 60, 90].map(days => ({ value: String(days), label: `${days} يوم` }))]} />
+                  } />
                 </div>
               </div>
               {isAdmin && <div className="grid grid-cols-2 gap-4">
@@ -401,8 +402,8 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess, isAdmin }: { suppli
                         </div>
                         <div>
                           <p className="text-sm font-bold text-white">{p.payment_method}</p>
-                          <p className="text-[10px] text-[#e2bfb0]/60">{new Date(p.payment_date).toLocaleDateString("ar-EG")}{p.reference_number ? ` · ${p.reference_number}` : ""}</p>
-                          {p.notes && <p className="text-[10px] text-[#e2bfb0]/40">{p.notes}</p>}
+                          <p className="text-xs text-[#e2bfb0]/70">{new Date(p.payment_date).toLocaleDateString("ar-EG")}{p.reference_number ? ` · ${p.reference_number}` : ""}</p>
+                          {p.notes && <p className="text-xs text-[#e2bfb0]/60">{p.notes}</p>}
                         </div>
                       </div>
                       <p className="font-bold text-green-400">+{Number(p.amount).toLocaleString()} ج.م</p>
@@ -423,12 +424,11 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess, isAdmin }: { suppli
               </div>
               <div>
                 <label className="text-xs text-[#e2bfb0]/60 mb-1 block">طريقة الدفع</label>
-                <select {...regPay("payment_method")} className="w-full glass rounded-xl px-4 py-3 text-sm text-white bg-[#1c1b1b] border border-white/10 focus:outline-none focus:border-primary/50">
-                  <option value="Cash">نقداً</option>
-                  <option value="Bank Transfer">تحويل بنكي</option>
-                  <option value="Check">شيك</option>
-                  <option value="Other">أخرى</option>
-                </select>
+                <Controller control={payControl} name="payment_method" render={({ field }) =>
+                  <ProductSelect label="طريقة الدفع" value={field.value} onChange={field.onChange} placeholder="اختر طريقة الدفع"
+                    options={[{ value: "Cash", label: "نقداً" }, { value: "Bank Transfer", label: "تحويل بنكي" }, { value: "Check", label: "شيك" }, { value: "Other", label: "أخرى" }]} />
+                } />
+                <p className="mt-2 text-xs text-[#e2bfb0]/60">الدفع النقدي يتطلب وردية نقدية مفتوحة باسمك ورصيدًا كافيًا في الدرج.</p>
               </div>
               <div>
                 <label className="text-xs text-[#e2bfb0]/60 mb-1 block">رقم المرجع / الشيك</label>
@@ -467,7 +467,9 @@ export default function SuppliersPage() {
       const res = await fetchApi(`/suppliers?search=${encodeURIComponent(q)}&limit=50`);
       setSuppliers(res.data || []);
       setTotal(res.total || 0);
-    } catch { } finally { setLoading(false); }
+    } catch (error) {
+      notifyError(errorMessage(error, "تعذر تحميل الموردين"));
+    } finally { setLoading(false); }
   };
 
   useEffect(() => {
@@ -491,7 +493,7 @@ export default function SuppliersPage() {
     try {
       await fetchApi(`/suppliers/${id}`, { method: "DELETE" });
       loadSuppliers(search);
-    } catch (err: unknown) { alert(errorMessage(err, "فشل حذف المورد")); }
+    } catch (err: unknown) { notifyError(errorMessage(err, "فشل حذف المورد")); }
   };
 
   return (
@@ -503,7 +505,7 @@ export default function SuppliersPage() {
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-8">
           <div>
             <h1 className="app-heading">إدارة الموردين</h1>
-            <p className="app-subtitle">{role === "ADMIN" ? "سجلات الموردين وكشوفات الحساب" : "بيانات الموردين"}</p>
+            <p className="app-subtitle">{role === "ADMIN" && !warehouseOnlyMode ? "سجلات الموردين وكشوفات الحساب" : "بيانات الموردين"}</p>
           </div>
           <button onClick={() => setShowAddPanel(true)} className="app-primary-button">
             <span className="material-symbols-outlined text-[20px]">add</span>
@@ -512,13 +514,13 @@ export default function SuppliersPage() {
         </div>
 
         {/* Stat Cards */}
-        <div className="app-panel mb-8 inline-flex min-w-64 items-center gap-4 p-6">
+        <div className="app-panel mb-8 inline-flex min-w-64 items-center justify-between gap-4 p-6 text-right">
+          <div>
+            <p className="app-muted text-sm font-semibold">إجمالي الموردين</p>
+            <p className="text-2xl font-bold text-primary">{total.toLocaleString("ar-EG")}</p>
+          </div>
           <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10">
             <span className="material-symbols-outlined text-primary">local_shipping</span>
-          </div>
-          <div>
-            <p className="app-muted text-xs">إجمالي الموردين</p>
-            <p className="text-2xl font-bold text-primary">{total.toLocaleString("ar-EG")}</p>
           </div>
         </div>
 
@@ -534,10 +536,10 @@ export default function SuppliersPage() {
             <table className="w-full text-right border-collapse">
               <thead>
                 <tr className="bg-white/5">
-                  <th className="px-8 py-5 text-[11px] font-bold text-[#e2bfb0]/60 uppercase">المورد</th>
-                  <th className="px-8 py-5 text-[11px] font-bold text-[#e2bfb0]/60 uppercase">معلومات التواصل</th>
-                  <th className="px-8 py-5 text-[11px] font-bold text-[#e2bfb0]/60 uppercase">شروط الدفع</th>
-                  <th className="px-8 py-5 text-[11px] font-bold text-[#e2bfb0]/60 uppercase text-center">العمليات</th>
+                  <th className="px-8 py-5 text-sm font-bold text-[#e2bfb0]/80 text-right">المورد</th>
+                  <th className="px-8 py-5 text-sm font-bold text-[#e2bfb0]/80 text-right">معلومات التواصل</th>
+                  <th className="px-8 py-5 text-sm font-bold text-[#e2bfb0]/80 text-right">شروط الدفع</th>
+                  <th className="px-8 py-5 text-sm font-bold text-[#e2bfb0]/80 text-center">العمليات</th>
                 </tr>
               </thead>
               <tbody>
@@ -560,7 +562,7 @@ export default function SuppliersPage() {
                         </div>
                         <div>
                           <p className="font-bold text-white text-sm">{s.name}</p>
-                          {s.tax_number && <p className="text-[10px] text-[#e2bfb0]/50">رقم ضريبي: {s.tax_number}</p>}
+                          {s.tax_number && <p className="text-xs text-[#e2bfb0]/70">رقم ضريبي: {s.tax_number}</p>}
                         </div>
                       </div>
                     </td>
@@ -572,7 +574,7 @@ export default function SuppliersPage() {
                       </div>
                     </td>
                     <td className="px-8 py-5">
-                      <span className="px-3 py-1 bg-white/5 text-[#e2bfb0]/70 rounded-full text-[10px] font-bold border border-white/10">
+                      <span className="px-3 py-1 bg-white/5 text-[#e2bfb0]/70 rounded-full text-xs font-bold border border-white/10">
                         {s.payment_terms_days === "COD" ? "نقداً عند الاستلام" : s.payment_terms_days ? `${s.payment_terms_days} يوم` : "-"}
                       </span>
                     </td>
@@ -600,12 +602,12 @@ export default function SuppliersPage() {
       </main>
 
       {/* Add Panel */}
-      {showAddPanel && role && <AddSupplierPanel isAdmin={role === "ADMIN"} onClose={() => setShowAddPanel(false)} onSuccess={() => loadSuppliers(search)} />}
+      {showAddPanel && role && <AddSupplierPanel isAdmin={role === "ADMIN" && !warehouseOnlyMode} onClose={() => setShowAddPanel(false)} onSuccess={() => loadSuppliers(search)} />}
 
       {/* Edit Panel */}
       {selectedSupplierId && role && (
         <EditSupplierPanel
-          isAdmin={role === "ADMIN"}
+          isAdmin={role === "ADMIN" && !warehouseOnlyMode}
           supplierId={selectedSupplierId}
           onClose={() => setSelectedSupplierId(null)}
           onSuccess={() => loadSuppliers(search)}

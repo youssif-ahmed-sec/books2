@@ -1,5 +1,7 @@
 "use client";
 
+import { notifyError } from "@/lib/notifications";
+
 import { useState, useEffect } from "react";
 import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
@@ -54,7 +56,7 @@ function SettingsContent() {
       setRole("SALES_ASSISTANT");
       loadUsers();
     } catch (err) {
-      alert(errorMessage(err, "فشل إنشاء المستخدم"));
+      notifyError(errorMessage(err, "فشل إنشاء المستخدم"));
     }
   };
 

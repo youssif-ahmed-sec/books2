@@ -52,3 +52,17 @@ class InventoryTransaction(Base):
     request_id = Column(UUID(as_uuid=True), nullable=True)
     request_fingerprint = Column(String(64), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class InventoryCount(Base):
+    __tablename__ = "inventory_counts"
+    __table_args__ = (CheckConstraint("observed_quantity >= 0", name="ck_inventory_count_nonnegative"),)
+
+    id = Column(UUID(as_uuid=True), primary_key=True)
+    product_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
+    warehouse_id = Column(UUID(as_uuid=True), ForeignKey("warehouses.id"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    expected_quantity = Column(Numeric(18, 2), nullable=False)
+    observed_quantity = Column(Numeric(18, 2), nullable=False)
+    difference = Column(Numeric(18, 2), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

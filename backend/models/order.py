@@ -56,6 +56,8 @@ class Order(Base):
 
     created_at      = Column(DateTime(timezone=True), server_default=func.now())
     updated_at      = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    preparing_started_at = Column(DateTime(timezone=True), nullable=True)
+    priority = Column(String, nullable=False, default="Normal")
 
 
 class OrderItem(Base):
@@ -75,6 +77,8 @@ class OrderItem(Base):
     price_level     = Column(String, nullable=False, default="Retail")
     unit_price      = Column(Numeric(12, 2), nullable=False)  # price/selling-unit (from DB)
     total_price     = Column(Numeric(12, 2), nullable=False)  # unit_price * quantity_requested
+    cost_at_sale    = Column(Numeric(12, 2), nullable=True)  # total item cost, frozen for profit reports
+    tax_rate        = Column(Numeric(5, 2), nullable=True)  # quoted rate, frozen for invoices
     # Immutable bill of materials for a draft bundle; NULL marks legacy orders that need review.
     bundle_components_snapshot = Column(JSON, nullable=True)
 

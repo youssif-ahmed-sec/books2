@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { fetchApi } from "@/lib/api";
+import { notifyError } from "@/lib/notifications";
 
 interface InventoryMovementsModalProps {
   onClose: () => void;
@@ -69,7 +70,7 @@ export default function InventoryMovementsModal({ onClose }: InventoryMovementsM
         setMovements(mapped);
         setTotalItems(data.total);
       }
-    }).catch((err) => console.error("Failed to load movements:", err))
+    }).catch((err) => notifyError(err instanceof Error ? err.message : "تعذر تحميل حركات المخزون"))
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [page]);
@@ -107,16 +108,16 @@ export default function InventoryMovementsModal({ onClose }: InventoryMovementsM
               <table className="w-full text-right border-collapse min-w-[700px]">
                 <thead>
                   <tr className="bg-[#1a1918]/50 border-b border-white/5">
-                    <th className="px-8 py-5 text-[11px] font-bold text-[#e2bfb0]/60 uppercase tracking-widest">
+                    <th className="px-8 py-5 text-sm font-bold text-[#e2bfb0]/80 text-right">
                       المنتج
                     </th>
-                    <th className="px-8 py-5 text-[11px] font-bold text-[#e2bfb0]/60 uppercase tracking-widest text-center">
+                    <th className="px-8 py-5 text-sm font-bold text-[#e2bfb0]/80 text-center">
                       النوع
                     </th>
-                    <th className="px-8 py-5 text-[11px] font-bold text-[#e2bfb0]/60 uppercase tracking-widest text-center">
+                    <th className="px-8 py-5 text-sm font-bold text-[#e2bfb0]/80 text-center">
                       الكمية
                     </th>
-                    <th className="px-8 py-5 text-[11px] font-bold text-[#e2bfb0]/60 uppercase tracking-widest text-left">
+                    <th className="px-8 py-5 text-sm font-bold text-[#e2bfb0]/80 text-right">
                       التاريخ والوقت
                     </th>
                   </tr>
@@ -141,7 +142,7 @@ export default function InventoryMovementsModal({ onClose }: InventoryMovementsM
                           <p className="font-bold text-white text-sm">{move.product}</p>
                         </td>
                         <td className="px-8 py-4 text-center">
-                          <span className={`px-3 py-1 text-[10px] rounded-full font-bold border ${move.typeStyle}`}>
+                          <span className={`px-3 py-1 text-xs rounded-full font-bold border ${move.typeStyle}`}>
                             {move.type}
                           </span>
                         </td>
@@ -150,7 +151,7 @@ export default function InventoryMovementsModal({ onClose }: InventoryMovementsM
                             {move.qty}
                           </span>
                         </td>
-                        <td className="px-8 py-4 text-left">
+                        <td className="px-8 py-4 text-right">
                           <p className="text-sm text-[#e2bfb0]/80 whitespace-nowrap">{move.date}</p>
                         </td>
                       </tr>

@@ -20,8 +20,9 @@ from models.user import Base, RoleEnum, User
 from models.product import Product, ProductUnit, ProductPrice, ProductBundleComponent, Supplier
 from models.inventory import InventoryBalance, InventoryTransaction, Warehouse
 from models.order import Order, OrderItem, OrderStatusEnum
+from models.financial import CashShift
 from schemas.inventory import InventoryTransactionCreate
-from schemas.order import OrderCreate, OrderDraftCreate, OrderStatusUpdate
+from schemas.order import OrderCreate, OrderDraftCreate, OrderStatusUpdate, OrderPreparation
 from services.order_service import OrderService
 
 
@@ -46,16 +47,18 @@ async def database():
 
 @pytest.mark.asyncio
 async def test_draft_bundle_uses_component_snapshot_after_recipe_edit(database):
-    user_id, warehouse_id, bundle_id, old_id, new_id, unit_id = [uuid4() for _ in range(6)]
+    user_id, preparer_id, warehouse_id, bundle_id, old_id, new_id, unit_id = [uuid4() for _ in range(7)]
     async with database() as db:
         db.add_all([
             User(id=user_id, role=RoleEnum.ADMIN),
+            User(id=preparer_id, role=RoleEnum.SALES_ASSISTANT),
             Warehouse(id=warehouse_id, name="Main"),
             Product(id=bundle_id, sku="BUNDLE", name_en="Bundle", name_ar="باقة", base_unit="Piece", is_bundle=True),
             Product(id=old_id, sku="OLD", name_en="Old", name_ar="قديم", base_unit="Piece"),
             Product(id=new_id, sku="NEW", name_en="New", name_ar="جديد", base_unit="Piece"),
         ])
         await db.flush()
+        db.add(CashShift(user_id=user_id, opening_cash=0, status="OPEN"))
         db.add_all([
             ProductUnit(id=unit_id, product_id=bundle_id, unit_name="Piece", conversion_factor=1),
             ProductBundleComponent(bundle_id=bundle_id, component_id=old_id, quantity=2),
@@ -79,9 +82,15 @@ async def test_draft_bundle_uses_component_snapshot_after_recipe_edit(database):
         for status in (
             OrderStatusEnum.WAITING_QUOTATION, OrderStatusEnum.QUOTATION_SENT,
             OrderStatusEnum.WAITING_APPROVAL, OrderStatusEnum.APPROVED,
-            OrderStatusEnum.PREPARING, OrderStatusEnum.READY,
         ):
             await OrderService.update_order_status(db, draft["id"], OrderStatusUpdate(status=status), user_id)
+        await OrderService.assign_preparer(db, draft["id"], preparer_id, user_id)
+        preparer = (await db.execute(select(User).where(User.id == preparer_id))).scalar_one()
+        await OrderService.complete_preparation(
+            db, draft["id"],
+            OrderPreparation(items=[{"order_item_id": item.id, "picked_quantity": 1}], package_confirmed=True),
+            preparer,
+        )
         await OrderService.update_order_status(
             db, draft["id"], OrderStatusUpdate(status=OrderStatusEnum.DELIVERED, warehouse_id=warehouse_id), user_id
         )
@@ -100,6 +109,7 @@ async def test_pos_retry_returns_original_order_without_second_stock_movement(da
             Product(id=product_id, sku="SINGLE", name_en="Book", name_ar="كتاب", base_unit="Piece"),
         ])
         await db.flush()
+        db.add(CashShift(user_id=user_id, opening_cash=0, status="OPEN"))
         db.add_all([
             ProductUnit(id=unit_id, product_id=product_id, unit_name="Piece", conversion_factor=1),
             InventoryBalance(product_id=product_id, warehouse_id=warehouse_id, current_stock=2),
@@ -166,15 +176,17 @@ async def test_database_rejects_negative_and_duplicate_balances(database):
 
 @pytest.mark.asyncio
 async def test_local_api_order_roles_transitions_and_checkout_retry(database):
-    user_id, warehouse_id, product_id, unit_id, request_id = [uuid4() for _ in range(5)]
+    user_id, preparer_id, warehouse_id, product_id, unit_id, request_id = [uuid4() for _ in range(6)]
     async with database() as db:
         user = User(id=user_id, role=RoleEnum.ADMIN)
         db.add_all([
             user,
+            User(id=preparer_id, role=RoleEnum.SALES_ASSISTANT),
             Warehouse(id=warehouse_id, name="API test warehouse"),
             Product(id=product_id, sku="API-TEST", name_en="Book", name_ar="كتاب", base_unit="Piece"),
         ])
         await db.flush()
+        db.add(CashShift(user_id=user_id, opening_cash=0, status="OPEN"))
         db.add_all([
             ProductUnit(id=unit_id, product_id=product_id, unit_name="Piece", conversion_factor=1),
             InventoryBalance(product_id=product_id, warehouse_id=warehouse_id, current_stock=3),
@@ -194,9 +206,9 @@ async def test_local_api_order_roles_transitions_and_checkout_retry(database):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             assert (await client.get("/api/v1/orders")).status_code == 403
             assert (await client.get("/api/v1/reports/sales")).status_code == 403
-            assert (await client.get("/api/v1/reports/inventory")).status_code == 403
-            assert (await client.get("/api/v1/inventory/transactions")).status_code == 403
-            assert (await client.get("/api/v1/inventory/transactions/recent")).status_code == 403
+            assert (await client.get("/api/v1/reports/inventory")).status_code == 200
+            assert (await client.get("/api/v1/inventory/transactions")).status_code == 200
+            assert (await client.get("/api/v1/inventory/transactions/recent")).status_code == 200
             stats = await client.get("/api/v1/inventory/stats")
             assert stats.status_code == 200
             assert stats.json()["today_movements"] is None
@@ -218,12 +230,21 @@ async def test_local_api_order_roles_transitions_and_checkout_retry(database):
             for next_status in (
                 OrderStatusEnum.WAITING_QUOTATION, OrderStatusEnum.QUOTATION_SENT,
                 OrderStatusEnum.WAITING_APPROVAL, OrderStatusEnum.APPROVED,
-                OrderStatusEnum.PREPARING, OrderStatusEnum.READY,
             ):
                 response = await client.patch(
                     f"/api/v1/orders/{order_id}/status", json={"status": next_status.value}
                 )
                 assert response.status_code == 200, response.text
+            assigned = await client.patch(
+                f"/api/v1/orders/{order_id}/assign", json={"user_id": str(preparer_id)},
+            )
+            assert assigned.status_code == 200, assigned.text
+            prepared = await client.post(
+                f"/api/v1/orders/{order_id}/prepare",
+                json={"items": [{"order_item_id": draft.json()["items"][0]["id"], "picked_quantity": 1}],
+                      "package_confirmed": True},
+            )
+            assert prepared.status_code == 200, prepared.text
             delivered = await client.patch(
                 f"/api/v1/orders/{order_id}/status",
                 json={"status": OrderStatusEnum.DELIVERED.value, "warehouse_id": str(warehouse_id)},
@@ -305,9 +326,9 @@ async def test_real_login_roles_inventory_receipt_and_cashier_checkout(database)
                 assert me.json()["role"] == role.value
 
             inventory_headers = headers[RoleEnum.INVENTORY_CONTROLLER]
-            assert (await client.get("/api/v1/reports/inventory", headers=inventory_headers)).status_code == 403
-            assert (await client.get("/api/v1/inventory/transactions", headers=inventory_headers)).status_code == 403
-            assert (await client.get("/api/v1/inventory/transactions/recent", headers=inventory_headers)).status_code == 403
+            assert (await client.get("/api/v1/reports/inventory", headers=inventory_headers)).status_code == 200
+            assert (await client.get("/api/v1/inventory/transactions", headers=inventory_headers)).status_code == 200
+            assert (await client.get("/api/v1/inventory/transactions/recent", headers=inventory_headers)).status_code == 200
             stats = await client.get("/api/v1/inventory/stats", headers=inventory_headers)
             assert stats.status_code == 200
             assert stats.json()["today_movements"] is None
@@ -323,6 +344,10 @@ async def test_real_login_roles_inventory_receipt_and_cashier_checkout(database)
 
             cashier_headers = headers[RoleEnum.CASHIER_ORDERS]
             assert (await client.get("/api/v1/inventory/transactions", headers=cashier_headers)).status_code == 403
+            opened = await client.post(
+                "/api/v1/cash-register/open", headers=cashier_headers, json={"opening_cash": 0},
+            )
+            assert opened.status_code == 201, opened.text
             checkout = await client.post(
                 "/api/v1/orders", headers=cashier_headers,
                 json={
