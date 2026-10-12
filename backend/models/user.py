@@ -20,6 +20,7 @@ class User(Base):
     # ID is a UUID and acts as PK & FK to auth.users.id in Supabase
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email = Column(String, unique=True, nullable=True, index=True)
+    username = Column(String(50), unique=True, nullable=True, index=True)
     hashed_password = Column(String, nullable=True)
     role = Column(Enum(RoleEnum), nullable=False)
     is_active = Column(Boolean, default=True)

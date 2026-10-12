@@ -11,6 +11,7 @@ import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
 import { ProductSelect } from "@/components/ProductSelect";
 import { fetchApi } from "@/lib/api";
+import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
 import BrandsManagement from "@/components/BrandsManagement";
 import { errorMessage } from "@/lib/errors";
 import { useHydrated } from "@/lib/useHydrated";
@@ -53,6 +54,12 @@ interface Supplier {
   payment_terms_days?: string;
   notes?: string;
 }
+
+const supplierIdentity = (item: Supplier): Supplier => ({
+  id: item.id, name: item.name, phone: item.phone, email: item.email,
+  address: item.address, tax_number: item.tax_number,
+  contact_info: item.contact_info, notes: item.notes,
+});
 
 interface SupplierDetail extends Supplier {
   total_purchases: number;
@@ -114,14 +121,14 @@ function AddSupplierPanel({ onClose, onSuccess, isAdmin }: { onClose: () => void
   };
 
   return (
-    <div className="fixed inset-0 z-[100]" dir="rtl">
+    <div className="motion-overlay fixed inset-0 z-[100]" dir="rtl">
       {/* Dark overlay */}
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="supplier-drawer absolute inset-y-0 right-0 flex w-full max-w-[520px] flex-col overflow-y-auto shadow-2xl" style={{ background: "#1a1918", borderLeft: "1px solid rgba(255,255,255,0.08)" }}>
+      <div className="motion-drawer supplier-drawer absolute inset-y-0 right-0 flex w-full max-w-[520px] flex-col overflow-y-auto shadow-2xl" style={{ background: "#1a1918", borderLeft: "1px solid rgba(255,255,255,0.08)" }}>
         <div className="flex items-center justify-between p-5 sm:p-8 border-b border-white/10 flex-shrink-0">
           <div>
             <h2 className="text-xl font-bold text-white">إضافة مورد جديد</h2>
-            <p className="text-sm text-[#e2bfb0]/60 mt-1">تسجيل بيانات مورد في النظام</p>
+            <p className="text-sm text-[#e2bfb0]/60 mt-1">يُفتح له حساب مستقل تلقائيًا عند الحفظ</p>
           </div>
           <button onClick={onClose} className="w-9 h-9 rounded-full glass flex items-center justify-center text-[#e2bfb0]/60 hover:text-white">
             <span className="material-symbols-outlined text-[20px]">close</span>
@@ -195,7 +202,7 @@ function AddSupplierPanel({ onClose, onSuccess, isAdmin }: { onClose: () => void
           <div className="mt-auto">
             <button type="submit" disabled={isSubmitting} className="w-full bg-primary text-white font-bold py-4 rounded-xl hover:brightness-110 active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-50">
               {isSubmitting ? <span className="material-symbols-outlined animate-spin text-[20px]">progress_activity</span> : <span className="material-symbols-outlined text-[20px]">save</span>}
-              <span>{isSubmitting ? "جاري الحفظ..." : "حفظ المورد"}</span>
+              <span>{isSubmitting ? "جاري الحفظ..." : "حفظ المورد وفتح حسابه"}</span>
             </button>
           </div>
         </form>
@@ -354,10 +361,10 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess, isAdmin, initialTab
   if (!mounted) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[100]" dir="rtl">
+    <div className="motion-overlay fixed inset-0 z-[100]" dir="rtl">
       {/* Dark overlay */}
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="supplier-drawer absolute inset-y-0 right-0 flex w-full max-w-[600px] flex-col overflow-y-auto shadow-2xl" style={{ background: "#1a1918", borderLeft: "1px solid rgba(255,255,255,0.08)" }}>
+      <div className="motion-drawer supplier-drawer absolute inset-y-0 right-0 flex w-full max-w-[600px] flex-col overflow-y-auto shadow-2xl" style={{ background: "#1a1918", borderLeft: "1px solid rgba(255,255,255,0.08)" }}>
         <div className="flex items-center justify-between p-8 border-b border-white/10 flex-shrink-0">
           <div>
             <h2 className="text-xl font-bold text-white">{loading ? "..." : detail?.name}</h2>
@@ -591,10 +598,11 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess, isAdmin, initialTab
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function SuppliersPage() {
+  const previous = readSectionSnapshot<{ suppliers: Supplier[]; total: number }>("suppliers-list");
   const [role, setRole] = useState<string | null>(null);
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [suppliers, setSuppliers] = useState<Supplier[]>(() => previous?.suppliers || []);
+  const [total, setTotal] = useState(() => previous?.total || 0);
+  const [loading, setLoading] = useState(() => !previous);
   const [search, setSearch] = useState("");
   const [showAddPanel, setShowAddPanel] = useState(false);
   const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null);
@@ -610,6 +618,7 @@ export default function SuppliersPage() {
       const res = await fetchApi(`/suppliers?search=${encodeURIComponent(q)}&limit=50`);
       setSuppliers(res.data || []);
       setTotal(res.total || 0);
+      if (!q) writeSectionSnapshot("suppliers-list", { suppliers: (res.data || []).map(supplierIdentity), total: res.total || 0 });
     } catch (error) {
       notifyError(errorMessage(error, "تعذر تحميل الموردين"));
     } finally { setLoading(false); }
@@ -621,6 +630,7 @@ export default function SuppliersPage() {
       .then(res => {
         setSuppliers(res.data || []);
         setTotal(res.total || 0);
+        writeSectionSnapshot("suppliers-list", { suppliers: (res.data || []).map(supplierIdentity), total: res.total || 0 });
       })
       .catch(console.error)
       .finally(() => setLoading(false));
@@ -652,7 +662,7 @@ export default function SuppliersPage() {
           </div>
           <button onClick={() => setShowAddPanel(true)} className="app-primary-button">
             <span className="material-symbols-outlined text-[20px]">add</span>
-            إضافة مورد
+            إضافة مورد وفتح حساب
           </button>
         </div>
 

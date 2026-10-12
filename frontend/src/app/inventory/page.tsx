@@ -13,6 +13,7 @@ import { EditProductPanel } from "@/components/EditProductPanel";
 import InventoryMovementsModal from "@/components/InventoryMovementsModal";
 import ReceiveStockPanel from "@/components/ReceiveStockPanel";
 import { fetchApi } from "@/lib/api";
+import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
 import { getUserRole, canViewCost, canEditProduct, UserRole } from "@/utils/auth";
 import { useHydrated } from "@/lib/useHydrated";
 
@@ -57,6 +58,11 @@ interface PurchaseNeeded { id: string; name: string; stock: string; image?: stri
 interface StockAlert { product_id: string; name: string; stock: number; base_unit: string; image_url?: string }
 interface SupplierOption { id: string; name: string }
 interface CategoryOption { id: string; name_ar: string }
+interface InventorySnapshot {
+  items: InventoryItem[]; stats: StatCard[]; movements: StockMovement[];
+  purchaseNeeded: PurchaseNeeded[]; total: number; page: number;
+  supplier: string; category: string; status: string;
+}
 
 export default function InventoryPage() {
   const [showAddPanel, setShowAddPanel] = useState(false);
@@ -65,28 +71,28 @@ export default function InventoryPage() {
   const [showReceivePanel, setShowReceivePanel] = useState(false);
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
 
-  const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
-  const [statCards, setStatCards] = useState<StatCard[]>([
+  const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>(() => readSectionSnapshot<InventorySnapshot>("inventory")?.items || []);
+  const [statCards, setStatCards] = useState<StatCard[]>(() => readSectionSnapshot<InventorySnapshot>("inventory")?.stats || [
     { icon: "warning", iconColor: "text-primary", label: "منخفض المخزون", value: "0", valueColor: "text-primary", sub: "يحتاج إعادة طلب", subColor: "text-[#e2bfb0]/60" },
     { icon: "error", iconColor: "text-[#ffb4ab]", label: "مخزون حرج", value: "0", valueColor: "text-[#ffb4ab]", sub: "أصناف نفدت", subColor: "text-[#e2bfb0]/60" },
     { icon: "payments", iconColor: "text-primary", label: "قيمة المخزون", value: "0", valueExtra: "ج.م", sub: "تقدير القيمة الحالية", subColor: "text-[#e2bfb0]/60" },
   ]);
-  const [stockMovements, setStockMovements] = useState<StockMovement[]>([]);
-  const [purchaseNeeded, setPurchaseNeeded] = useState<PurchaseNeeded[]>([]);
-  const [purchaseNeededLoading, setPurchaseNeededLoading] = useState(true);
-  const [loading, setLoading] = useState(true);
+  const [stockMovements, setStockMovements] = useState<StockMovement[]>(() => readSectionSnapshot<InventorySnapshot>("inventory")?.movements || []);
+  const [purchaseNeeded, setPurchaseNeeded] = useState<PurchaseNeeded[]>(() => readSectionSnapshot<InventorySnapshot>("inventory")?.purchaseNeeded || []);
+  const [purchaseNeededLoading, setPurchaseNeededLoading] = useState(() => !readSectionSnapshot<InventorySnapshot>("inventory"));
+  const [loading, setLoading] = useState(() => !readSectionSnapshot<InventorySnapshot>("inventory"));
   const hydrated = useHydrated();
   const userRole: UserRole | null = hydrated ? getUserRole() : null;
 
   const [suppliers, setSuppliers] = useState<SupplierOption[]>([]);
   const [categories, setCategories] = useState<CategoryOption[]>([]);
   
-  const [selectedSupplier, setSelectedSupplier] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState("");
-  const [selectedStockStatus, setSelectedStockStatus] = useState("");
+  const [selectedSupplier, setSelectedSupplier] = useState(() => readSectionSnapshot<InventorySnapshot>("inventory")?.supplier || "");
+  const [selectedCategory, setSelectedCategory] = useState(() => readSectionSnapshot<InventorySnapshot>("inventory")?.category || "");
+  const [selectedStockStatus, setSelectedStockStatus] = useState(() => readSectionSnapshot<InventorySnapshot>("inventory")?.status || "");
   
-  const [page, setPage] = useState(1);
-  const [totalItems, setTotalItems] = useState(0);
+  const [page, setPage] = useState(() => readSectionSnapshot<InventorySnapshot>("inventory")?.page || 1);
+  const [totalItems, setTotalItems] = useState(() => readSectionSnapshot<InventorySnapshot>("inventory")?.total || 0);
   const limit = 10;
 
   useEffect(() => {
@@ -97,9 +103,9 @@ export default function InventoryPage() {
   const loadData = useCallback(async (showLoading = true) => {
     if (!userRole) return;
       try {
-        if (showLoading) setLoading(true);
+        if (showLoading && !readSectionSnapshot<InventorySnapshot>("inventory")) setLoading(true);
         
-        const params = new URLSearchParams({ skip: ((page - 1) * limit).toString(), limit: limit.toString() });
+        const params = new URLSearchParams({ skip: ((page - 1) * limit).toString(), limit: limit.toString(), is_bundle: "false" });
         if (selectedSupplier) params.append("supplier_id", selectedSupplier);
         if (selectedCategory) params.append("category_id", selectedCategory);
         if (selectedStockStatus) params.append("stock_status", selectedStockStatus);
@@ -194,12 +200,13 @@ export default function InventoryPage() {
         setInventoryItems(mappedItems);
         
         // Map stats
-        setStatCards([
+        const mappedStats: StatCard[] = [
           ...(userRole === "ADMIN" ? [{ icon: "trending_up", iconColor: "text-primary", label: "حركات اليوم", value: String(statsRes.today_movements ?? 0), sub: "", subColor: "text-green-400" }] : []),
           { icon: "warning", iconColor: "text-primary", label: "منخفض المخزون", value: statsRes.low_stock_count.toString(), valueColor: "text-primary", sub: "يحتاج إعادة طلب", subColor: "text-[#e2bfb0]/60" },
           { icon: "error", iconColor: "text-[#ffb4ab]", label: "مخزون حرج", value: statsRes.critical_stock_count.toString(), valueColor: "text-[#ffb4ab]", sub: "أصناف نفدت", subColor: "text-[#e2bfb0]/60" },
           { icon: "payments", iconColor: "text-primary", label: "قيمة المخزون", value: parseFloat(statsRes.total_value).toLocaleString(), valueExtra: "ج.م", sub: "تقدير القيمة الحالية", subColor: "text-[#e2bfb0]/60" },
-        ]);
+        ];
+        setStatCards(mappedStats);
 
         // Map transactions
         const mappedMovements = (transactionsRes as RecentTransaction[]).map((tx) => {
@@ -226,6 +233,11 @@ export default function InventoryPage() {
           };
         });
         setStockMovements(mappedMovements);
+        writeSectionSnapshot<InventorySnapshot>("inventory", {
+          items: mappedItems, stats: mappedStats, movements: mappedMovements,
+          purchaseNeeded: readSectionSnapshot<InventorySnapshot>("inventory")?.purchaseNeeded || [],
+          total: productsRes.total || 0, page, supplier: selectedSupplier, category: selectedCategory, status: selectedStockStatus,
+        });
         
       } catch (error) {
         console.error("Failed to load inventory data:", error);
@@ -242,15 +254,18 @@ export default function InventoryPage() {
 
   const loadPurchaseNeeded = useCallback(async () => {
     if (!userRole) return;
-    setPurchaseNeededLoading(true);
+    if (!readSectionSnapshot<InventorySnapshot>("inventory")) setPurchaseNeededLoading(true);
     try {
       const alerts = await fetchApi("/reports/stock-alerts") as StockAlert[];
-      setPurchaseNeeded(alerts.map((alert) => ({
+      const needed = alerts.map((alert) => ({
         id: alert.product_id,
         name: alert.name,
         stock: `${Number(alert.stock).toLocaleString("ar-EG", { maximumFractionDigits: 3 })} ${alert.base_unit}`,
         image: alert.image_url,
-      })));
+      }));
+      setPurchaseNeeded(needed);
+      const previous = readSectionSnapshot<InventorySnapshot>("inventory");
+      if (previous) writeSectionSnapshot("inventory", { ...previous, purchaseNeeded: needed });
     } catch (error) {
       notifyError(error instanceof Error ? error.message : "تعذر تحميل الأصناف التي تحتاج أمر شراء");
     } finally {
@@ -329,11 +344,11 @@ export default function InventoryPage() {
         </div>
 
         {/* Stats Row */}
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5" aria-label={loading ? "جاري تحميل إحصاءات المخزون" : undefined}>
+        <div className="motion-stagger grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5" aria-label={loading ? "جاري تحميل إحصاءات المخزون" : undefined}>
           {(loading && userRole === "ADMIN" && statCards.length === 3
             ? [{ icon: "trending_up", iconColor: "text-primary", label: "حركات اليوم", value: "", sub: "", subColor: "text-green-400" }, ...statCards]
             : statCards).map((card) => (
-            <div key={card.label} className={`glass p-8 rounded-2xl hi-fi-shadow flex flex-col gap-4 text-right ${loading ? "inventory-stat-loading" : ""}`}>
+            <div key={card.label} className={`motion-surface glass p-8 rounded-2xl hi-fi-shadow flex flex-col gap-4 text-right ${loading ? "inventory-stat-loading" : ""}`}>
               <div className="flex items-center justify-between">
                 <span className="text-sm font-bold text-[#e2bfb0]/80">{card.label}</span>
                 <span className={`material-symbols-outlined ${card.iconColor} text-3xl`}>{card.icon}</span>

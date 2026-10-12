@@ -5,44 +5,37 @@ import { fetchApi } from "@/lib/api";
 import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
 import AdminGate from "@/components/AdminGate";
+import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
+
+type DashboardData = {
+  total_revenue: number; total_orders: number; pending_orders: number; total_products: number;
+  today_sales: number; monthly_sales: number; gross_profit: number | null; net_profit: number | null;
+  cash_movement: number; open_drawer_cash: number; customer_debt: number;
+  low_stock_count: number; out_of_stock_count: number;
+  stock_alerts: { product_id: string; name: string; stock: number; minimum: number; severity: string }[];
+  top_products: { id: string; name: string; net_sales: number }[];
+  top_categories: { id: string; name: string; net_sales: number }[];
+  top_customers: { id: string; name: string; net_sales: number }[];
+  sales_by_source: Record<string, number>; new_customers: number; returning_customers: number;
+  delayed_orders: { id: string; hours: number }[];
+  suppliers: { id: string; name: string; balance: number | null; statement_incomplete: boolean; orders: number; received_orders: number }[];
+};
 
 export default function DashboardPage() {
   return <AdminGate><DashboardContent /></AdminGate>;
 }
 
 function DashboardContent() {
-  const [data, setData] = useState<{
-    total_revenue: number;
-    total_orders: number;
-    pending_orders: number;
-    total_products: number;
-    today_sales: number;
-    monthly_sales: number;
-    gross_profit: number | null;
-    net_profit: number | null;
-    cash_movement: number;
-    open_drawer_cash: number;
-    customer_debt: number;
-    low_stock_count: number;
-    out_of_stock_count: number;
-    stock_alerts: { product_id: string; name: string; stock: number; minimum: number; severity: string }[];
-    top_products: { id: string; name: string; net_sales: number }[];
-    top_categories: { id: string; name: string; net_sales: number }[];
-    top_customers: { id: string; name: string; net_sales: number }[];
-    sales_by_source: Record<string, number>;
-    new_customers: number;
-    returning_customers: number;
-    delayed_orders: { id: string; hours: number }[];
-    suppliers: { id: string; name: string; balance: number | null; statement_incomplete: boolean; orders: number; received_orders: number }[];
-  } | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [data, setData] = useState<DashboardData | null>(() => readSectionSnapshot<DashboardData>("dashboard"));
+  const [isLoading, setIsLoading] = useState(() => !readSectionSnapshot("dashboard"));
 
   useEffect(() => {
     async function loadDashboard() {
-      setIsLoading(true);
+      if (!readSectionSnapshot("dashboard")) setIsLoading(true);
       try {
         const metrics = await fetchApi("/dashboards/management");
         setData(metrics);
+        writeSectionSnapshot("dashboard", metrics);
       } catch (err) {
         console.error("Failed to load dashboard data:", err);
       } finally {

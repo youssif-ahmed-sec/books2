@@ -183,7 +183,7 @@ export default function BrandsManagement() {
 
       {/* Inline Form Modal */}
       {showForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" dir="rtl">
+        <div className="motion-overlay fixed inset-0 z-50 flex items-center justify-center" dir="rtl">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={closeForm} />
           <div className="relative w-full max-w-md bg-[#1a1918] border border-white/10 rounded-3xl shadow-2xl overflow-hidden animate-slide-up">
             <div className="flex items-center justify-between p-6 border-b border-white/10">

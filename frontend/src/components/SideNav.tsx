@@ -3,8 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { fetchApi } from "@/lib/api";
-import { getCurrentUser } from "@/lib/currentUser";
+import { cachedCurrentUser, getCurrentUser } from "@/lib/currentUser";
 import { errorMessage } from "@/lib/errors";
 import BrandMark from "./BrandMark";
 import { warehouseOnlyMode } from "@/lib/warehouseMode";
@@ -15,6 +14,7 @@ const navItems = [
   { href: "/stock-operations", icon: "swap_horiz", label: "النقل والجرد", disabled: false },
   { href: "/suppliers", icon: "local_shipping", label: "الموردين", disabled: false },
   { href: "/purchases", icon: "receipt_long", label: "المشتريات", disabled: false },
+  { href: "/integrations/whatsapp", icon: "forum", label: "تكامل واتساب", disabled: false },
   { href: "/categories", icon: "category", label: "التصنيفات", disabled: false },
   { href: "/offers", icon: "sell", label: "العروض", disabled: false },
   { href: "/pos", icon: "point_of_sale", label: "نقطة البيع", disabled: false },
@@ -33,7 +33,7 @@ export default function SideNav() {
   const pathname = usePathname();
   const router = useRouter();
   
-  const [user, setUser] = useState<{ email: string; role: string } | null>(null);
+  const [user, setUser] = useState<{ email: string; role: string } | null>(() => cachedCurrentUser());
   const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
@@ -54,7 +54,7 @@ export default function SideNav() {
   }, [router]);
 
   const visibleNavItems = navItems.filter((item) => {
-    if (warehouseOnlyMode && !["/inventory", "/stock-operations", "/suppliers", "/purchases", "/categories", "/offers", "/audit"].includes(item.href)) return false;
+    if (warehouseOnlyMode && !["/inventory", "/stock-operations", "/suppliers", "/purchases", "/integrations/whatsapp", "/categories", "/offers", "/audit"].includes(item.href)) return false;
     const role = user?.role;
     if (!role) return false;
     if (item.href === "/dashboard") {
@@ -63,7 +63,7 @@ export default function SideNav() {
     if (item.href === "/reports") {
       return role === "ADMIN" || role === "SENIOR_SALES" || role === "INVENTORY_CONTROLLER";
     }
-    if (["/inventory", "/stock-operations", "/suppliers", "/purchases", "/categories", "/offers"].includes(item.href)) {
+    if (["/inventory", "/stock-operations", "/suppliers", "/purchases", "/integrations/whatsapp", "/categories", "/offers"].includes(item.href)) {
       return role === "ADMIN" || role === "INVENTORY_CONTROLLER";
     }
     if (["/pos", "/cash-register", "/returns", "/orders", "/inbox"].includes(item.href)) {

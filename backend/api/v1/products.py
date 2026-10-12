@@ -218,6 +218,7 @@ async def get_db_info(db: AsyncSession = Depends(get_db), current_user: User = D
 async def get_products(
     supplier_id: Optional[UUID] = None,
     category_id: Optional[UUID] = None,
+    is_bundle: Optional[bool] = None,
     stock_status: Optional[str] = None,
     search: Optional[str] = None,
     skip: int = 0,
@@ -229,6 +230,9 @@ async def get_products(
     Get products, optionally filtered by search term (sku, barcode, name), with pagination.
     """
     base_query = select(Product).where(Product.is_deleted == False)
+
+    if is_bundle is not None:
+        base_query = base_query.where(Product.is_bundle == is_bundle)
     
     if supplier_id:
         base_query = base_query.where(Product.supplier_id == supplier_id)

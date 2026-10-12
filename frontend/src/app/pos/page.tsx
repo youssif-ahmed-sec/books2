@@ -11,6 +11,8 @@ import { ReceiptPrint } from "@/components/pos/ReceiptPrint";
 import { sendLocalPrint } from "@/lib/localPrint";
 import { errorMessage } from "@/lib/errors";
 import { getUserRole, type UserRole } from "@/utils/auth";
+import { armUiSound, playUiSound } from "@/lib/uiSounds";
+import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
 
 interface CheckoutPayload {
   warehouse_id: string;
@@ -61,19 +63,30 @@ interface CartItem {
   availableUnits: ProductUnit[];
 }
 
+type PosReferenceSnapshot = {
+  customers: { id: string; name: string; price_level: string; balance: number; credit_limit: number }[];
+  priceLevels: { value: string; label: string }[];
+  warehouses: { id: string; name: string }[];
+};
+
 export default function POSPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(false);
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [availablePriceLevels, setAvailablePriceLevels] = useState<{value: string, label: string}[]>([]);
-  const [customers, setCustomers] = useState<{ id: string; name: string; price_level: string; balance: number; credit_limit: number }[]>([]);
+  const cartRef = useRef<CartItem[]>([]);
+  const scanInFlight = useRef<string | null>(null);
+  const [availablePriceLevels, setAvailablePriceLevels] = useState<{value: string, label: string}[]>(() => readSectionSnapshot<PosReferenceSnapshot>("pos-reference")?.priceLevels || []);
+  const [customers, setCustomers] = useState<{ id: string; name: string; price_level: string; balance: number; credit_limit: number }[]>(() => readSectionSnapshot<PosReferenceSnapshot>("pos-reference")?.customers || []);
   const [selectedCustomer, setSelectedCustomer] = useState("");
   const [userRole, setUserRole] = useState<UserRole | null>(null);
   const [discount, setDiscount] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState("Cash");
-  const [warehouses, setWarehouses] = useState<{ id: string; name: string }[]>([]);
-  const [warehouseId, setWarehouseId] = useState("");
+  const [warehouses, setWarehouses] = useState<{ id: string; name: string }[]>(() => readSectionSnapshot<PosReferenceSnapshot>("pos-reference")?.warehouses || []);
+  const [warehouseId, setWarehouseId] = useState(() => {
+    const previous = readSectionSnapshot<PosReferenceSnapshot>("pos-reference")?.warehouses || [];
+    return previous.length === 1 ? previous[0].id : "";
+  });
   const [isProcessing, setIsProcessing] = useState(false);
 
   // For printing
@@ -83,6 +96,8 @@ export default function POSPage() {
   const [receiptItems, setReceiptItems] = useState<CartItem[]>([]);
   const [printStatus, setPrintStatus] = useState("");
   const [isSendingReceipt, setIsSendingReceipt] = useState(false);
+
+  useEffect(() => { cartRef.current = cart; }, [cart]);
 
   const reprintReceipt = async () => {
     if (!lastPrintJob || isSendingReceipt) return;
@@ -99,7 +114,7 @@ export default function POSPage() {
   };
 
   useEffect(() => {
-    setUserRole(getUserRole());
+    const roleTimer = window.setTimeout(() => setUserRole(getUserRole()), 0);
     const loadData = async () => {
       try {
         const [customersData, priceLevelsData, warehouseData] = await Promise.all([
@@ -110,20 +125,18 @@ export default function POSPage() {
         setWarehouses(warehouseData);
         if (warehouseData.length === 1) setWarehouseId(warehouseData[0].id);
 
-        if (Array.isArray(customersData)) {
-          setCustomers(customersData);
-        } else if (customersData.data && Array.isArray(customersData.data)) {
-          setCustomers(customersData.data);
-        }
+        const loadedCustomers = Array.isArray(customersData) ? customersData : Array.isArray(customersData.data) ? customersData.data : [];
+        setCustomers(loadedCustomers);
 
-        if (Array.isArray(priceLevelsData) && priceLevelsData.length > 0) {
-          setAvailablePriceLevels(priceLevelsData);
-        }
+        const loadedLevels = Array.isArray(priceLevelsData) ? priceLevelsData : [];
+        if (loadedLevels.length > 0) setAvailablePriceLevels(loadedLevels);
+        writeSectionSnapshot("pos-reference", { customers: loadedCustomers, priceLevels: loadedLevels, warehouses: warehouseData });
       } catch (err) {
         console.error("Failed to load initial data", err);
       }
     };
-    loadData();
+    void loadData();
+    return () => window.clearTimeout(roleTimer);
   }, []);
 
   const getPrice = useCallback((unit: ProductUnit, level: string) => {
@@ -148,18 +161,18 @@ export default function POSPage() {
     }));
   };
 
-  const addToCart = useCallback((product: Product, selectedUnitId?: string) => {
+  const addToCart = useCallback((product: Product, selectedUnitId?: string): boolean => {
     const unit = selectedUnitId 
       ? product.units.find(u => u.id === selectedUnitId) || product.units.find(u => u.unit_name === product.base_unit) || product.units[0]
       : product.units.find(u => u.unit_name === product.base_unit) || product.units[0];
 
-    if (!unit) return;
+    if (!unit) return false;
 
     const customerLevel = customers.find(customer => customer.id === selectedCustomer)?.price_level || "Retail";
     let targetLevel = unit.prices.find(p => p.price_level === customerLevel)?.price_level;
     if (!targetLevel && userRole !== "ADMIN") {
       notifyError("لا يوجد سعر لهذه الوحدة في شريحة العميل المحددة.");
-      return;
+      return false;
     }
     if (!targetLevel && unit.prices.length > 0) {
       targetLevel = unit.prices[0].price_level;
@@ -167,35 +180,27 @@ export default function POSPage() {
 
     if (!targetLevel) {
       notifyError("لا يوجد أسعار لهذه الوحدة.");
-      return;
+      return false;
     }
 
     const unitPrice = getPrice(unit, targetLevel);
     if (unitPrice === 0) {
       notifyError("السعر صفر لهذه الوحدة.");
-      return;
+      return false;
     }
 
-    setCart(prev => {
-      const existing = prev.find(item => item.productId === product.id && item.unitId === unit.id);
-      if (existing) {
-        const reserved = prev.filter(item => item.productId === product.id).reduce((sum, item) => sum + item.quantity * item.conversionFactor, 0);
-        if (reserved + unit.conversion_factor > product.current_stock) {
-          notifyError("لا يوجد مخزون كافٍ.");
-          return prev;
-        }
-        return prev.map(item => 
-          item.id === existing.id 
-            ? { ...item, quantity: item.quantity + 1, totalPrice: (item.quantity + 1) * item.unitPrice } 
-            : item
-        );
-      } else {
-        const reserved = prev.filter(item => item.productId === product.id).reduce((sum, item) => sum + item.quantity * item.conversionFactor, 0);
-        if (reserved + unit.conversion_factor > product.current_stock) {
-          notifyError("لا يوجد مخزون كافٍ.");
-          return prev;
-        }
-        return [...prev, {
+    const previous = cartRef.current;
+    const reserved = previous.filter(item => item.productId === product.id).reduce((sum, item) => sum + item.quantity * item.conversionFactor, 0);
+    if (reserved + unit.conversion_factor > product.current_stock) {
+      notifyError("لا يوجد مخزون كافٍ.");
+      return false;
+    }
+    const existing = previous.find(item => item.productId === product.id && item.unitId === unit.id);
+    const next = existing
+      ? previous.map(item => item.id === existing.id
+          ? { ...item, quantity: item.quantity + 1, totalPrice: (item.quantity + 1) * item.unitPrice }
+          : item)
+      : [...previous, {
           id: Math.random().toString(),
           productId: product.id,
           nameAr: product.name_ar,
@@ -209,11 +214,12 @@ export default function POSPage() {
           maxStock: product.current_stock,
           availableUnits: product.units
         }];
-      }
-    });
+    cartRef.current = next;
+    setCart(next);
+    return true;
   }, [getPrice, customers, selectedCustomer, userRole]);
 
-  const searchProducts = useCallback(async (query: string) => {
+  const searchProducts = useCallback(async (query: string, scanned = false) => {
     if (!query) {
       setProducts([]);
       return;
@@ -226,26 +232,31 @@ export default function POSPage() {
       const exactUnitMatches = dataArr.flatMap(product => product.units.filter(unit => unit.barcode === query).map(unit => ({ product, unit })));
       const exactProductMatches = dataArr.filter(product => product.barcode === query || product.sku === query);
       if (exactUnitMatches.length === 1 && exactProductMatches.length === 0) {
-        addToCart(exactUnitMatches[0].product, exactUnitMatches[0].unit.id);
-        setSearchQuery("");
-        setProducts([]);
+        const added = addToCart(exactUnitMatches[0].product, exactUnitMatches[0].unit.id);
+        playUiSound(added ? "scanSuccess" : "scanFailure");
+        if (added) { setSearchQuery(""); setProducts([]); }
       } else if (exactUnitMatches.length === 0 && exactProductMatches.length === 1) {
-        addToCart(exactProductMatches[0]);
-        setSearchQuery("");
-        setProducts([]);
+        const added = addToCart(exactProductMatches[0]);
+        playUiSound(added ? "scanSuccess" : "scanFailure");
+        if (added) { setSearchQuery(""); setProducts([]); }
       } else if (exactUnitMatches.length + exactProductMatches.length > 1) {
         notifyError("الباركود مطابق لأكثر من منتج أو وحدة. راجع الباركود المسجل قبل البيع.");
+        if (scanned) playUiSound("scanFailure");
+      } else if (scanned) {
+        playUiSound("scanFailure");
       }
     } catch (error) {
       console.error(error);
+      if (scanned) playUiSound("scanFailure");
     } finally {
+      if (scanned) scanInFlight.current = null;
       setLoading(false);
     }
   }, [addToCart]);
 
   useEffect(() => {
     const delayDebounceFn = setTimeout(() => {
-      if (searchQuery) searchProducts(searchQuery);
+      if (searchQuery && scanInFlight.current !== searchQuery) searchProducts(searchQuery);
     }, 300);
     return () => clearTimeout(delayDebounceFn);
   }, [searchQuery, searchProducts]);
@@ -367,6 +378,7 @@ export default function POSPage() {
         method: "POST",
         body: JSON.stringify(payload)
       });
+      playUiSound("saleComplete");
 
       setLastOrder({
         id: res.id,
@@ -408,6 +420,7 @@ export default function POSPage() {
         setIsSendingReceipt(false);
       }
       setCart([]);
+      cartRef.current = [];
       setDiscount(0);
       checkoutRequest.current = null;
 
@@ -614,6 +627,16 @@ export default function POSPage() {
                 autoFocus
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(event) => {
+                  const code = event.currentTarget.value.trim();
+                  if (event.key === "Enter" && code) {
+                    event.preventDefault();
+                    if (scanInFlight.current === code) return;
+                    scanInFlight.current = code;
+                    armUiSound();
+                    void searchProducts(code, true);
+                  }
+                }}
                 placeholder="ابحث بالباركود، كود المنتج أو الاسم..."
                 className="app-search-focus w-full bg-[#131313] border border-white/10 rounded-full py-4 pr-12 pl-6 text-white transition-all placeholder:text-[#e2bfb0]/30"
               />

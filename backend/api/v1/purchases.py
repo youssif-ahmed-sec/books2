@@ -13,9 +13,10 @@ from database import get_db
 from models.inventory import InventoryBalance, InventoryTransaction, TransactionTypeEnum, Warehouse
 from models.product import Product, Supplier
 from models.purchase import PurchaseOrder
-from models.user import AuditLog, User
+from models.user import AuditLog, RoleEnum, User
 from schemas.purchase import PurchaseOrderResponse, PurchaseReceive, PurchaseRequestCreate
 from services.inventory_service import InventoryService
+from services.notification_service import notify_roles, notify_user
 
 router = APIRouter(prefix="/purchases", tags=["Purchases"])
 
@@ -34,7 +35,9 @@ async def request_purchase(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_inventory_access),
 ):
-    product = (await db.execute(select(Product).where(Product.id == payload.product_id, Product.is_deleted == False).with_for_update())).scalar_one_or_none()
+    product = (await db.execute(select(Product).where(
+        Product.id == payload.product_id, Product.is_deleted == False, Product.is_bundle == False,
+    ).with_for_update())).scalar_one_or_none()
     supplier = (await db.execute(select(Supplier).where(Supplier.id == payload.supplier_id, Supplier.is_deleted == False))).scalar_one_or_none()
     if product is None or supplier is None:
         raise HTTPException(status_code=404, detail="Active product or supplier not found")
@@ -45,6 +48,8 @@ async def request_purchase(
     db.add(order)
     await db.flush()
     db.add(AuditLog(user_id=user.id, action="REQUEST_PURCHASE", entity_type="PurchaseOrder", entity_id=str(order.id)))
+    await notify_roles(db, (RoleEnum.ADMIN,), kind="purchase_request",
+                       title="طلب شراء جديد", message=f"{product.name_ar} · كمية {payload.quantity}", href="/purchases")
     await db.commit()
     await db.refresh(order)
     return order
@@ -64,6 +69,8 @@ async def approve_purchase(
     order.status = "APPROVED"
     order.approved_by = user.id
     db.add(AuditLog(user_id=user.id, action="APPROVE_PURCHASE", entity_type="PurchaseOrder", entity_id=str(order.id)))
+    notify_user(db, order.requested_by, kind="purchase_approved", title="تمت الموافقة على طلب الشراء",
+                message="يمكن متابعة الطلب من صفحة المشتريات.", href="/purchases")
     await db.commit()
     await db.refresh(order)
     return order
@@ -82,6 +89,8 @@ async def reject_purchase(
         raise HTTPException(status_code=409, detail="Only requested purchases can be rejected")
     order.status = "REJECTED"
     db.add(AuditLog(user_id=user.id, action="REJECT_PURCHASE", entity_type="PurchaseOrder", entity_id=str(order.id)))
+    notify_user(db, order.requested_by, kind="purchase_rejected", title="تم رفض طلب الشراء",
+                message="راجع حالة الطلب في صفحة المشتريات.", href="/purchases")
     await db.commit()
     await db.refresh(order)
     return order
@@ -130,7 +139,9 @@ async def receive_purchase(
     next_quantity = Decimal(str(order.received_quantity or 0)) + payload.quantity
     if next_quantity > Decimal(str(order.quantity)):
         raise HTTPException(status_code=400, detail="Receipt exceeds ordered quantity")
-    product = (await db.execute(select(Product).where(Product.id == order.product_id, Product.is_deleted == False).with_for_update())).scalar_one_or_none()
+    product = (await db.execute(select(Product).where(
+        Product.id == order.product_id, Product.is_deleted == False, Product.is_bundle == False,
+    ).with_for_update())).scalar_one_or_none()
     if product is None:
         raise HTTPException(status_code=409, detail="Product is no longer active for receiving")
     warehouse = (await db.execute(select(Warehouse).where(
@@ -156,6 +167,8 @@ async def receive_purchase(
     order.status = "RECEIVED" if next_quantity == Decimal(str(order.quantity)) else "PARTIALLY_RECEIVED"
     db.add(AuditLog(user_id=user.id, action="RECEIVE_PURCHASE", entity_type="PurchaseOrder", entity_id=str(order.id),
                     new_value={"quantity": str(payload.quantity)}))
+    await notify_roles(db, (RoleEnum.ADMIN,), kind="stock_received", title="استلام من أمر شراء",
+                       message=f"{product.name_ar} · كمية {payload.quantity}", href="/purchases")
     try:
         await db.commit()
     except IntegrityError:

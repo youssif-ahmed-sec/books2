@@ -9,6 +9,7 @@ class UserProfileResponse(BaseModel):
     id: UUID
     role: RoleEnum
     email: Optional[str] = None
+    username: Optional[str] = None
     is_active: bool
     created_at: datetime
 
@@ -24,8 +25,14 @@ class UserSyncRequest(BaseModel):
 class UserRegisterRequest(BaseModel):
     """Register a new local user (Admin only in production)."""
     email: EmailStr
+    username: Optional[str] = Field(default=None, min_length=3, max_length=50, pattern=r"^[a-zA-Z0-9._-]+$")
     password: str = Field(min_length=12)
     role: RoleEnum = RoleEnum.SALES_ASSISTANT
+
+    @field_validator("username")
+    @classmethod
+    def normalize_username(cls, value: Optional[str]) -> Optional[str]:
+        return value.strip().lower() if value is not None else None
 
     @field_validator("password")
     @classmethod
@@ -33,6 +40,29 @@ class UserRegisterRequest(BaseModel):
         if len(value.encode("utf-8")) > 72:
             raise ValueError("Password must be at most 72 UTF-8 bytes")
         return value
+
+
+class UserUpdateRequest(BaseModel):
+    email: Optional[EmailStr] = None
+    username: Optional[str] = Field(default=None, min_length=3, max_length=50, pattern=r"^[a-zA-Z0-9._-]+$")
+    role: Optional[RoleEnum] = None
+    password: Optional[str] = Field(default=None, min_length=12)
+
+    @field_validator("username")
+    @classmethod
+    def normalize_username(cls, value: Optional[str]) -> Optional[str]:
+        return value.strip().lower() if value is not None else None
+
+    @field_validator("password")
+    @classmethod
+    def password_fits_bcrypt(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and len(value.encode("utf-8")) > 72:
+            raise ValueError("Password must be at most 72 UTF-8 bytes")
+        return value
+
+
+class UserStatusRequest(BaseModel):
+    is_active: bool
 
 
 class TokenResponse(BaseModel):

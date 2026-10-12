@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 interface UnitBarcodeFieldProps {
   unitName: string;
@@ -12,7 +12,7 @@ interface UnitBarcodeFieldProps {
 export default function UnitBarcodeField({ unitName, value, onChange, readOnly = false }: UnitBarcodeFieldProps) {
   const [mode, setMode] = useState<"scan" | "auto">(value ? "scan" : "auto");
   const inputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => { if (value) setMode("scan"); }, [value]);
+  const selectedMode = value ? "scan" : mode;
 
   return (
     <div className="unit-barcode-field">
@@ -23,22 +23,22 @@ export default function UnitBarcodeField({ unitName, value, onChange, readOnly =
         </div>
       ) : <>
       <div className="flex items-center justify-center gap-2" role="group" aria-label={`طريقة باركود ${unitName}`}>
-        <button type="button" aria-pressed={mode === "scan"}
+        <button type="button" aria-pressed={selectedMode === "scan"}
           onClick={() => { setMode("scan"); requestAnimationFrame(() => inputRef.current?.focus()); }}
-          className={`rounded-lg px-2 py-1 text-xs ${mode === "scan" ? "bg-primary text-white" : "bg-white/5 text-[#e2bfb0]"}`}>
+          className={`rounded-lg px-2 py-1 text-xs ${selectedMode === "scan" ? "bg-primary text-white" : "bg-white/5 text-[#e2bfb0]"}`}>
           مسح باركود
         </button>
-        <button type="button" aria-pressed={mode === "auto"}
+        <button type="button" aria-pressed={selectedMode === "auto"}
           onClick={() => { setMode("auto"); onChange(""); }}
-          className={`rounded-lg px-2 py-1 text-xs ${mode === "auto" ? "bg-primary text-white" : "bg-white/5 text-[#e2bfb0]"}`}>
+          className={`rounded-lg px-2 py-1 text-xs ${selectedMode === "auto" ? "bg-primary text-white" : "bg-white/5 text-[#e2bfb0]"}`}>
           إنشاء تلقائي
         </button>
       </div>
       <input ref={inputRef} type="text" dir="ltr" aria-label={`باركود ${unitName}`}
-        value={mode === "auto" ? "" : value}
+        value={selectedMode === "auto" ? "" : value}
         onChange={event => onChange(event.target.value)}
-        disabled={mode === "auto"}
-        placeholder={mode === "auto" ? "يُنشأ عند الحفظ" : "ضع المؤشر وامسح الباركود"}
+        disabled={selectedMode === "auto"}
+        placeholder={selectedMode === "auto" ? "يُنشأ عند الحفظ" : "ضع المؤشر وامسح الباركود"}
         className="w-full rounded-xl border border-white/10 bg-[#201f1f] px-3 py-2 text-sm disabled:opacity-60" />
       </>}
     </div>

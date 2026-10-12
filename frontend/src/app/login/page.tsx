@@ -7,7 +7,7 @@ import BrandMark from "@/components/BrandMark";
 import ThemeToggle from "@/components/ThemeToggle";
 
 export default function LoginPage() {
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -21,7 +21,7 @@ export default function LoginPage() {
     
     try {
       const formData = new URLSearchParams();
-      formData.append("username", email);
+      formData.append("username", identifier);
       formData.append("password", password);
 
       const res = await fetch("/api/v1/auth/login", {
@@ -34,7 +34,7 @@ export default function LoginPage() {
 
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.detail || "فشل تسجيل الدخول. يرجى التحقق من البريد الإلكتروني وكلمة المرور.");
+        throw new Error(errorData.detail || "فشل تسجيل الدخول. تحقق من اسم المستخدم أو البريد وكلمة المرور.");
       }
 
       const data = await res.json();
@@ -80,19 +80,19 @@ export default function LoginPage() {
               </div>
             )}
             <div className="space-y-2.5">
-              <label htmlFor="username" className="block text-sm font-semibold">البريد الإلكتروني</label>
+              <label htmlFor="username" className="block text-sm font-semibold">البريد الإلكتروني أو اسم المستخدم</label>
               <div className="relative">
                 <span aria-hidden="true" className="material-symbols-outlined app-muted pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-xl">mail</span>
                 <input
                   id="username"
                   name="username"
-                  type="email"
+                  type="text"
                   autoComplete="username"
                   dir="ltr"
                   required
-                  placeholder="name@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="name@example.com أو اسم المستخدم"
+                  value={identifier}
+                  onChange={(e) => setIdentifier(e.target.value)}
                   className="login-input w-full py-4 pl-12 pr-5 text-left text-base"
                 />
               </div>

@@ -69,8 +69,8 @@ export default function BarcodePrintDialog({ productName, units, onClose, quanti
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-4" dir="rtl" role="dialog" aria-modal="true" aria-label="اختيار باركودات الوحدات للطباعة">
-      <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-white/10 bg-[#1c1b1b] p-5 text-[#e5e2e1] custom-scrollbar">
+    <div className="motion-overlay fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-4" dir="rtl" role="dialog" aria-modal="true" aria-label="اختيار باركودات الوحدات للطباعة">
+      <div className="motion-dialog max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-white/10 bg-[#1c1b1b] p-5 text-[#e5e2e1] custom-scrollbar">
         <div className="mb-4 flex items-start justify-between gap-4">
           <div><h2 className="text-xl font-bold">طباعة باركودات الوحدات</h2><p className="mt-1 text-sm text-[#e2bfb0]">{productName} · {quantityHint || "العدد الافتراضي من كمية كل وحدة، ويمكن تغييره."}</p></div>
           <button type="button" onClick={onClose} disabled={printing} aria-label="إغلاق اختيار الطباعة" className="rounded-full p-2 hover:bg-white/10">✕</button>

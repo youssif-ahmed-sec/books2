@@ -45,7 +45,7 @@ function ProductDetails() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!id) { setError("لم يُحدد منتج لعرضه"); setLoading(false); return; }
+    if (!id) { const timer = window.setTimeout(() => { setError("لم يُحدد منتج لعرضه"); setLoading(false); }, 0); return () => window.clearTimeout(timer); }
     let active = true;
     Promise.all([
       fetchApi(`/products/${id}`),

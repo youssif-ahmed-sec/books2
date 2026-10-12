@@ -16,6 +16,7 @@ from core.dependencies import require_inventory_access, require_warehouse_access
 from core.idempotency import request_fingerprint
 from database import get_db
 from services.inventory_service import InventoryService
+from services.notification_service import notify_low_stock_crossing, notify_roles
 from fastapi_cache.decorator import cache
 
 router = APIRouter(prefix="/inventory", tags=["Inventory"])
@@ -80,7 +81,7 @@ async def create_stock_receipt(
 
     # Lock products in a stable order before warehouse/balances; all lines commit together.
     products = (await db.execute(select(Product).where(
-        Product.id.in_(product_ids), Product.is_deleted == False,
+        Product.id.in_(product_ids), Product.is_deleted == False, Product.is_bundle == False,
     ).order_by(Product.id).with_for_update())).scalars().all()
     if len(products) != len(product_ids):
         raise HTTPException(status_code=404, detail="One or more products were not found")
@@ -113,6 +114,8 @@ async def create_stock_receipt(
         db.add(AuditLog(user_id=current_user.id, action="RECEIVE_STOCK", entity_type="Product",
                         entity_id=str(line.product_id),
                         new_value={"quantity": str(line.quantity), "receipt_id": str(payload.request_id)}))
+    await notify_roles(db, (RoleEnum.ADMIN,), kind="stock_received", title="تم استلام بضاعة",
+                       message=f"فاتورة استلام بها {len(payload.lines)} صنف · {supplier.name}", href="/stock-operations")
     try:
         await db.commit()
     except IntegrityError:
@@ -157,6 +160,8 @@ async def create_inventory_transaction(
         raise HTTPException(status_code=422, detail="Receiving requires supplier_id")
     if is_receipt and transaction_in.unit_cost is not None:
         raise HTTPException(status_code=422, detail="Set product cost in product edit, not receiving")
+    if transaction_in.reference_document and transaction_in.reference_document.startswith("RCV-"):
+        raise HTTPException(status_code=422, detail="RCV receipt numbers are assigned by the receiving workflow")
     if not is_receipt and (transaction_in.supplier_id is not None or transaction_in.unit_cost is not None):
         raise HTTPException(status_code=422, detail="Supplier and cost are only valid for Receiving")
 
@@ -170,11 +175,13 @@ async def create_inventory_transaction(
         return existing
 
     # Keep product archival and movements ordered by the same product lock.
-    product_query = select(Product.id).where(
+    product_query = select(Product).where(
         Product.id == transaction_in.product_id,
         Product.is_deleted == False,
+        Product.is_bundle == False,
     ).with_for_update()
-    if (await db.execute(product_query)).scalar_one_or_none() is None:
+    product = (await db.execute(product_query)).scalar_one_or_none()
+    if product is None:
         raise HTTPException(status_code=404, detail="Product not found")
 
     # Serializes first-time balance creation within a warehouse.
@@ -217,6 +224,7 @@ async def create_inventory_transaction(
 
     if balance.current_stock + quantity < 0:
         raise HTTPException(status_code=400, detail="Insufficient stock")
+    stock_before = balance.current_stock
     new_transaction = InventoryService.record_movement(
         db, balance, quantity, current_user.id, transaction_in.transaction_type,
         supplier_id=transaction_in.supplier_id,
@@ -227,6 +235,7 @@ async def create_inventory_transaction(
         request_fingerprint=fingerprint,
     )
     db.add(AuditLog(user_id=current_user.id, action="INVENTORY_MOVEMENT", entity_type="Product", entity_id=str(transaction_in.product_id), new_value={"quantity": str(quantity), "type": transaction_in.transaction_type.value if hasattr(transaction_in.transaction_type, "value") else transaction_in.transaction_type, "warehouse_id": str(transaction_in.warehouse_id)}))
+    await notify_low_stock_crossing(db, product, stock_before, balance.current_stock)
     
     try:
         await db.commit()

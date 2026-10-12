@@ -10,6 +10,7 @@ import { z } from "zod";
 import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
 import AdminGate from "@/components/AdminGate";
+import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
 
 const transactionSchema = z.object({
   type: z.enum(["expense", "income"]),
@@ -28,8 +29,8 @@ export default function FinancialsPage() {
 }
 
 function FinancialsContent() {
-  const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [incomes, setIncomes] = useState<Income[]>([]);
+  const [expenses, setExpenses] = useState<Expense[]>(() => readSectionSnapshot<{ expenses: Expense[] }>("financials")?.expenses || []);
+  const [incomes, setIncomes] = useState<Income[]>(() => readSectionSnapshot<{ incomes: Income[] }>("financials")?.incomes || []);
   const [isSlideoverOpen, setIsSlideoverOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"expense" | "income">("expense");
 
@@ -48,6 +49,7 @@ function FinancialsContent() {
       ]);
       setExpenses(expData);
       setIncomes(incData);
+      writeSectionSnapshot("financials", { expenses: expData, incomes: incData });
     } catch (err) {
       console.error("Failed to load financials:", err);
     }
@@ -58,6 +60,7 @@ function FinancialsContent() {
       .then(([expData, incData]) => {
         setExpenses(expData);
         setIncomes(incData);
+        writeSectionSnapshot("financials", { expenses: expData, incomes: incData });
       })
       .catch(err => console.error("Failed to load financials:", err));
   }, []);

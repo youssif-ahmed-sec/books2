@@ -9,6 +9,7 @@ import { errorMessage } from "@/lib/errors";
 import { printOrderInvoice } from "@/lib/localPrint";
 import { orderSourceLabels, orderStatusLabels } from "@/lib/orderLabels";
 import { getUserRole, type UserRole } from "@/utils/auth";
+import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
 
 // ── Types ─────────────────────────────────────────────────────────────
 interface Product {
@@ -100,9 +101,9 @@ const STATUS_MAP = orderStatusLabels;
 const SOURCE_MAP = orderSourceLabels;
 
 export default function OrdersPage() {
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("All");
+  const [orders, setOrders] = useState<Order[]>(() => readSectionSnapshot<Order[]>("orders-list") || []);
+  const [loading, setLoading] = useState(() => !readSectionSnapshot("orders-list"));
+  const [activeTab, setActiveTab] = useState(() => readSectionSnapshot<{ tab: string }>("orders-tab")?.tab || "All");
 
   // Draft Slide-over State
   const [isSlideOverOpen, setIsSlideOverOpen] = useState(false);
@@ -126,9 +127,10 @@ export default function OrdersPage() {
   const [availablePriceLevels, setAvailablePriceLevels] = useState<{value: string, label: string}[]>([]);
 
   useEffect(() => {
-    setUserRole(getUserRole());
+    const roleTimer = window.setTimeout(() => setUserRole(getUserRole()), 0);
     fetchApi("/orders").then((data: Order[]) => {
       setOrders(data);
+      writeSectionSnapshot("orders-list", data);
       const requestedLead = new URLSearchParams(window.location.search).get("lead_id");
       const lead = data.find(order => order.id === requestedLead && order.status === "New Lead");
       if (lead) {
@@ -146,13 +148,15 @@ export default function OrdersPage() {
         { value: "Wholesale", label: "جملة" }
       ]);
     });
+    return () => window.clearTimeout(roleTimer);
   }, []);
 
   const fetchOrders = async () => {
     try {
-      setLoading(true);
+      if (!readSectionSnapshot("orders-list")) setLoading(true);
       const data = await fetchApi("/orders");
       setOrders(data);
+      writeSectionSnapshot("orders-list", data);
     } catch (err) {
       console.error(err);
     } finally {
@@ -441,7 +445,7 @@ export default function OrdersPage() {
             {STATUS_TABS.map(tab => (
               <button
                 key={tab}
-                onClick={() => setActiveTab(tab)}
+                onClick={() => { setActiveTab(tab); writeSectionSnapshot("orders-tab", { tab }); }}
                 className={`px-5 py-2.5 rounded-full text-sm font-semibold whitespace-nowrap transition-colors ${activeTab === tab ? 'bg-primary text-white' : 'hover:bg-white/10 text-[#e2bfb0]/60 bg-white/5 border border-white/5'}`}
               >
                 {STATUS_MAP[tab] || tab}

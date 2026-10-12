@@ -187,6 +187,10 @@ html[data-theme="light"] body { background: #f6f4f1; color: #24211f; }
 .app-menu-action { display: flex; align-items: center; gap: .65rem; padding: .65rem .75rem; border-radius: .65rem; font-size: .875rem; font-weight: 600; text-align: right; }
 .app-menu-action:hover, .app-search-result:hover { background: rgba(255,255,255,.07); }
 .app-divider { border-top: 1px solid rgba(255,255,255,.1); }
+.notification-count { position: absolute; top: -4px; inset-inline-end: -5px; min-width: 19px; height: 19px; padding: 0 3px; border-radius: 999px; background: #ff6b00; color: #fff; font-size: 11px; font-weight: 800; line-height: 19px; text-align: center; }
+.notification-menu { z-index: 60; }
+.notification-item:hover, .notification-item:focus-visible { background: rgba(255,255,255,.07); outline: none; }
+html[data-theme="light"] .notification-item:hover, html[data-theme="light"] .notification-item:focus-visible { background: #f8f2ed; }
 
 html[data-theme="light"] .app-top-nav,
 html[data-theme="light"] .app-panel,
@@ -321,14 +325,56 @@ html[data-theme="light"] *::-webkit-scrollbar-thumb:hover { background-color: #9
 .supplier-drawer { overscroll-behavior: contain; }
 
 /* ── Animations ── */
+/* Only opacity and transform move on page entry; data stays visible while it refreshes. */
+@keyframes app-page-in {
+  from { opacity: .88; }
+  to { opacity: 1; }
+}
+
+@keyframes app-heading-in {
+  from { opacity: .7; transform: translateY(7px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes app-surface-in {
+  from { opacity: .45; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes app-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes app-dialog-in {
+  from { opacity: .7; transform: translateY(8px) scale(.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes app-drawer-in {
+  from { opacity: .8; transform: translateX(18px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+main { animation: app-page-in .18s ease-out; }
+.app-main > :first-child { animation: app-heading-in .24s cubic-bezier(.2, .8, .2, 1); }
+.motion-surface { animation: app-surface-in .22s cubic-bezier(.2, .8, .2, 1) both; }
+.motion-stagger > :nth-child(2) { animation-delay: 35ms; }
+.motion-stagger > :nth-child(3) { animation-delay: 70ms; }
+.motion-stagger > :nth-child(4) { animation-delay: 105ms; }
+.motion-overlay { animation: app-overlay-in .18s ease-out both; }
+.motion-dialog { animation: app-dialog-in .22s cubic-bezier(.2, .8, .2, 1) both; }
+.motion-drawer { animation: app-drawer-in .22s cubic-bezier(.2, .8, .2, 1) both; }
+.app-menu, .product-select-menu { animation: app-dialog-in .18s cubic-bezier(.2, .8, .2, 1) both; }
+
 @keyframes slideInRight {
-  from { transform: translateX(100%); }
-  to   { transform: translateX(0); }
+  from { opacity: .75; transform: translateX(18px); }
+  to   { opacity: 1; transform: translateX(0); }
 }
 
 @keyframes slideInLeft {
-  from { transform: translateX(-100%); }
-  to   { transform: translateX(0); }
+  from { opacity: .75; transform: translateX(-18px); }
+  to   { opacity: 1; transform: translateX(0); }
 }
 
 @keyframes fadeInUp {
@@ -347,20 +393,22 @@ html[data-theme="light"] *::-webkit-scrollbar-thumb:hover { background-color: #9
 }
 
 .animate-slide-in-right {
-  animation: slideInRight 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: slideInRight .22s cubic-bezier(.2, .8, .2, 1) both;
 }
 
 .animate-slide-in-left {
-  animation: slideInLeft 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: slideInLeft .22s cubic-bezier(.2, .8, .2, 1) both;
 }
 
 .animate-fade-in {
-  animation: fadeInUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: app-page-in .22s cubic-bezier(.2, .8, .2, 1) both;
 }
 
 .animate-scale-in {
-  animation: scaleIn 0.25s ease-out forwards;
+  animation: app-dialog-in .22s cubic-bezier(.2, .8, .2, 1) both;
 }
+
+.animate-slide-up { animation: app-dialog-in .22s cubic-bezier(.2, .8, .2, 1) both; }
 
 .badge-glow {
   animation: pulseGlow 3s infinite alternate;
@@ -373,6 +421,16 @@ html[data-theme="light"] *::-webkit-scrollbar-thumb:hover { background-color: #9
 
 .table-row-hover:hover {
   transform: translateX(-4px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  main, .app-main > :first-child, .motion-surface, .motion-overlay, .motion-dialog, .motion-drawer,
+  .app-menu, .product-select-menu,
+  .animate-slide-in-right, .animate-slide-in-left, .animate-fade-in,
+  .animate-scale-in, .animate-slide-up, .badge-glow {
+    animation: none !important;
+  }
+  .table-row-hover:hover { transform: none; }
 }
 
 /* ── Focus Ring Override ── */
@@ -593,6 +651,19 @@ html[data-theme="light"] .product-select-option:focus-visible { background: #f5e
 html[data-theme="light"] .product-select-option--selected { background: #f5e1d1; color: #7b3b16; }
 
 /* Shared, unobtrusive feedback for requests and connection changes. */
+@keyframes app-toast-in {
+  from { opacity: 0; transform: translateY(9px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes app-toast-out {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(5px); }
+}
+.app-toast-enter { animation: app-toast-in .22s cubic-bezier(.2, .8, .2, 1) both; }
+.app-toast-exit { animation: app-toast-out .16s ease-in both; }
+@media (prefers-reduced-motion: reduce) {
+  .app-toast-enter, .app-toast-exit { animation-duration: .01ms !important; }
+}
 .Toastify__toast-container.app-notification-center {
   width: min(23rem, calc(100vw - 2rem));
   right: 1.25rem;

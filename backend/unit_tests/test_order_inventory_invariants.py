@@ -156,13 +156,14 @@ async def test_receipt_retry_returns_original_movement(database):
 
 @pytest.mark.asyncio
 async def test_stock_receipt_adds_existing_quantity_atomically_without_pricing(database):
-    user_id, warehouse_id, first_id, second_id, supplier_id = [uuid4() for _ in range(5)]
+    user_id, warehouse_id, first_id, second_id, supplier_id, bundle_id = [uuid4() for _ in range(6)]
     async with database() as db:
         user = User(id=user_id, role=RoleEnum.INVENTORY_CONTROLLER)
         db.add_all([
             user, Warehouse(id=warehouse_id, name="Main"), Supplier(id=supplier_id, name="Supplier"),
             Product(id=first_id, sku="RCV-A", name_en="Pen", name_ar="قلم", base_unit="Piece", cost=Decimal("7")),
             Product(id=second_id, sku="RCV-B", name_en="Notebook", name_ar="دفتر", base_unit="Piece", cost=Decimal("9")),
+            Product(id=bundle_id, sku="RCV-OFFER", name_en="Offer", name_ar="عرض", base_unit="Piece", is_bundle=True),
         ])
         await db.flush()
         db.add(InventoryBalance(product_id=first_id, warehouse_id=warehouse_id, current_stock=5))
@@ -178,6 +179,12 @@ async def test_stock_receipt_adds_existing_quantity_atomically_without_pricing(d
             ), db, user)
         assert missing.value.status_code == 404
         assert (await db.execute(select(InventoryBalance.current_stock))).scalar_one() == Decimal("5")
+        with pytest.raises(HTTPException) as virtual:
+            await create_stock_receipt(StockReceiptCreate(
+                request_id=uuid4(), supplier_id=supplier_id, warehouse_id=warehouse_id,
+                lines=[{"product_id": bundle_id, "quantity": "1"}],
+            ), db, user)
+        assert virtual.value.status_code == 404
         document = await create_stock_receipt(first, db, user)
         assert len(document["lines"]) == 2
         assert len((await get_stock_receipt(first.request_id, db, user))["lines"]) == 2
@@ -204,19 +211,39 @@ async def test_stock_receipt_adds_existing_quantity_atomically_without_pricing(d
 
 @pytest.mark.asyncio
 async def test_stock_receipt_rejects_cashier_role(database):
+    controller_id, cashier_id, supplier_id, warehouse_id, product_id = [uuid4() for _ in range(5)]
+    async with database() as db:
+        db.add_all([
+            User(id=controller_id, role=RoleEnum.INVENTORY_CONTROLLER),
+            User(id=cashier_id, role=RoleEnum.CASHIER_ORDERS),
+            Supplier(id=supplier_id, name="Supplier"),
+            Warehouse(id=warehouse_id, name="Main"),
+            Product(id=product_id, sku="RCV-HTTP", name_en="Book", name_ar="كتاب", base_unit="Piece", cost=5),
+        ])
+        await db.commit()
+
     async def isolated_db():
         async with database() as db:
             yield db
 
     app.dependency_overrides[get_db] = isolated_db
-    app.dependency_overrides[get_current_user] = lambda: User(id=uuid4(), role=RoleEnum.CASHIER_ORDERS)
+    app.dependency_overrides[get_current_user] = lambda: User(id=cashier_id, role=RoleEnum.CASHIER_ORDERS)
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            response = await client.post("/api/v1/inventory/receipts", json={
-                "request_id": str(uuid4()), "supplier_id": str(uuid4()), "warehouse_id": str(uuid4()),
-                "lines": [{"product_id": str(uuid4()), "quantity": "1"}],
-            })
+            payload = {
+                "request_id": str(uuid4()), "supplier_id": str(supplier_id), "warehouse_id": str(warehouse_id),
+                "lines": [{"product_id": str(product_id), "quantity": "2"}],
+            }
+            response = await client.post("/api/v1/inventory/receipts", json=payload)
             assert response.status_code == 403
+            app.dependency_overrides[get_current_user] = lambda: User(id=controller_id, role=RoleEnum.INVENTORY_CONTROLLER)
+            saved = await client.post("/api/v1/inventory/receipts", json=payload)
+            assert saved.status_code == 201, saved.text
+            assert Decimal(str(saved.json()["lines"][0]["quantity"])) == Decimal("2")
+            fetched = await client.get(f"/api/v1/inventory/receipts/{payload['request_id']}")
+            assert fetched.status_code == 200 and fetched.json()["id"] == payload["request_id"]
+            app.dependency_overrides.pop(get_current_user, None)
+            assert (await client.get(f"/api/v1/inventory/receipts/{payload['request_id']}")).status_code == 401
     finally:
         app.dependency_overrides.pop(get_db, None)
         app.dependency_overrides.pop(get_current_user, None)

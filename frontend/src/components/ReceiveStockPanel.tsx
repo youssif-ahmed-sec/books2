@@ -6,12 +6,12 @@ import { sendLocalPrint } from "@/lib/localPrint";
 import { ProductSelect } from "@/components/ProductSelect";
 
 type Choice = { id: string; name?: string };
-type Product = { id: string; name_ar: string; sku: string; barcode?: string; base_unit: string; units?: Array<{ barcode?: string }> };
+type Product = { id: string; name_ar: string; sku: string; barcode?: string; base_unit: string; is_bundle?: boolean; units?: Array<{ barcode?: string }> };
 type Line = { product: Product; quantity: string };
 type Receipt = {
   id: string; created_at: string; supplier_name: string; warehouse_name: string;
   supplier_document?: string | null;
-  lines: Array<{ product_id: string; product_name: string; unit_name: string; quantity: string }>;
+  lines: Array<{ product_id: string; product_name: string; unit_name: string; quantity: number }>;
 };
 
 export default function ReceiveStockPanel({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
@@ -59,8 +59,8 @@ export default function ReceiveStockPanel({ onClose, onSaved }: { onClose: () =>
     const term = search.trim();
     if (!term) return;
     try {
-      const result = await fetchApi(`/products?search=${encodeURIComponent(term)}&limit=20`);
-      const found: Product[] = result.data || [];
+      const result = await fetchApi(`/products?is_bundle=false&search=${encodeURIComponent(term)}&limit=20`);
+      const found: Product[] = (result.data || []).filter((product: Product) => !product.is_bundle);
       const exact = found.filter(product => [product.sku, product.barcode, product.name_ar, ...(product.units || []).map(unit => unit.barcode)]
         .some(value => value?.toLocaleLowerCase() === term.toLocaleLowerCase()));
       if (exact.length === 1) return addProduct(exact[0]);
@@ -123,8 +123,8 @@ export default function ReceiveStockPanel({ onClose, onSaved }: { onClose: () =>
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" dir="rtl">
-      <div className="app-panel w-full max-w-3xl max-h-[90vh] overflow-y-auto p-5 sm:p-7 space-y-5">
+    <div className="motion-overlay fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" dir="rtl">
+      <div className="motion-dialog app-panel w-full max-w-3xl max-h-[90vh] overflow-y-auto p-5 sm:p-7 space-y-5">
         <div className="flex items-center justify-between gap-3">
           <div><h2 className="text-xl font-bold">{receipt ? "فاتورة استلام المخزون" : "استلام مخزون"}</h2>
             <p className="app-muted text-sm">{receipt ? `رقم ${receipt.id}` : "الاستلام يزيد الكمية فقط. تعديل الأسعار من صفحة المنتج."}</p></div>

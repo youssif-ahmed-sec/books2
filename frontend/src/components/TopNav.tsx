@@ -4,9 +4,9 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { fetchApi } from "@/lib/api";
-import { getCurrentUser } from "@/lib/currentUser";
+import { cachedCurrentUser, getCurrentUser } from "@/lib/currentUser";
 import ThemeToggle from "@/components/ThemeToggle";
-import { warehouseOnlyMode } from "@/lib/warehouseMode";
+import NotificationBell from "@/components/NotificationBell";
 
 interface TopNavProps { title: string }
 interface SearchProduct { id: string; name_ar: string; sku: string }
@@ -22,25 +22,19 @@ const roleLabels: Record<string, string> = {
 
 export default function TopNav({ title }: TopNavProps) {
   const router = useRouter();
-  const [user, setUser] = useState<CurrentUser | null>(null);
+  const [user, setUser] = useState<CurrentUser | null>(() => cachedCurrentUser());
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchProduct[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState(false);
-  const [hasOrderUpdates, setHasOrderUpdates] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
   const accountRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     getCurrentUser().then((currentUser: CurrentUser) => {
       setUser(currentUser);
-      if (!warehouseOnlyMode && (currentUser.role === "ADMIN" || currentUser.role === "CASHIER_ORDERS")) {
-        fetchApi("/dashboards/operational")
-          .then((summary: { new_leads: number; active_orders: number }) => setHasOrderUpdates(summary.new_leads + summary.active_orders > 0))
-          .catch(() => {});
-      }
     }).catch(() => {});
     const closeOutside = (event: MouseEvent) => {
       if (!searchRef.current?.contains(event.target as Node)) setSearchOpen(false);
@@ -101,12 +95,7 @@ export default function TopNav({ title }: TopNavProps) {
       </div>
       <div className="app-top-spacer flex-1" aria-hidden="true" />
       <div className="flex shrink-0 items-center gap-3">
-        {!warehouseOnlyMode && (user?.role === "ADMIN" || user?.role === "CASHIER_ORDERS") && (
-          <Link href="/inbox" aria-label="متابعة الطلبات والإشعارات" title="متابعة الطلبات" className="app-icon-button relative">
-            <span className="material-symbols-outlined">notifications</span>
-            {hasOrderUpdates && <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-primary" aria-hidden="true" />}
-          </Link>
-        )}
+        <NotificationBell />
         <div className="relative" ref={accountRef}>
           <button type="button" aria-label="الحساب" aria-expanded={accountOpen} onClick={() => setAccountOpen(!accountOpen)} className="app-icon-button app-account-button">
             <span className="material-symbols-outlined">account_circle</span>

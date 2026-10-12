@@ -11,9 +11,10 @@ from core.idempotency import request_fingerprint
 from database import get_db
 from models.inventory import InventoryBalance, InventoryCount, InventoryTransaction, TransactionTypeEnum, Warehouse
 from models.product import Product
-from models.user import AuditLog, User
+from models.user import AuditLog, RoleEnum, User
 from schemas.inventory import InventoryCountCreate, InventoryCountResponse, InventoryTransferCreate
 from services.inventory_service import InventoryService
+from services.notification_service import notify_low_stock_crossing, notify_roles
 
 router = APIRouter(prefix="/inventory", tags=["Inventory"])
 
@@ -91,7 +92,7 @@ async def count_stock(
         ):
             raise HTTPException(status_code=409, detail="Request ID was already used for a different count")
         return prior
-    product = (await db.execute(select(Product.id).where(Product.id == payload.product_id, Product.is_deleted == False).with_for_update())).scalar_one_or_none()
+    product = (await db.execute(select(Product).where(Product.id == payload.product_id, Product.is_deleted == False).with_for_update())).scalar_one_or_none()
     if product is None:
         raise HTTPException(status_code=404, detail="Product not found")
     warehouse = (await db.execute(select(Warehouse).where(
@@ -123,6 +124,10 @@ async def count_stock(
         )
     db.add(AuditLog(user_id=user.id, action="COUNT_STOCK", entity_type="Product", entity_id=str(payload.product_id),
                     old_value={"expected": str(expected)}, new_value={"observed": str(payload.observed_quantity)}))
+    if difference:
+        await notify_roles(db, (RoleEnum.ADMIN,), kind="count_difference", title="فرق جرد يحتاج مراجعة",
+                           message=f"{product.name_ar} · الفرق {difference:+}", href="/stock-operations")
+        await notify_low_stock_crossing(db, product, expected, payload.observed_quantity)
     try:
         await db.commit()
     except IntegrityError:

@@ -9,8 +9,6 @@ import { marginFromPrice, pricesFromMargins, type PriceMargins, type TierPrices 
 import { z } from "zod";
 import UnitBarcodeField from "@/components/UnitBarcodeField";
 import { ProductSelect } from "@/components/ProductSelect";
-import BundleEditor from "@/components/BundleEditor";
-import { offerComponentPayload, type OfferComponentDraft, type OfferPriceLevel, type OfferProduct } from "@/lib/bundles";
 
 const unitSchema = z.object({
   id: z.string(),
@@ -75,7 +73,6 @@ interface SavedUnit {
   barcode?: string | null;
   prices?: SavedPrice[];
 }
-interface SavedBundleComponent { id: string; component_id: string; quantity: number; unit_id?: string | null; price_level?: OfferPriceLevel | null }
 
 interface EditProductPanelProps {
   productId: string;
@@ -130,8 +127,6 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
     }));
   };
 
-  const [bundleComponents, setBundleComponents] = useState<OfferComponentDraft[]>([]);
-  const [productsList, setProductsList] = useState<OfferProduct[]>([]);
 
   const [globalUnits, setGlobalUnits] = useState<GlobalUnit[]>([]);
   const [showNewUnitDialog, setShowNewUnitDialog] = useState(false);
@@ -148,9 +143,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
     async function loadProduct() {
       try {
         setIsLoading(true);
-        const [data, catalog] = await Promise.all([fetchApi(`/products/${productId}`), fetchApi("/products?limit=1000")]);
-        const offerProducts: OfferProduct[] = catalog.data || [];
-        setProductsList(offerProducts);
+        const data = await fetchApi(`/products/${productId}`);
         const basePrices: SavedPrice[] = data.units?.find((unit: SavedUnit) => unit.unit_name === data.base_unit)?.prices || [];
         const baseRetail = Number(basePrices.find(price => price.price_level === "Retail")?.price || 0);
         const baseTier = (level: string) => Number(basePrices.find(price => price.price_level === level)?.price ?? baseRetail);
@@ -191,7 +184,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
           ),
           minStockLevel: data.min_stock_level?.toString() || "0",
           maxStockLevel: data.max_stock_level?.toString() || "0",
-          is_bundle: data.is_bundle || false,
+          is_bundle: false,
         });
         
         if (data.units && data.units.length > 0) {
@@ -219,19 +212,6 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
           setUnits(loadedUnits);
         }
 
-        if (data.is_bundle && data.bundle_components) {
-          setBundleComponents(data.bundle_components.map((c: SavedBundleComponent) => ({
-            id: c.id || Date.now().toString() + Math.random(),
-            component_id: c.component_id,
-            unit_id: c.unit_id || offerProducts.find(p => p.id === c.component_id)?.units.find(u => u.conversion_factor === 1)?.id || "",
-            price_level: c.price_level || "Retail",
-            quantity: c.quantity / (offerProducts.find(p => p.id === c.component_id)?.units.find(u => u.id === c.unit_id)?.conversion_factor || 1),
-          })));
-        } else {
-          setBundleComponents([]);
-        }
-        setForm(prev => ({ ...prev, is_bundle: data.is_bundle || false }));
-
         setIsLoading(false);
       } catch (err) {
         console.error("Failed to load product", err);
@@ -253,18 +233,16 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
     }
     async function loadDropdowns() {
       try {
-        const [cats, subcats, brnds, supps, prods] = await Promise.all([
+        const [cats, subcats, brnds, supps] = await Promise.all([
           fetchApi("/products/categories"),
           fetchApi("/products/subcategories"),
           fetchApi("/products/brands"),
           fetchApi("/products/suppliers"),
-          fetchApi("/products?limit=1000")
         ]);
         setCategoriesList(cats);
         setSubcategoriesList(subcats);
         setBrandsList(brnds);
         setSuppliersList(supps);
-        setProductsList(prods.data || []);
       } catch (err) {
         console.error("Failed to load dropdowns:", err);
       }
@@ -418,7 +396,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
         image_url: form.imageUrl,
         warehouse_location: form.warehouseLocation,
         is_active: form.active,
-        is_bundle: form.is_bundle,
+        is_bundle: false,
         category_id: form.category_id && form.category_id !== "" ? form.category_id : null,
         subcategory_id: form.subCategory_id && form.subCategory_id !== "" ? form.subCategory_id : null,
         brand_id: form.brand_id && form.brand_id !== "" ? form.brand_id : null,
@@ -436,7 +414,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
             { price_level: "VIP", price_type: "vip", price: parseFloat(u.vipPrice) || 0 },
           ]
         })),
-        bundle_components: form.is_bundle ? offerComponentPayload(bundleComponents, productsList) : [],
+        bundle_components: [],
       };
 
       await fetchApi(`/products/${productId}`, {
@@ -459,7 +437,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
     <>
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[60]"
+        className="motion-overlay fixed inset-0 bg-black/70 backdrop-blur-sm z-[60]"
         onClick={onClose}
       />
 
@@ -773,7 +751,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
                           onChange={value => updateUnit(unit.id, "sku", value)} />
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="text-xs text-[#e2bfb0]">{form.is_bundle ? "يُخصم من مكونات العرض" : unit.isBase ? `${totalBaseStock} ${unit.name}` : "يُعرض الرصيد بالوحدة الأساسية"}</span>
+                        <span className="text-xs text-[#e2bfb0]">{unit.isBase ? `${totalBaseStock} ${unit.name}` : "يُعرض الرصيد بالوحدة الأساسية"}</span>
                       </td>
                       <td className="px-6 py-4 text-center whitespace-nowrap">
                         {unit.isBase ? (
@@ -794,7 +772,6 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
             </div>
           </section>
 
-          <BundleEditor enabled={form.is_bundle} onEnabledChange={enabled => setForm(prev => ({ ...prev, is_bundle: enabled }))} components={bundleComponents} onComponentsChange={setBundleComponents} products={productsList} productId={productId} />
           {/* Section 3: Pricing */}
           <section className="space-y-8 pt-8 border-t border-white/5 pb-12">
             <div className="flex items-center gap-4">
@@ -997,8 +974,8 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
 
       {/* New Unit Dialog */}
       {showNewUnitDialog && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
-          <div className="bg-[#1c1b1b] rounded-3xl border border-white/10 p-8 w-full max-w-md shadow-2xl">
+        <div className="motion-overlay fixed inset-0 bg-black/80 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
+          <div className="motion-dialog bg-[#1c1b1b] rounded-3xl border border-white/10 p-8 w-full max-w-md shadow-2xl">
             <h3 className="text-2xl font-bold mb-6">إضافة وحدة جديدة بالكامل</h3>
             <div className="space-y-4">
               <div>

@@ -6,6 +6,8 @@ import TopNav from "@/components/TopNav";
 import { fetchApi } from "@/lib/api";
 import { roleHome } from "@/lib/roleHome";
 import { orderSourceLabels, orderStatusLabels } from "@/lib/orderLabels";
+import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
+import { cachedCurrentUser } from "@/lib/currentUser";
 
 interface SalesReport {
   metrics: { total_revenue: number; completed_orders: number; total_orders: number };
@@ -27,16 +29,25 @@ interface FinancialSummary {
   customer_debt: number; profit_incomplete: boolean;
 }
 
+type ReportSnapshot = {
+  activeTab: "sales" | "inventory"; startDate: string; endDate: string;
+  salesData: SalesReport | null; financialData: FinancialSummary | null;
+  inventoryData: InventoryReportRow[];
+};
+
 export default function ReportsPage() {
-  const [role, setRole] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"sales" | "inventory">("sales");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+  const [role, setRole] = useState<string | null>(() => {
+    const value = cachedCurrentUser()?.role;
+    return value && ["ADMIN", "SENIOR_SALES", "INVENTORY_CONTROLLER"].includes(value) ? value : null;
+  });
+  const [activeTab, setActiveTab] = useState<"sales" | "inventory">(() => readSectionSnapshot<ReportSnapshot>("reports")?.activeTab || "sales");
+  const [startDate, setStartDate] = useState(() => readSectionSnapshot<ReportSnapshot>("reports")?.startDate || "");
+  const [endDate, setEndDate] = useState(() => readSectionSnapshot<ReportSnapshot>("reports")?.endDate || "");
   
-  const [salesData, setSalesData] = useState<SalesReport | null>(null);
-  const [financialData, setFinancialData] = useState<FinancialSummary | null>(null);
-  const [inventoryData, setInventoryData] = useState<InventoryReportRow[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [salesData, setSalesData] = useState<SalesReport | null>(() => readSectionSnapshot<ReportSnapshot>("reports")?.salesData || null);
+  const [financialData, setFinancialData] = useState<FinancialSummary | null>(() => readSectionSnapshot<ReportSnapshot>("reports")?.financialData || null);
+  const [inventoryData, setInventoryData] = useState<InventoryReportRow[]>(() => readSectionSnapshot<ReportSnapshot>("reports")?.inventoryData || []);
+  const [isLoading, setIsLoading] = useState(() => !readSectionSnapshot("reports"));
 
   useEffect(() => {
     fetchApi("/auth/me").then(user => {
@@ -64,13 +75,28 @@ export default function ReportsPage() {
     fetchApi(`${endpoint}?${queryParams.toString()}`)
       .then(res => {
         if (!active) return;
+        const previous = readSectionSnapshot<ReportSnapshot>("reports");
+        const matching = previous?.activeTab === activeTab && previous.startDate === startDate && previous.endDate === endDate;
         if (activeTab === "sales") setSalesData(res);
         else setInventoryData(res);
+        writeSectionSnapshot<ReportSnapshot>("reports", {
+          activeTab, startDate, endDate,
+          salesData: activeTab === "sales" ? res : matching ? previous?.salesData || null : null,
+          financialData: matching ? previous?.financialData || null : null,
+          inventoryData: activeTab === "inventory" ? res : matching ? previous?.inventoryData || [] : [],
+        });
       })
       .catch(console.error)
       .finally(() => { if (active) setIsLoading(false); });
     if (activeTab === "sales" && role === "ADMIN") {
-      fetchApi(`/reports/financial-summary?${queryParams.toString()}`).then(data => { if (active) setFinancialData(data); }).catch(console.error);
+      fetchApi(`/reports/financial-summary?${queryParams.toString()}`).then(data => {
+        if (!active) return;
+        setFinancialData(data);
+        const previous = readSectionSnapshot<ReportSnapshot>("reports");
+        if (previous?.activeTab === activeTab && previous.startDate === startDate && previous.endDate === endDate) {
+          writeSectionSnapshot("reports", { ...previous, financialData: data });
+        }
+      }).catch(console.error);
     }
     return () => { active = false; };
   }, [role, activeTab, startDate, endDate]);
@@ -94,7 +120,7 @@ export default function ReportsPage() {
                 <input 
                   type="date" 
                   value={startDate}
-                  onChange={(e) => { setStartDate(e.target.value); setIsLoading(true); }}
+                  onChange={(e) => { setStartDate(e.target.value); setFinancialData(null); setIsLoading(true); }}
                   className="app-field text-sm"
                 />
               </div>
@@ -103,7 +129,7 @@ export default function ReportsPage() {
                 <input 
                   type="date" 
                   value={endDate}
-                  onChange={(e) => { setEndDate(e.target.value); setIsLoading(true); }}
+                  onChange={(e) => { setEndDate(e.target.value); setFinancialData(null); setIsLoading(true); }}
                   className="app-field text-sm"
                 />
               </div>
@@ -112,7 +138,7 @@ export default function ReportsPage() {
 
           <div className="flex gap-4 border-b border-white/10">
             {role !== "INVENTORY_CONTROLLER" && <button
-              onClick={() => { setActiveTab("sales"); setIsLoading(true); }}
+              onClick={() => { setActiveTab("sales"); setFinancialData(null); setIsLoading(true); }}
               className={`pb-4 px-2 text-sm font-medium transition-colors border-b-2 ${
                 activeTab === "sales"
                   ? "border-primary text-primary"

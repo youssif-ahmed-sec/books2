@@ -4,17 +4,18 @@ import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
 import { fetchApi } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
+import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
 
 type Item = { id: string; product_id: string; product_name?: string; quantity_requested: number };
 type Order = { id: string; items: Item[]; notes: string | null; created_at: string };
 
 export default function PreparationPage() {
-  const [orders, setOrders] = useState<Order[]>([]);
+  const [orders, setOrders] = useState<Order[]>(() => readSectionSnapshot<Order[]>("preparation-orders") || []);
   const [picked, setPicked] = useState<Record<string, number>>({});
   const [packed, setPacked] = useState<Record<string, boolean>>({});
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
-  const load = () => fetchApi("/orders/assigned").then(setOrders).catch(error => setMessage(errorMessage(error, "تعذر تحميل الطلبات")));
+  const load = () => fetchApi("/orders/assigned").then((rows: Order[]) => { setOrders(rows); writeSectionSnapshot("preparation-orders", rows); }).catch(error => setMessage(errorMessage(error, "تعذر تحميل الطلبات")));
   useEffect(() => { load(); }, []);
 
   const complete = async (order: Order) => {

@@ -1,4 +1,5 @@
 import { fetchApi } from "@/lib/api";
+import { playUiSound } from "@/lib/uiSounds";
 
 export type LocalPrintType = "customer" | "barcode" | "invoice" | "stock_receipt";
 
@@ -24,9 +25,11 @@ export async function sendLocalPrint(order: Record<string, unknown>, receiptType
       body: JSON.stringify({ order, receipt_type: receiptType }),
     });
   } catch {
+    playUiSound("printSubmissionFailure");
     throw new Error("تعذر الاتصال بتطبيق الطباعة المحلي. تأكد أنه يعمل على هذا الجهاز.");
   }
   if (!response.ok) {
+    playUiSound("printSubmissionFailure");
     if (response.status === 409) throw new Error("اختر طابعة داخل تطبيق الطباعة المحلي أولًا.");
     throw new Error(`رفض تطبيق الطباعة المهمة (${response.status}).`);
   }

@@ -11,6 +11,7 @@ import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
 import { ProductSelect } from "@/components/ProductSelect";
 import { fetchApi } from "@/lib/api";
+import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
 import { errorMessage } from "@/lib/errors";
 import { useHydrated } from "@/lib/useHydrated";
 
@@ -73,8 +74,8 @@ function CategoryModal({
   if (!mounted) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" dir="rtl">
-      <div className="bg-[#1c1b1b] border border-white/10 rounded-3xl p-8 max-w-md w-full relative">
+    <div className="motion-overlay fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" dir="rtl">
+      <div className="motion-dialog bg-[#1c1b1b] border border-white/10 rounded-3xl p-8 max-w-md w-full relative">
         <button onClick={onClose} className="absolute top-4 left-4 text-[#e2bfb0]/40 hover:text-white">
           <span className="material-symbols-outlined">close</span>
         </button>
@@ -139,8 +140,8 @@ function SubcategoryModal({
   if (!mounted) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" dir="rtl">
-      <div className="bg-[#1c1b1b] border border-white/10 rounded-3xl p-8 max-w-md w-full relative">
+    <div className="motion-overlay fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" dir="rtl">
+      <div className="motion-dialog bg-[#1c1b1b] border border-white/10 rounded-3xl p-8 max-w-md w-full relative">
         <button onClick={onClose} className="absolute top-4 left-4 text-[#e2bfb0]/40 hover:text-white">
           <span className="material-symbols-outlined">close</span>
         </button>
@@ -180,9 +181,9 @@ function SubcategoryModal({
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function CategoriesPage() {
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [subcategories, setSubcategories] = useState<Subcategory[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [categories, setCategories] = useState<Category[]>(() => readSectionSnapshot<{ categories: Category[] }>("categories")?.categories || []);
+  const [subcategories, setSubcategories] = useState<Subcategory[]>(() => readSectionSnapshot<{ subcategories: Subcategory[] }>("categories")?.subcategories || []);
+  const [loading, setLoading] = useState(() => !readSectionSnapshot("categories"));
   const [expandedCats, setExpandedCats] = useState<Set<string>>(new Set());
 
   // Modal state
@@ -190,7 +191,7 @@ export default function CategoriesPage() {
   const [subModal, setSubModal] = useState<{ mode: "add" | "edit"; existing?: Subcategory; defaultCatId?: string } | null>(null);
 
   const loadAll = async () => {
-    setLoading(true);
+    if (!readSectionSnapshot("categories")) setLoading(true);
     try {
       const [cats, subs] = await Promise.all([
         fetchApi("/products/categories"),
@@ -198,6 +199,7 @@ export default function CategoriesPage() {
       ]);
       setCategories(cats);
       setSubcategories(subs);
+      writeSectionSnapshot("categories", { categories: cats, subcategories: subs });
       // Auto-expand all categories
       setExpandedCats(new Set(cats.map((c: Category) => c.id)));
     } catch (error) {
@@ -210,6 +212,7 @@ export default function CategoriesPage() {
       .then(([cats, subs]) => {
         setCategories(cats);
         setSubcategories(subs);
+        writeSectionSnapshot("categories", { categories: cats, subcategories: subs });
         setExpandedCats(new Set(cats.map((c: Category) => c.id)));
       })
       .catch(console.error)

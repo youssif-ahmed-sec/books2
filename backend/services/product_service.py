@@ -321,12 +321,12 @@ class ProductService:
 
 
     @staticmethod
-    async def delete_product(db: AsyncSession, product_id: uuid.UUID, user_id: uuid.UUID) -> bool:
+    async def delete_product(db: AsyncSession, product_id: uuid.UUID, user_id: uuid.UUID, *, require_bundle: bool = False) -> bool:
         query = select(Product).where(Product.id == product_id, Product.is_deleted == False).with_for_update()
         result = await db.execute(query)
         product = result.scalar_one_or_none()
         
-        if not product:
+        if not product or (require_bundle and not product.is_bundle):
             return False
 
         stock = (await db.execute(select(func.coalesce(func.sum(InventoryBalance.current_stock), 0)).where(

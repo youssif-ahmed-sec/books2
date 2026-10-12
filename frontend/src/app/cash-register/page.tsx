@@ -5,12 +5,13 @@ import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
 import { fetchApi } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
+import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
 
 type Shift = { id: string; status: string; opening_cash: number; expected_cash: number; closing_cash: number | null; difference: number | null; opened_at: string; closed_at: string | null };
 
 export default function CashRegisterPage() {
-  const [current, setCurrent] = useState<Shift | null>(null);
-  const [history, setHistory] = useState<Shift[]>([]);
+  const [current, setCurrent] = useState<Shift | null>(() => readSectionSnapshot<{ current: Shift | null }>("cash-register")?.current || null);
+  const [history, setHistory] = useState<Shift[]>(() => readSectionSnapshot<{ history: Shift[] }>("cash-register")?.history || []);
   const [opening, setOpening] = useState(0);
   const [counted, setCounted] = useState(0);
   const [adjustment, setAdjustment] = useState(0);
@@ -22,8 +23,9 @@ export default function CashRegisterPage() {
   const reload = async () => {
     const [shift, shifts] = await Promise.all([fetchApi("/cash-register/current"), fetchApi("/cash-register/history")]);
     setCurrent(shift); setHistory(shifts);
+    writeSectionSnapshot("cash-register", { current: shift, history: shifts });
   };
-  useEffect(() => { reload().catch(error => setMessage(errorMessage(error, "تعذر تحميل بيانات الصندوق"))); }, []);
+  useEffect(() => { const timer = window.setTimeout(() => { void reload().catch(error => setMessage(errorMessage(error, "تعذر تحميل بيانات الصندوق"))); }, 0); return () => window.clearTimeout(timer); }, []);
 
   async function act(path: string, payload: object) {
     setBusy(true); setMessage("");

@@ -101,7 +101,6 @@ export function ProductSelect({ label, value, options, placeholder, onChange, in
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
-        aria-invalid={invalid || undefined}
         className={`product-select-trigger${compact ? " product-select-trigger--compact" : ""}${filter ? " product-select-trigger--filter" : ""}${invalid ? " product-select-trigger--invalid" : ""}`}
         onClick={() => open ? setOpen(false) : showMenu()}
         onKeyDown={event => {

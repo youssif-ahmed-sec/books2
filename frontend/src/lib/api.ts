@@ -1,13 +1,16 @@
 import { notifyError, notifyOffline } from "@/lib/notifications";
+import { clearSectionSnapshots } from "@/lib/sectionSnapshot";
 
 export const API_BASE_URL = "/api/v1";
 
 interface FetchOptions extends RequestInit {
   requireAuth?: boolean;
+  invalidateSnapshots?: boolean;
+  silentErrors?: boolean;
 }
 
 export async function fetchApi(endpoint: string, options: FetchOptions = {}) {
-  const { requireAuth = true, headers = {}, ...rest } = options;
+  const { requireAuth = true, invalidateSnapshots = true, silentErrors = false, headers = {}, ...rest } = options;
 
   const requestHeaders = new Headers(headers);
   requestHeaders.set("Content-Type", "application/json");
@@ -35,19 +38,20 @@ export async function fetchApi(endpoint: string, options: FetchOptions = {}) {
     });
   } catch (cause) {
     if (typeof navigator !== "undefined" && !navigator.onLine) {
-      notifyOffline();
+      if (!silentErrors) notifyOffline();
       throw new Error("انقطع الاتصال بالإنترنت. حاول مرة أخرى بعد عودة الاتصال.", { cause });
     }
     const message = "تعذر الاتصال بالخادم. حاول مرة أخرى بعد قليل.";
-    notifyError(message);
+    if (!silentErrors) notifyError(message);
     throw new Error(message, { cause });
   }
 
   if (!response.ok) {
-    if (response.status >= 500) notifyError("حدث خطأ بالخادم. حاول مرة أخرى بعد قليل.");
+    if (!silentErrors && response.status >= 500) notifyError("حدث خطأ بالخادم. حاول مرة أخرى بعد قليل.");
     if (response.status === 401 && requireAuth) {
       if (typeof window !== "undefined") {
         localStorage.removeItem("access_token");
+        clearSectionSnapshots();
         window.location.href = "/login";
       }
     }
@@ -62,6 +66,8 @@ export async function fetchApi(endpoint: string, options: FetchOptions = {}) {
     throw new Error(errorMessage);
   }
 
+  if (invalidateSnapshots && (rest.method || "GET").toUpperCase() !== "GET") clearSectionSnapshots();
+
   // Handle 204 No Content
   if (response.status === 204) {
     return null;
@@ -71,7 +77,7 @@ export async function fetchApi(endpoint: string, options: FetchOptions = {}) {
     return await response.json();
   } catch (cause) {
     const message = "تعذر قراءة رد الخادم. حاول مرة أخرى بعد قليل.";
-    notifyError(message);
+    if (!silentErrors) notifyError(message);
     throw new Error(message, { cause });
   }
 }

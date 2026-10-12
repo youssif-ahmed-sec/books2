@@ -9,7 +9,7 @@ import { getUserRole, type UserRole } from "@/utils/auth";
 export default function PausedPage() {
   const router = useRouter();
   const [role, setRole] = useState<UserRole | null>(null);
-  useEffect(() => setRole(getUserRole()), []);
+  useEffect(() => { const timer = window.setTimeout(() => setRole(getUserRole()), 0); return () => window.clearTimeout(timer); }, []);
   const logout = () => {
     fetchApi("/auth/logout", { method: "POST" }).catch(() => {});
     localStorage.removeItem("access_token");

@@ -1,9 +1,15 @@
 "use client";
 
 import { useEffect } from "react";
-import { ToastContainer, toast } from "react-toastify";
+import { cssTransition, ToastContainer, toast } from "react-toastify";
 import { notifyError, notifyOffline, notifySuccess, offlineToastId } from "@/lib/notifications";
 import "react-toastify/dist/ReactToastify.css";
+
+const quietToastMotion = cssTransition({
+  enter: "app-toast-enter",
+  exit: "app-toast-exit",
+  collapse: false,
+});
 
 export default function NotificationCenter() {
   useEffect(() => {
@@ -37,6 +43,7 @@ export default function NotificationCenter() {
       newestOnTop
       pauseOnHover
       closeOnClick={false}
+      transition={quietToastMotion}
       className="app-notification-center"
       toastClassName="app-notification"
       progressClassName="app-notification-progress"

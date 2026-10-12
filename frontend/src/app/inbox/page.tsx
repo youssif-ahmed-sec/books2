@@ -8,6 +8,7 @@ import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
 import { orderStatusLabels } from "@/lib/orderLabels";
 import { errorMessage } from "@/lib/errors";
+import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
 
 interface InboxOrder {
   id: string;
@@ -25,8 +26,8 @@ interface InboxOrder {
 const inboxStatuses = ["New Lead", "Draft Order", "Waiting Quotation", "Quotation Sent", "Waiting Customer Approval"];
 
 export default function InboxPage() {
-  const [orders, setOrders] = useState<InboxOrder[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [orders, setOrders] = useState<InboxOrder[]>(() => readSectionSnapshot<InboxOrder[]>("inbox-orders") || []);
+  const [isLoading, setIsLoading] = useState(() => !readSectionSnapshot("inbox-orders"));
   const [customers, setCustomers] = useState<{ id: string; name: string }[]>([]);
   const [leadCustomer, setLeadCustomer] = useState("");
   const [leadSource, setLeadSource] = useState("Phone Call");
@@ -36,7 +37,7 @@ export default function InboxPage() {
   const [delays, setDelays] = useState<{ id: string; hours: number; escalate_to_admin: boolean }[]>([]);
 
   const loadOrders = async () => {
-    setIsLoading(true);
+    if (!readSectionSnapshot("inbox-orders")) setIsLoading(true);
     try {
       const data = await fetchApi("/orders");
       // Filter for inbox-relevant statuses
@@ -44,6 +45,7 @@ export default function InboxPage() {
         inboxStatuses.includes(o.status)
       );
       setOrders(inboxOrders);
+      writeSectionSnapshot("inbox-orders", inboxOrders);
     } catch (err) {
       console.error("Failed to load inbox orders:", err);
     } finally {
@@ -55,7 +57,7 @@ export default function InboxPage() {
     fetchApi("/customers").then(setCustomers).catch(console.error);
     fetchApi("/orders/preparation-alerts").then(setDelays).catch(console.error);
     fetchApi("/orders")
-      .then((data: InboxOrder[]) => setOrders(data.filter((o) => inboxStatuses.includes(o.status))))
+      .then((data: InboxOrder[]) => { const rows = data.filter((o) => inboxStatuses.includes(o.status)); setOrders(rows); writeSectionSnapshot("inbox-orders", rows); })
       .catch((err) => console.error("Failed to load inbox orders:", err))
       .finally(() => setIsLoading(false));
   }, []);

@@ -6,6 +6,7 @@ import TopNav from "@/components/TopNav";
 import { fetchApi } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
 import { getUserRole } from "@/utils/auth";
+import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
 
 type Order = { id: string; status: string; total_amount: number; customer_id: string | null };
 type EligibleItem = { order_item_id: string; product_name: string; remaining_quantity: number; unit_price: number };
@@ -14,7 +15,7 @@ type Product = { id: string; name_ar: string; units: { id: string; unit_name: st
 type ReturnRecord = { id: string; kind: string; refund_amount: number; charge_amount: number; payment_method: string; created_at: string };
 
 export default function ReturnsPage() {
-  const [orders, setOrders] = useState<Order[]>([]);
+  const [orders, setOrders] = useState<Order[]>(() => readSectionSnapshot<Order[]>("returnable-orders") || []);
   const [orderId, setOrderId] = useState("");
   const [eligibility, setEligibility] = useState<Eligibility | null>(null);
   const [quantities, setQuantities] = useState<Record<string, number>>({});
@@ -27,19 +28,20 @@ export default function ReturnsPage() {
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    fetchApi("/orders").then((data: Order[]) => setOrders(data.filter(order => ["Delivered", "Closed"].includes(order.status)))).catch(error => setMessage(errorMessage(error, "تعذر تحميل الفواتير")));
+    fetchApi("/orders").then((data: Order[]) => { const rows = data.filter(order => ["Delivered", "Closed"].includes(order.status)); setOrders(rows); writeSectionSnapshot("returnable-orders", rows); }).catch(error => setMessage(errorMessage(error, "تعذر تحميل الفواتير")));
   }, []);
 
   useEffect(() => {
-    if (!orderId) { setEligibility(null); setHistory([]); return; }
-    setMessage("");
+    if (!orderId) { const timer = window.setTimeout(() => { setEligibility(null); setHistory([]); }, 0); return () => window.clearTimeout(timer); }
+    const messageTimer = window.setTimeout(() => setMessage(""), 0);
     Promise.all([fetchApi(`/returns/eligibility/${orderId}`), fetchApi(`/returns?order_id=${orderId}`)])
       .then(([eligible, records]) => { setEligibility(eligible); setHistory(records); setQuantities({}); })
       .catch(error => { setEligibility(null); setMessage(errorMessage(error, "الفاتورة غير قابلة للإرجاع")); });
+    return () => window.clearTimeout(messageTimer);
   }, [orderId]);
 
   useEffect(() => {
-    if (!search.trim() || kind !== "EXCHANGE") { setProducts([]); return; }
+    if (!search.trim() || kind !== "EXCHANGE") { const timer = window.setTimeout(() => setProducts([]), 0); return () => window.clearTimeout(timer); }
     const timer = setTimeout(() => {
       fetchApi(`/pos/search?q=${encodeURIComponent(search)}`).then(setProducts).catch(() => setProducts([]));
     }, 300);

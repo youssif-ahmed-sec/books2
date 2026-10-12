@@ -11,6 +11,7 @@ import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
 import { getUserRole, type UserRole } from "@/utils/auth";
 import { errorMessage } from "@/lib/errors";
+import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
 
 const customerSchema = z.object({
   name: z.string().min(2, "الاسم مطلوب (أكثر من حرفين)"),
@@ -36,7 +37,7 @@ type CustomerOrder = { id: string; status: string; total_amount: number; created
 
 export default function CustomersPage() {
   const [userRole, setUserRole] = useState<UserRole | null>(null);
-  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>(() => readSectionSnapshot<Customer[]>("customers-list") || []);
   const [isSlideoverOpen, setIsSlideoverOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [paymentCustomer, setPaymentCustomer] = useState<Customer | null>(null);
@@ -68,16 +69,18 @@ export default function CustomersPage() {
     try {
       const data = await fetchApi("/customers");
       setCustomers(data);
+      writeSectionSnapshot("customers-list", data);
     } catch (err) {
       console.error("Failed to load customers:", err);
     }
   };
 
   useEffect(() => {
-    setUserRole(getUserRole());
-    fetchApi("/customers").then(setCustomers).catch((err) => {
+    const timer = window.setTimeout(() => setUserRole(getUserRole()), 0);
+    fetchApi("/customers").then((data: Customer[]) => { setCustomers(data); writeSectionSnapshot("customers-list", data); }).catch((err) => {
       console.error("Failed to load customers:", err);
     });
+    return () => window.clearTimeout(timer);
   }, []);
 
   const openAdd = () => {

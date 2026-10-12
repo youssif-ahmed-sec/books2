@@ -21,7 +21,7 @@ interface InventoryTransaction {
 interface StockReceipt {
   id: string; created_at: string; supplier_name: string; warehouse_name: string;
   supplier_document?: string | null;
-  lines: Array<{ product_id: string; product_name: string; unit_name: string; quantity: string }>;
+  lines: Array<{ product_id: string; product_name: string; unit_name: string; quantity: number }>;
 }
 
 interface MovementRow {
@@ -113,7 +113,7 @@ export default function InventoryMovementsModal({ onClose }: InventoryMovementsM
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" dir="rtl">
+    <div className="motion-overlay fixed inset-0 z-50 flex items-center justify-center" dir="rtl">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-4xl max-h-[85vh] bg-[#1a1918] border border-white/10 rounded-3xl shadow-2xl flex flex-col animate-slide-up">
         
@@ -250,8 +250,8 @@ export default function InventoryMovementsModal({ onClose }: InventoryMovementsM
         </div>
 
       </div>
-      {receipt && <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 p-4" dir="rtl">
-        <div className="app-panel w-full max-w-xl max-h-[85vh] overflow-y-auto p-6 space-y-4">
+      {receipt && <div className="motion-overlay fixed inset-0 z-[60] flex items-center justify-center bg-black/75 p-4" dir="rtl">
+        <div className="motion-dialog app-panel w-full max-w-xl max-h-[85vh] overflow-y-auto p-6 space-y-4">
           <div className="flex justify-between gap-3"><div><h3 className="text-xl font-bold">فاتورة استلام المخزون</h3><p className="app-muted text-xs">{receipt.id}</p></div>
             <button type="button" onClick={() => setReceipt(null)} className="app-muted hover:text-white">إغلاق</button></div>
           <div className="grid gap-2 sm:grid-cols-2 text-sm"><p>المورد: {receipt.supplier_name}</p><p>المخزن: {receipt.warehouse_name}</p>

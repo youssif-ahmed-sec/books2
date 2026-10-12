@@ -5,6 +5,7 @@ import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
 import { ProductSelect } from "@/components/ProductSelect";
 import { fetchApi } from "@/lib/api";
+import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
 import { errorMessage } from "@/lib/errors";
 import { warehouseOnlyMode } from "@/lib/warehouseMode";
 
@@ -14,9 +15,9 @@ type Balance = { product_id: string; warehouse_id: string; current_stock: number
 type Pending = { fingerprint: string; requestId: string };
 
 export default function StockOperationsPage() {
-  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const [warehouses, setWarehouses] = useState<Warehouse[]>(() => readSectionSnapshot<{ warehouses: Warehouse[] }>("stock-operations")?.warehouses || []);
   const [products, setProducts] = useState<Product[]>([]);
-  const [balances, setBalances] = useState<Balance[]>([]);
+  const [balances, setBalances] = useState<Balance[]>(() => readSectionSnapshot<{ balances: Balance[] }>("stock-operations")?.balances || []);
   const [search, setSearch] = useState("");
   const [productId, setProductId] = useState("");
   const [sourceId, setSourceId] = useState("");
@@ -25,7 +26,7 @@ export default function StockOperationsPage() {
   const [observed, setObserved] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [alerts, setAlerts] = useState<{ product_id: string; name: string; stock: number; minimum: number; severity: string }[]>([]);
+  const [alerts, setAlerts] = useState<{ product_id: string; name: string; stock: number; minimum: number; severity: string }[]>(() => readSectionSnapshot<{ alerts: { product_id: string; name: string; stock: number; minimum: number; severity: string }[] }>("stock-operations")?.alerts || []);
   const pendingTransfer = useRef<Pending | null>(null);
   const pendingCount = useRef<Pending | null>(null);
 
@@ -33,14 +34,14 @@ export default function StockOperationsPage() {
 
   useEffect(() => {
     Promise.all([fetchApi("/inventory/warehouses"), fetchApi("/inventory/balances"), fetchApi("/reports/stock-alerts")])
-      .then(([warehouseList, balanceList, lowStock]) => { setWarehouses(warehouseList); setBalances(balanceList); setAlerts(lowStock); })
+      .then(([warehouseList, balanceList, lowStock]) => { setWarehouses(warehouseList); setBalances(balanceList); setAlerts(lowStock); writeSectionSnapshot("stock-operations", { warehouses: warehouseList, balances: balanceList, alerts: lowStock }); })
       .catch(err => setError(errorMessage(err, "فشل تحميل المخزون")));
   }, []);
 
   useEffect(() => {
-    if (!search.trim()) { setProducts([]); return; }
+    if (!search.trim()) { const timer = window.setTimeout(() => setProducts([]), 0); return () => window.clearTimeout(timer); }
     const timer = setTimeout(() => {
-      fetchApi(`/products?search=${encodeURIComponent(search)}&limit=30`)
+      fetchApi(`/products?is_bundle=false&search=${encodeURIComponent(search)}&limit=30`)
         .then(page => setProducts(page.data || []))
         .catch(err => setError(errorMessage(err, "فشل البحث")));
     }, 250);

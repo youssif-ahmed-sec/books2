@@ -10,8 +10,6 @@ import { z } from "zod";
 import { ProductSelect } from "@/components/ProductSelect";
 import UnitBarcodeField from "@/components/UnitBarcodeField";
 import BarcodePrintDialog, { type BarcodePrintUnit } from "@/components/BarcodePrintDialog";
-import BundleEditor from "@/components/BundleEditor";
-import { offerComponentPayload, type OfferComponentDraft, type OfferProduct } from "@/lib/bundles";
 
 const unitSchema = z.object({
   id: z.string(),
@@ -73,12 +71,11 @@ interface SupplierOption { id: string; name: string }
 interface AddProductPanelProps {
   onClose: () => void;
   onSaved: () => void;
-  initialOffer?: boolean;
 }
 
 
 
-export function AddProductPanel({ onClose, onSaved, initialOffer = false }: AddProductPanelProps) {
+export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
   useEffect(() => {
     document.body.classList.add("product-panel-open");
     return () => document.body.classList.remove("product-panel-open");
@@ -106,7 +103,7 @@ export function AddProductPanel({ onClose, onSaved, initialOffer = false }: AddP
     vipMargin: "0",
     minStockLevel: "0",
     maxStockLevel: "0",
-    is_bundle: initialOffer,
+    is_bundle: false,
   });
   
   const [isUploadingImage, setIsUploadingImage] = useState(false);
@@ -122,8 +119,6 @@ export function AddProductPanel({ onClose, onSaved, initialOffer = false }: AddP
     }));
   };
 
-  const [bundleComponents, setBundleComponents] = useState<OfferComponentDraft[]>([]);
-  const [productsList, setProductsList] = useState<OfferProduct[]>([]);
 
   const [globalUnits, setGlobalUnits] = useState<GlobalUnit[]>([]);
   const [showNewUnitDialog, setShowNewUnitDialog] = useState(false);
@@ -145,18 +140,16 @@ export function AddProductPanel({ onClose, onSaved, initialOffer = false }: AddP
     }
     async function loadDropdowns() {
       try {
-        const [cats, subcats, brnds, supps, prods] = await Promise.all([
+        const [cats, subcats, brnds, supps] = await Promise.all([
           fetchApi("/products/categories"),
           fetchApi("/products/subcategories"),
           fetchApi("/products/brands"),
           fetchApi("/products/suppliers"),
-          fetchApi("/products?limit=1000") // for bundle components
         ]);
         setCategoriesList(cats);
         setSubcategoriesList(subcats);
         setBrandsList(brnds);
         setSuppliersList(supps);
-        setProductsList(prods.data || []);
       } catch (err) {
         console.error("Failed to load dropdowns:", err);
       }
@@ -312,7 +305,7 @@ export function AddProductPanel({ onClose, onSaved, initialOffer = false }: AddP
         image_url: form.imageUrl.trim() || null,
         warehouse_location: form.warehouseLocation.trim() || null,
         is_active: form.active,
-        is_bundle: form.is_bundle,
+        is_bundle: false,
         category_id: form.category_id && form.category_id !== "" ? form.category_id : null,
         subcategory_id: form.subCategory_id && form.subCategory_id !== "" ? form.subCategory_id : null,
         brand_id: form.brand_id && form.brand_id !== "" ? form.brand_id : null,
@@ -329,8 +322,8 @@ export function AddProductPanel({ onClose, onSaved, initialOffer = false }: AddP
             { price_level: "VIP", price_type: "vip", price: parseFloat(u.vipPrice) || 0 },
           ]
         })),
-        initial_stock: form.is_bundle ? 0 : units.reduce((acc, unit) => acc + (unit.stock * unit.conversionFactor), 0),
-        bundle_components: form.is_bundle ? offerComponentPayload(bundleComponents, productsList) : []
+        initial_stock: units.reduce((acc, unit) => acc + (unit.stock * unit.conversionFactor), 0),
+        bundle_components: []
       };
 
       const savedProduct = await fetchApi("/products", {
@@ -361,7 +354,7 @@ export function AddProductPanel({ onClose, onSaved, initialOffer = false }: AddP
       {printProduct && <BarcodePrintDialog productName={printProduct.name} units={printProduct.units} onClose={onClose} />}
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[60]"
+        className="motion-overlay fixed inset-0 bg-black/70 backdrop-blur-sm z-[60]"
         onClick={onClose}
       />
 
@@ -693,7 +686,7 @@ export function AddProductPanel({ onClose, onSaved, initialOffer = false }: AddP
                           onChange={value => updateUnit(unit.id, "sku", value)} />
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        {form.is_bundle ? <span className="text-xs text-[#e2bfb0]">يُخصم من مكونات العرض</span> : <div className="flex items-center justify-center gap-3">
+                        <div className="flex items-center justify-center gap-3">
                           <input
                             type="number"
                             value={unit.stock === 0 ? "" : unit.stock}
@@ -706,7 +699,7 @@ export function AddProductPanel({ onClose, onSaved, initialOffer = false }: AddP
                               = {unit.stock * unit.conversionFactor} قطعة
                             </span>
                           )}
-                        </div>}
+                        </div>
                       </td>
                       <td className="px-6 py-4 text-center whitespace-nowrap">
                         {unit.isBase ? (
@@ -727,7 +720,6 @@ export function AddProductPanel({ onClose, onSaved, initialOffer = false }: AddP
             </div>
           </section>
 
-          <BundleEditor enabled={form.is_bundle} onEnabledChange={enabled => setForm(prev => ({ ...prev, is_bundle: enabled }))} components={bundleComponents} onComponentsChange={setBundleComponents} products={productsList} locked={initialOffer} />
           {/* Section 3: Pricing */}
           <section className="space-y-6 pt-6 border-t border-white/5 pb-8">
             <div className="flex items-center gap-4">
@@ -929,8 +921,8 @@ export function AddProductPanel({ onClose, onSaved, initialOffer = false }: AddP
 
       {/* New Unit Dialog */}
       {showNewUnitDialog && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
-          <div className="bg-[#1c1b1b] rounded-3xl border border-white/10 p-8 w-full max-w-md shadow-2xl">
+        <div className="motion-overlay fixed inset-0 bg-black/80 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
+          <div className="motion-dialog bg-[#1c1b1b] rounded-3xl border border-white/10 p-8 w-full max-w-md shadow-2xl">
             <h3 className="text-2xl font-bold mb-6">إضافة وحدة جديدة بالكامل</h3>
             <div className="space-y-4">
               <div>

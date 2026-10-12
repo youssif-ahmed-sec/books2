@@ -25,6 +25,9 @@ from api.v1.returns import router as returns_router
 from api.v1.cash_register import router as cash_register_router
 from api.v1.audit import router as audit_router
 from api.v1.warehouse_reports import router as warehouse_reports_router
+from api.v1.notifications import router as notifications_router
+from api.v1.offers import router as offers_router
+from api.v1.purchase_documents import router as purchase_documents_router
 from core.feature_flags import warehouse_only_mode
 from contextlib import asynccontextmanager
 
@@ -100,6 +103,9 @@ app.include_router(suppliers_router, prefix="/api/v1")
 app.include_router(purchases_router,  prefix="/api/v1")
 app.include_router(inventory_ops_router, prefix="/api/v1")
 app.include_router(audit_router, prefix="/api/v1")
+app.include_router(notifications_router, prefix="/api/v1")
+app.include_router(offers_router, prefix="/api/v1")
+app.include_router(purchase_documents_router, prefix="/api/v1")
 
 # Temporary warehouse handoff mode. The full routers remain available in source
 # and can be restored by an explicit configuration change and frontend rebuild.

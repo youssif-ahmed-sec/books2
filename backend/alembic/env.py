@@ -15,7 +15,9 @@ import models.order
 import models.customer
 import models.financial
 import models.purchase
+import models.purchase_document
 import models.returns
+import models.notification
 from database import engine, DATABASE_URL
 
 config = context.config
