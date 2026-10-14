@@ -54,9 +54,7 @@ app = FastAPI(
 |------|--------|
 | **ADMIN** | Users, financial records, inventory, sales, and reports |
 | **INVENTORY_CONTROLLER** | Products, categories, brands, suppliers, and stock |
-| **CASHIER_ORDERS** | POS and orders |
-| **SENIOR_SALES** | Sales reports |
-| **SALES_ASSISTANT** | Customer records and product lookup |
+| **CASHIER_ORDERS** | Sales, orders, and order preparation |
 
 ### Public Endpoints (no token needed)
 - `POST /api/v1/auth/login` — Login

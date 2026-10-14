@@ -2,34 +2,46 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { fetchApi } from "@/lib/api";
+import { searchSection, sectionSearchLabel, type SectionSearchResult } from "@/lib/sectionSearch";
 import { cachedCurrentUser, getCurrentUser } from "@/lib/currentUser";
 import ThemeToggle from "@/components/ThemeToggle";
 import NotificationBell from "@/components/NotificationBell";
 
 interface TopNavProps { title: string }
-interface SearchProduct { id: string; name_ar: string; sku: string }
 interface CurrentUser { email: string; role: string }
 
 const roleLabels: Record<string, string> = {
   ADMIN: "مدير النظام",
   INVENTORY_CONTROLLER: "مسؤول المخزون",
   CASHIER_ORDERS: "الكاشير والطلبات",
-  SENIOR_SALES: "مبيعات أول",
-  SALES_ASSISTANT: "مساعد مبيعات",
 };
+
+function revealResult(id: string) {
+  let attempts = 0;
+  const timer = window.setInterval(() => {
+    const element = Array.from(document.querySelectorAll<HTMLElement>("[data-search-id]")).find(node => node.dataset.searchId === id && node.getClientRects().length > 0);
+    if (element) { element.scrollIntoView({ behavior: "smooth", block: "center" }); element.classList.add("app-search-target"); window.clearInterval(timer); }
+    if (++attempts >= 40) window.clearInterval(timer);
+  }, 150);
+}
 
 export default function TopNav({ title }: TopNavProps) {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchLabel = sectionSearchLabel(pathname);
+  const remoteSearch = ["/inventory", "/inventory/product", "/suppliers", "/audit"].includes(pathname);
   const [user, setUser] = useState<CurrentUser | null>(() => cachedCurrentUser());
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<SearchProduct[]>([]);
+  const [submittedQuery, setSubmittedQuery] = useState("");
+  const [results, setResults] = useState<SectionSearchResult[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
+  const searchedPath = useRef(pathname);
   const accountRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -45,23 +57,36 @@ export default function TopNav({ title }: TopNavProps) {
   }, []);
 
   useEffect(() => {
-    const value = query.trim();
-    if (value.length < 2) return;
+    const timer = window.setTimeout(() => { setQuery(""); setSubmittedQuery(""); setResults([]); setSearchOpen(false); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [pathname]);
+
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("focus");
+    if (!id) return;
+    revealResult(id);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (searchedPath.current !== pathname) { searchedPath.current = pathname; return; }
+    const value = (remoteSearch ? submittedQuery : query).trim();
+    if (value.length < (remoteSearch ? 3 : 2) || !searchLabel) return;
     let active = true;
+    const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       setSearching(true);
       setSearchError(false);
       try {
-        const response = await fetchApi(`/products?search=${encodeURIComponent(value)}&limit=6`);
-        if (active) setResults(response.data || []);
+        const found = await searchSection(pathname, value, controller.signal);
+        if (active) setResults(found.slice(0, 20));
       } catch {
         if (active) { setResults([]); setSearchError(true); }
       } finally {
         if (active) setSearching(false);
       }
-    }, 250);
-    return () => { active = false; window.clearTimeout(timer); };
-  }, [query]);
+    }, remoteSearch ? 0 : 150);
+    return () => { active = false; controller.abort(); window.clearTimeout(timer); };
+  }, [query, submittedQuery, pathname, searchLabel, remoteSearch]);
 
   const logout = () => {
     fetchApi("/auth/logout", { method: "POST" }).catch(console.error);
@@ -75,21 +100,24 @@ export default function TopNav({ title }: TopNavProps) {
         <h2 className="text-lg font-bold text-primary">{title}</h2>
       </div>
       <div className="app-top-search relative min-w-0 w-[min(34vw,480px)]" ref={searchRef}>
-        <label className="app-search app-search-focus flex h-10 items-center gap-2 rounded-full px-4">
+        <div className="app-search app-search-focus flex h-10 items-center gap-2 rounded-full px-4">
           <span className="material-symbols-outlined text-xl app-muted" aria-hidden="true">search</span>
-          <input type="search" value={query}
-            onChange={(event) => { setQuery(event.target.value); setSearchOpen(true); if (event.target.value.trim().length < 2) setResults([]); }}
-            onFocus={() => setSearchOpen(true)} placeholder="بحث سريع عن صنف أو باركود..." aria-label="البحث عن منتج"
+          <input type="search" value={query} disabled={!searchLabel}
+            onChange={(event) => { setQuery(event.target.value); setSubmittedQuery(""); setSearchOpen(true); setResults([]); }}
+            onKeyDown={(event) => { if (event.key === "Enter" && remoteSearch) { event.preventDefault(); setSubmittedQuery(query.trim()); setSearchOpen(true); } }}
+            onFocus={() => setSearchOpen(true)} placeholder={searchLabel ? `ابحث عن ${searchLabel}...` : "لا توجد سجلات للبحث في هذا القسم"} aria-label={searchLabel ? `البحث عن ${searchLabel}` : "البحث غير متاح في هذا القسم"}
             className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:opacity-60" />
-        </label>
-        {searchOpen && query.trim().length >= 2 && (
+          {remoteSearch && <button type="button" onClick={() => { setSubmittedQuery(query.trim()); setSearchOpen(true); }} disabled={query.trim().length < 3} aria-label="تنفيذ البحث" className="app-muted text-xs disabled:opacity-40">بحث</button>}
+        </div>
+        {searchOpen && remoteSearch && query.trim().length >= 3 && !submittedQuery && <div className="app-menu absolute left-0 right-0 top-[calc(100%+8px)] rounded-2xl p-3 text-xs shadow-xl">اضغط Enter أو زر بحث لعرض النتائج</div>}
+        {searchOpen && (remoteSearch ? submittedQuery.trim().length >= 3 : query.trim().length >= 2) && (
           <div className="app-menu absolute left-0 right-0 top-[calc(100%+8px)] max-h-72 overflow-y-auto rounded-2xl p-2 shadow-xl">
-            {searching ? <p className="app-muted p-3 text-sm">جاري البحث...</p> : searchError ? <p className="p-3 text-sm text-[#ffb4ab]">تعذر البحث حاليًا. حاول مرة أخرى.</p> : results.length ? results.map((product) => (
-              <div key={product.id} className="app-search-result flex items-center justify-between gap-3 rounded-xl px-3 py-3 text-sm">
-                <span className="min-w-0 truncate font-semibold">{product.name_ar}</span>
-                <span className="app-muted shrink-0 text-xs" dir="ltr">{product.sku}</span>
-              </div>
-            )) : <p className="app-muted p-3 text-sm">لا توجد منتجات مطابقة</p>}
+            {searching ? <p className="app-muted p-3 text-sm">جاري البحث...</p> : searchError ? <p className="p-3 text-sm text-[#ffb4ab]">تعذر البحث حاليًا. حاول مرة أخرى.</p> : results.length ? results.map((result) => (
+              <Link key={result.id} href={result.href} onClick={() => { setSearchOpen(false); setQuery(""); window.dispatchEvent(new CustomEvent("section-search-focus", { detail: result.id })); revealResult(result.id); }} className="app-search-result flex items-center justify-between gap-3 rounded-xl px-3 py-3 text-sm">
+                <span className="min-w-0 truncate font-semibold">{result.label}</span>
+                <span className="app-muted shrink-0 text-xs" dir="ltr">{result.detail}</span>
+              </Link>
+            )) : <p className="app-muted p-3 text-sm">لا توجد نتائج مطابقة</p>}
           </div>
         )}
       </div>

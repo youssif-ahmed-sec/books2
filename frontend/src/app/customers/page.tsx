@@ -236,7 +236,7 @@ export default function CustomersPage() {
             </thead>
             <tbody className="text-[#e5e2e1]">
               {customers.map((c) => (
-                <tr key={c.id} className="app-table-row">
+                <tr key={c.id} data-search-id={c.id} className="app-table-row">
                   <td className="px-4 py-3 font-medium text-white">{c.name}</td>
                   <td className="px-4 py-3" dir="ltr">{c.phone}</td>
                   <td className="px-4 py-3">

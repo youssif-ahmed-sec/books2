@@ -38,7 +38,7 @@ type ReportSnapshot = {
 export default function ReportsPage() {
   const [role, setRole] = useState<string | null>(() => {
     const value = cachedCurrentUser()?.role;
-    return value && ["ADMIN", "SENIOR_SALES", "INVENTORY_CONTROLLER"].includes(value) ? value : null;
+    return value && ["ADMIN", "INVENTORY_CONTROLLER"].includes(value) ? value : null;
   });
   const [activeTab, setActiveTab] = useState<"sales" | "inventory">(() => readSectionSnapshot<ReportSnapshot>("reports")?.activeTab || "sales");
   const [startDate, setStartDate] = useState(() => readSectionSnapshot<ReportSnapshot>("reports")?.startDate || "");
@@ -51,7 +51,7 @@ export default function ReportsPage() {
 
   useEffect(() => {
     fetchApi("/auth/me").then(user => {
-      if (["ADMIN", "SENIOR_SALES", "INVENTORY_CONTROLLER"].includes(user.role)) {
+      if (["ADMIN", "INVENTORY_CONTROLLER"].includes(user.role)) {
         setRole(user.role);
         if (user.role === "INVENTORY_CONTROLLER") setActiveTab("inventory");
       }

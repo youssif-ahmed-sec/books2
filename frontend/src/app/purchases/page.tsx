@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
+import { useSectionSearchSelection } from "@/lib/useSectionSearchSelection";
 import { ProductSelect } from "@/components/ProductSelect";
 import { fetchApi } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
@@ -159,6 +160,7 @@ export default function PurchasesPage() {
   const [error, setError] = useState("");
   const [role, setRole] = useState("");
   const [filter, setFilter] = useState<"open" | "all" | "done">("open");
+  useSectionSearchSelection(() => setFilter("all"));
   const [editing, setEditing] = useState<Document | "new" | null>(null);
   const [receiving, setReceiving] = useState<Document | null>(null);
   const [expandedReceipt, setExpandedReceipt] = useState<string | null>(null);
@@ -191,7 +193,7 @@ export default function PurchasesPage() {
     <div className="flex flex-wrap gap-2" role="group" aria-label="فلترة أوامر الشراء">{(["open", "all", "done"] as const).map(key => <button type="button" key={key} onClick={() => setFilter(key)} className={filter === key ? "app-primary-button !px-4 !py-2" : "app-secondary-button !px-4 !py-2"}>{key === "open" ? "المطلوب متابعته" : key === "done" ? "المكتمل والمغلق" : "كل الأوامر"}</button>)}</div>
     {loading ? <div className="grid gap-4 lg:grid-cols-2">{[0, 1, 2].map(index => <div key={index} className="app-panel space-y-4 p-5"><span className="app-skeleton h-5 w-32" /><span className="app-skeleton h-4 w-64 max-w-full" /><span className="app-skeleton h-4 w-40" /></div>)}</div> : visible.length === 0 ? <div className="app-panel p-10 text-center app-muted">لا توجد أوامر في هذه الحالة.</div> : <div className="grid items-start gap-4 xl:grid-cols-2">{visible.map(document => {
       const receivedCount = document.lines.filter(line => Number(line.received_base_quantity) > 0).length;
-      return <article key={document.id} className="motion-surface app-panel space-y-4 p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-lg font-bold">{supplierName(document.supplier_id, document.supplier_name)}</h2><p className="app-muted text-xs" dir="ltr">{document.id.slice(0, 8)} · {new Date(document.created_at).toLocaleDateString("ar-EG")}</p></div><span className="rounded-full bg-primary/10 px-3 py-1 text-sm font-bold text-primary">{statusLabel[document.status] || document.status}</span></div>
+      return <article key={document.id} data-search-id={document.id} className="motion-surface app-panel space-y-4 p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-lg font-bold">{supplierName(document.supplier_id, document.supplier_name)}</h2><p className="app-muted text-xs" dir="ltr">{document.id.slice(0, 8)} · {new Date(document.created_at).toLocaleDateString("ar-EG")}</p></div><span className="rounded-full bg-primary/10 px-3 py-1 text-sm font-bold text-primary">{statusLabel[document.status] || document.status}</span></div>
         <ul className="divide-y divide-white/10">{document.lines.map(line => <li key={line.id} className="flex flex-wrap justify-between gap-2 py-2 text-sm"><span>{line.product_name} · {moneylessNumber(Number(line.quantity))} {line.unit_name}</span><span className="app-muted">وصل {moneylessNumber(Number(line.received_base_quantity) / Number(line.conversion_factor))} من {moneylessNumber(Number(line.quantity))}</span></li>)}</ul>
         {document.note && <p className="app-muted text-sm">{document.note}</p>}
         {document.receipts.length > 0 && <div className="space-y-2 border-t border-white/10 pt-3"><h3 className="text-sm font-bold">مستندات الاستلام</h3>{document.receipts.map(receipt => <div key={receipt.id} className="rounded-xl border border-white/10 p-3"><button type="button" className="flex w-full items-center justify-between gap-3 text-right text-sm" aria-expanded={expandedReceipt === receipt.id} onClick={() => setExpandedReceipt(current => current === receipt.id ? null : receipt.id)}><span>استلام {new Date(receipt.created_at).toLocaleDateString("ar-EG")} · رقم {receipt.id.slice(0, 8)}</span><span className="material-symbols-outlined text-primary">{expandedReceipt === receipt.id ? "expand_less" : "expand_more"}</span></button>{expandedReceipt === receipt.id && <ul className="app-muted mt-3 space-y-1 border-t border-white/10 pt-3 text-sm">{receipt.lines.map(item => { const ordered = document.lines.find(line => line.id === item.document_line_id); return <li key={item.document_line_id}>{ordered?.product_name || "صنف محفوظ"} · {item.base_quantity} {ordered?.base_unit_name || "وحدة أساسية"}</li>; })}</ul>}</div>)}</div>}

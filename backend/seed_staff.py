@@ -14,17 +14,9 @@ STAFF_MEMBERS = [
         "role": RoleEnum.CASHIER_ORDERS,
     },
     {
-        "email": "khaled@bookstore.local",
-        "role": RoleEnum.SENIOR_SALES,
-    },
-    {
         "email": "ibrahim@bookstore.local",
         "role": RoleEnum.INVENTORY_CONTROLLER,
     },
-    {
-        "email": "abdelrahman@bookstore.local",
-        "role": RoleEnum.SALES_ASSISTANT,
-    }
 ]
 
 async def seed_staff():

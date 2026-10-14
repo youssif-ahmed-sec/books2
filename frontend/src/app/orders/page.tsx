@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from "react";
 import Head from "next/head";
 import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
+import { useSectionSearchSelection } from "@/lib/useSectionSearchSelection";
 import { fetchApi } from "@/lib/api";
 import { toast } from 'react-toastify';
 import { errorMessage } from "@/lib/errors";
@@ -104,6 +105,7 @@ export default function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>(() => readSectionSnapshot<Order[]>("orders-list") || []);
   const [loading, setLoading] = useState(() => !readSectionSnapshot("orders-list"));
   const [activeTab, setActiveTab] = useState(() => readSectionSnapshot<{ tab: string }>("orders-tab")?.tab || "All");
+  useSectionSearchSelection(() => setActiveTab("All"));
 
   // Draft Slide-over State
   const [isSlideOverOpen, setIsSlideOverOpen] = useState(false);
@@ -481,7 +483,7 @@ export default function OrdersPage() {
                 </thead>
                 <tbody className="divide-y divide-white/5">
                   {filteredOrders.map((order) => (
-                    <tr key={order.id} className="hover:bg-white/5 transition-colors group">
+                    <tr key={order.id} data-search-id={order.id} className="hover:bg-white/5 transition-colors group">
                       <td className="px-6 py-4 font-mono text-xs text-[#e2bfb0]/80">
                         {order.id.split('-')[0].toUpperCase()}
                       </td>

@@ -9,6 +9,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
+import { useSectionSearchSelection } from "@/lib/useSectionSearchSelection";
 import AdminGate from "@/components/AdminGate";
 import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
 
@@ -33,6 +34,13 @@ function FinancialsContent() {
   const [incomes, setIncomes] = useState<Income[]>(() => readSectionSnapshot<{ incomes: Income[] }>("financials")?.incomes || []);
   const [isSlideoverOpen, setIsSlideoverOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"expense" | "income">("expense");
+  useSectionSearchSelection(id => setActiveTab(incomes.some(item => item.id === id) ? "income" : "expense"));
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("focus");
+    if (!id || !incomes.some(item => item.id === id)) return;
+    const timer = window.setTimeout(() => setActiveTab("income"), 0);
+    return () => window.clearTimeout(timer);
+  }, [incomes]);
 
   const { register, handleSubmit, reset, control, formState: { errors, isSubmitting } } = useForm<TransactionFormInput, unknown, TransactionFormValues>({
     resolver: zodResolver(transactionSchema),
@@ -163,7 +171,7 @@ function FinancialsContent() {
             </thead>
             <tbody className="text-[#e5e2e1]">
               {activeTab === "expense" && expenses.map((e) => (
-                <tr key={e.id} className="app-table-row">
+                <tr key={e.id} data-search-id={e.id} className="app-table-row">
                   <td className="px-4 py-3" dir="ltr">{new Date(e.expense_date).toLocaleDateString()}</td>
                   <td className="px-4 py-3 font-medium text-white">{e.category}</td>
                   <td className="px-4 py-3">{e.description || "-"}</td>
@@ -171,7 +179,7 @@ function FinancialsContent() {
                 </tr>
               ))}
               {activeTab === "income" && incomes.map((i) => (
-                <tr key={i.id} className="app-table-row">
+                <tr key={i.id} data-search-id={i.id} className="app-table-row">
                   <td className="px-4 py-3" dir="ltr">{new Date(i.income_date).toLocaleDateString()}</td>
                   <td className="px-4 py-3 font-medium text-white">{i.source}</td>
                   <td className="px-4 py-3">{i.description || "-"}</td>

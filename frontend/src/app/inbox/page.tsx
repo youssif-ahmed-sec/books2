@@ -104,7 +104,7 @@ export default function InboxPage() {
           <div className="app-panel p-6 flex flex-col gap-4">
             <h2 className="text-lg font-bold text-white border-b border-white/10 pb-3">طلبات جديدة ومسودات</h2>
             {orders.filter(o => ["New Lead", "Draft Order"].includes(o.status)).map(order => (
-              <div key={order.id} className="bg-white/5 rounded-2xl p-4 flex flex-col gap-3 border border-white/5">
+              <div key={order.id} data-search-id={order.id} className="bg-white/5 rounded-2xl p-4 flex flex-col gap-3 border border-white/5">
                 <div className="flex justify-between items-start">
                   <div>
                     <span className="app-muted text-xs font-mono">#{order.id.slice(0,8)}</span>
@@ -132,7 +132,7 @@ export default function InboxPage() {
           <div className="app-panel p-6 flex flex-col gap-4">
             <h2 className="text-lg font-bold text-white border-b border-white/10 pb-3">عروض الأسعار</h2>
             {orders.filter(o => ["Waiting Quotation", "Quotation Sent"].includes(o.status)).map(order => (
-              <div key={order.id} className="bg-white/5 rounded-2xl p-4 flex flex-col gap-3 border border-white/5">
+              <div key={order.id} data-search-id={order.id} className="bg-white/5 rounded-2xl p-4 flex flex-col gap-3 border border-white/5">
                 <div className="flex justify-between items-start">
                   <div>
                     <span className="app-muted text-xs font-mono">#{order.id.slice(0,8)}</span>
@@ -157,7 +157,7 @@ export default function InboxPage() {
           <div className="app-panel p-6 flex flex-col gap-4">
             <h2 className="text-lg font-bold text-white border-b border-white/10 pb-3">في انتظار الموافقة</h2>
             {orders.filter(o => o.status === "Waiting Customer Approval").map(order => (
-              <div key={order.id} className="bg-white/5 rounded-2xl p-4 flex flex-col gap-3 border border-white/5">
+              <div key={order.id} data-search-id={order.id} className="bg-white/5 rounded-2xl p-4 flex flex-col gap-3 border border-white/5">
                 <div className="flex justify-between items-start">
                   <div>
                     <span className="app-muted text-xs font-mono">#{order.id.slice(0,8)}</span>

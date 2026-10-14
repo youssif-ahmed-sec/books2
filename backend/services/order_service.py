@@ -518,8 +518,8 @@ class OrderService:
         if order.status != OrderStatusEnum.APPROVED.value:
             raise ValueError("Only approved orders can be assigned for preparation.")
         assignee = (await db.execute(select(User).where(User.id == assignee_id, User.is_active == True, User.is_deleted == False))).scalar_one_or_none()
-        if assignee is None or assignee.role not in (RoleEnum.SENIOR_SALES, RoleEnum.SALES_ASSISTANT):
-            raise ValueError("Assignee must be an active sales associate.")
+        if assignee is None or assignee.role != RoleEnum.CASHIER_ORDERS:
+            raise ValueError("Assignee must be an active cashier.")
         order.assigned_to_id = assignee_id
         order.status = OrderStatusEnum.PREPARING.value
         order.preparing_started_at = datetime.now(timezone.utc)

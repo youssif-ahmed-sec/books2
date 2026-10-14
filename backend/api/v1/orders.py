@@ -50,7 +50,7 @@ async def assigned_orders(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if current_user.role not in (RoleEnum.ADMIN, RoleEnum.SENIOR_SALES, RoleEnum.SALES_ASSISTANT):
+    if current_user.role not in (RoleEnum.ADMIN, RoleEnum.CASHIER_ORDERS):
         raise HTTPException(status_code=403, detail="Preparation access required")
     orders = await OrderService.get_orders(db, status="Preparing")
     visible = orders if current_user.role == RoleEnum.ADMIN else [order for order in orders if order["assigned_to_id"] == current_user.id]
@@ -68,7 +68,7 @@ async def list_preparers(
     _user: User = Depends(require_pos_orders_access),
 ):
     rows = (await db.execute(select(User).where(
-        User.role.in_([RoleEnum.SENIOR_SALES, RoleEnum.SALES_ASSISTANT]),
+        User.role == RoleEnum.CASHIER_ORDERS,
         User.is_active == True, User.is_deleted == False,
     ))).scalars().all()
     return [{"id": user.id, "email": user.email, "role": user.role.value} for user in rows]
@@ -97,7 +97,7 @@ async def finish_order_preparation(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if current_user.role not in (RoleEnum.ADMIN, RoleEnum.SENIOR_SALES, RoleEnum.SALES_ASSISTANT):
+    if current_user.role not in (RoleEnum.ADMIN, RoleEnum.CASHIER_ORDERS):
         raise HTTPException(status_code=403, detail="Preparation access required")
     try:
         order = await OrderService.complete_preparation(db, order_id, payload, current_user)

@@ -59,6 +59,8 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found or inactive",
         )
+    if user.role not in (RoleEnum.ADMIN, RoleEnum.INVENTORY_CONTROLLER, RoleEnum.CASHIER_ORDERS):
+        raise HTTPException(status_code=401, detail="Account role must be reassigned by an admin")
     return user
 
 
@@ -99,7 +101,7 @@ async def require_financial_access(
 
 
 async def require_sales_reporting_access(current_user: User = Depends(get_current_user)) -> User:
-    if current_user.role not in (RoleEnum.ADMIN, RoleEnum.SENIOR_SALES):
+    if current_user.role != RoleEnum.ADMIN:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sales reporting access required")
     return current_user
 
@@ -133,13 +135,11 @@ async def require_warehouse_access(
 async def require_basic_staff_access(
     current_user: User = Depends(get_current_user),
 ) -> User:
-    # Any authenticated user with a valid role in RoleEnum has basic staff access
+    # Only current operational roles have staff access.
     if current_user.role not in (
         RoleEnum.ADMIN,
         RoleEnum.CASHIER_ORDERS,
-        RoleEnum.SENIOR_SALES,
         RoleEnum.INVENTORY_CONTROLLER,
-        RoleEnum.SALES_ASSISTANT
     ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

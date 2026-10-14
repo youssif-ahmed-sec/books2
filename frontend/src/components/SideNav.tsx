@@ -61,7 +61,7 @@ export default function SideNav() {
       return role === "ADMIN";
     }
     if (item.href === "/reports") {
-      return role === "ADMIN" || role === "SENIOR_SALES" || role === "INVENTORY_CONTROLLER";
+      return role === "ADMIN" || role === "INVENTORY_CONTROLLER";
     }
     if (["/inventory", "/stock-operations", "/suppliers", "/purchases", "/integrations/whatsapp", "/categories", "/offers"].includes(item.href)) {
       return role === "ADMIN" || role === "INVENTORY_CONTROLLER";
@@ -69,7 +69,7 @@ export default function SideNav() {
     if (["/pos", "/cash-register", "/returns", "/orders", "/inbox"].includes(item.href)) {
       return role === "ADMIN" || role === "CASHIER_ORDERS";
     }
-    if (item.href === "/preparation") return role === "ADMIN" || role === "SENIOR_SALES" || role === "SALES_ASSISTANT";
+    if (item.href === "/preparation") return role === "ADMIN" || role === "CASHIER_ORDERS";
     if (item.href === "/financials") return role === "ADMIN";
     if (item.href === "/audit") return role === "ADMIN";
     return true;

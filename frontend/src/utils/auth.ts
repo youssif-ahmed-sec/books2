@@ -1,4 +1,4 @@
-export type UserRole = "ADMIN" | "CASHIER_ORDERS" | "SENIOR_SALES" | "INVENTORY_CONTROLLER" | "SALES_ASSISTANT";
+export type UserRole = "ADMIN" | "CASHIER_ORDERS" | "INVENTORY_CONTROLLER";
 
 export function decodeJwt(token: string) {
   try {

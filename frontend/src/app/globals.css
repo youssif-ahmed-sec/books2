@@ -186,6 +186,7 @@ html[data-theme="light"] body { background: #f6f4f1; color: #24211f; }
 .app-menu { background: #242321; border: 1px solid rgba(255,255,255,.12); }
 .app-menu-action { display: flex; align-items: center; gap: .65rem; padding: .65rem .75rem; border-radius: .65rem; font-size: .875rem; font-weight: 600; text-align: right; }
 .app-menu-action:hover, .app-search-result:hover { background: rgba(255,255,255,.07); }
+.app-search-target { outline: 2px solid #dcb27d; outline-offset: 3px; }
 .app-divider { border-top: 1px solid rgba(255,255,255,.1); }
 .notification-count { position: absolute; top: -4px; inset-inline-end: -5px; min-width: 19px; height: 19px; padding: 0 3px; border-radius: 999px; background: #ff6b00; color: #fff; font-size: 11px; font-weight: 800; line-height: 19px; text-align: center; }
 .notification-menu { z-index: 60; }

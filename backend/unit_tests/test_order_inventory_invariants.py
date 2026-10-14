@@ -51,7 +51,7 @@ async def test_draft_bundle_uses_component_snapshot_after_recipe_edit(database):
     async with database() as db:
         db.add_all([
             User(id=user_id, role=RoleEnum.ADMIN),
-            User(id=preparer_id, role=RoleEnum.SALES_ASSISTANT),
+            User(id=preparer_id, role=RoleEnum.CASHIER_ORDERS),
             Warehouse(id=warehouse_id, name="Main"),
             Product(id=bundle_id, sku="BUNDLE", name_en="Bundle", name_ar="باقة", base_unit="Piece", is_bundle=True),
             Product(id=old_id, sku="OLD", name_en="Old", name_ar="قديم", base_unit="Piece"),
@@ -276,7 +276,7 @@ async def test_local_api_order_roles_transitions_and_checkout_retry(database):
         user = User(id=user_id, role=RoleEnum.ADMIN)
         db.add_all([
             user,
-            User(id=preparer_id, role=RoleEnum.SALES_ASSISTANT),
+            User(id=preparer_id, role=RoleEnum.CASHIER_ORDERS),
             Warehouse(id=warehouse_id, name="API test warehouse"),
             Product(id=product_id, sku="API-TEST", name_en="Book", name_ar="كتاب", base_unit="Piece"),
         ])
@@ -432,7 +432,7 @@ async def test_real_login_roles_inventory_receipt_and_cashier_checkout(database)
                 json={
                     "request_id": str(uuid4()), "product_id": str(product_id),
                     "warehouse_id": str(warehouse_id), "supplier_id": str(supplier_id),
-                    "transaction_type": "Receiving", "quantity_changed": 1, "unit_cost": 7,
+                    "transaction_type": "Receiving", "quantity_changed": 1,
                 },
             )
             assert receipt.status_code == 201, receipt.text

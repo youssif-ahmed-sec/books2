@@ -102,7 +102,7 @@ export default function PurchasesPage() {
             const receipt = receipts[purchase.id] || { quantity: "", warehouseId: "" };
             const product = products.find(item => item.id === purchase.product_id);
             const supplier = suppliers.find(item => item.id === purchase.supplier_id);
-            return <article key={purchase.id} className="motion-surface app-panel p-5 space-y-3">
+            return <article key={purchase.id} data-search-id={purchase.id} className="motion-surface app-panel p-5 space-y-3">
               <div className="flex flex-wrap justify-between gap-3">
                 <div>
                   <p className="font-bold">{product?.name_ar || purchase.product_id}</p>

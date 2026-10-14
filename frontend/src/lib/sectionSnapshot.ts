@@ -1,6 +1,7 @@
 // Keep the previous view in memory during client-side navigation. Each mounted
 // section still revalidates against the API; nothing is persisted to disk.
 const snapshots = new Map<string, { token: string; data: unknown }>();
+let revision = 0;
 
 function token() {
   return typeof window === "undefined" ? null : localStorage.getItem("access_token");
@@ -19,4 +20,7 @@ export function writeSectionSnapshot<T>(section: string, data: T) {
 
 export function clearSectionSnapshots() {
   snapshots.clear();
+  revision++;
 }
+
+export function sectionSnapshotRevision() { return revision; }

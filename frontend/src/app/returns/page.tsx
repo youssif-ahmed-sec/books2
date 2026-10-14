@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
+import { useSectionSearchSelection } from "@/lib/useSectionSearchSelection";
 import { fetchApi } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
 import { getUserRole } from "@/utils/auth";
@@ -17,6 +18,7 @@ type ReturnRecord = { id: string; kind: string; refund_amount: number; charge_am
 export default function ReturnsPage() {
   const [orders, setOrders] = useState<Order[]>(() => readSectionSnapshot<Order[]>("returnable-orders") || []);
   const [orderId, setOrderId] = useState("");
+  useSectionSearchSelection(setOrderId);
   const [eligibility, setEligibility] = useState<Eligibility | null>(null);
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [kind, setKind] = useState<"REFUND" | "EXCHANGE">("REFUND");

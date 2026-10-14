@@ -14,6 +14,7 @@ import { fetchApi } from "@/lib/api";
 import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
 import BrandsManagement from "@/components/BrandsManagement";
 import { errorMessage } from "@/lib/errors";
+import { useSectionSearchSelection } from "@/lib/useSectionSearchSelection";
 import { useHydrated } from "@/lib/useHydrated";
 
 // ─── Zod Schemas ─────────────────────────────────────────────────────────────
@@ -603,7 +604,6 @@ export default function SuppliersPage() {
   const [suppliers, setSuppliers] = useState<Supplier[]>(() => previous?.suppliers || []);
   const [total, setTotal] = useState(() => previous?.total || 0);
   const [loading, setLoading] = useState(() => !previous);
-  const [search, setSearch] = useState("");
   const [showAddPanel, setShowAddPanel] = useState(false);
   const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null);
   const [supplierTab, setSupplierTab] = useState<"info" | "statement" | "debt" | "payment">("info");
@@ -611,6 +611,7 @@ export default function SuppliersPage() {
     setSupplierTab(tab);
     setSelectedSupplierId(id);
   };
+  useSectionSearchSelection(id => openSupplier(id, role === "ADMIN" ? "statement" : "info"));
 
   const loadSuppliers = async (q = "") => {
     setLoading(true);
@@ -636,16 +637,11 @@ export default function SuppliersPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setSearch(e.target.value);
-    loadSuppliers(e.target.value);
-  };
-
   const handleDelete = async (id: string) => {
     if (!confirm("هل أنت متأكد من حذف هذا المورد؟")) return;
     try {
       await fetchApi(`/suppliers/${id}`, { method: "DELETE" });
-      loadSuppliers(search);
+      loadSuppliers();
     } catch (err: unknown) { notifyError(errorMessage(err, "فشل حذف المورد")); }
   };
 
@@ -677,12 +673,6 @@ export default function SuppliersPage() {
           </div>
         </div>
 
-        {/* Search */}
-        <div className="glass app-search-focus rounded-2xl p-4 mb-6 flex items-center gap-3">
-          <span className="material-symbols-outlined text-[#e2bfb0]/40">search</span>
-          <input value={search} onChange={handleSearch} placeholder="بحث بالاسم أو الهاتف أو البريد..." className="flex-1 bg-transparent text-sm text-white placeholder:text-[#e2bfb0]/30 focus:outline-none" />
-        </div>
-
         {/* Table */}
         <div className="glass rounded-2xl overflow-hidden hi-fi-shadow">
           <div className="overflow-x-auto">
@@ -707,7 +697,7 @@ export default function SuppliersPage() {
                     لا يوجد موردين مسجلين
                   </td></tr>
                 ) : suppliers.map(s => (
-                  <tr key={s.id} className="hover:bg-white/5 transition-all border-b border-white/5 last:border-0">
+                  <tr key={s.id} data-search-id={s.id} className="hover:bg-white/5 transition-all border-b border-white/5 last:border-0">
                     <td className="px-8 py-5">
                       <div className="flex items-center gap-4">
                         <div className="w-10 h-10 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0">
@@ -754,7 +744,7 @@ export default function SuppliersPage() {
       </main>
 
       {/* Add Panel */}
-      {showAddPanel && role && <AddSupplierPanel isAdmin={role === "ADMIN"} onClose={() => setShowAddPanel(false)} onSuccess={() => loadSuppliers(search)} />}
+      {showAddPanel && role && <AddSupplierPanel isAdmin={role === "ADMIN"} onClose={() => setShowAddPanel(false)} onSuccess={() => loadSuppliers()} />}
 
       {/* Edit Panel */}
       {selectedSupplierId && role && (
@@ -763,7 +753,7 @@ export default function SuppliersPage() {
           initialTab={supplierTab}
           supplierId={selectedSupplierId}
           onClose={() => setSelectedSupplierId(null)}
-          onSuccess={() => loadSuppliers(search)}
+          onSuccess={() => loadSuppliers()}
         />
       )}
     </div>

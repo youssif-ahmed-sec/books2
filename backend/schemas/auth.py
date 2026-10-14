@@ -1,8 +1,10 @@
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
-from typing import Optional
+from typing import Optional, Literal
 from uuid import UUID
 from datetime import datetime
 from models.user import RoleEnum
+
+OperationalRole = Literal[RoleEnum.ADMIN, RoleEnum.INVENTORY_CONTROLLER, RoleEnum.CASHIER_ORDERS]
 
 
 class UserProfileResponse(BaseModel):
@@ -19,7 +21,7 @@ class UserProfileResponse(BaseModel):
 class UserSyncRequest(BaseModel):
     id: UUID  # From Supabase Auth
     email: EmailStr
-    role: RoleEnum = RoleEnum.SALES_ASSISTANT
+    role: OperationalRole
 
 
 class UserRegisterRequest(BaseModel):
@@ -27,7 +29,7 @@ class UserRegisterRequest(BaseModel):
     email: EmailStr
     username: Optional[str] = Field(default=None, min_length=3, max_length=50, pattern=r"^[a-zA-Z0-9._-]+$")
     password: str = Field(min_length=12)
-    role: RoleEnum = RoleEnum.SALES_ASSISTANT
+    role: OperationalRole
 
     @field_validator("username")
     @classmethod
@@ -45,7 +47,7 @@ class UserRegisterRequest(BaseModel):
 class UserUpdateRequest(BaseModel):
     email: Optional[EmailStr] = None
     username: Optional[str] = Field(default=None, min_length=3, max_length=50, pattern=r"^[a-zA-Z0-9._-]+$")
-    role: Optional[RoleEnum] = None
+    role: Optional[OperationalRole] = None
     password: Optional[str] = Field(default=None, min_length=12)
 
     @field_validator("username")

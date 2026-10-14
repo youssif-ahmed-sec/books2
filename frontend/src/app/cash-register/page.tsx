@@ -61,7 +61,7 @@ export default function CashRegisterPage() {
         </div>
         <div className="border-t border-white/10 pt-4 space-y-3"><h2 className="font-bold">إغلاق الوردية</h2><p className="text-sm text-white/60">عدّ النقدية الفعلية وسجلها؛ سيظهر الفرق عن المتوقع في السجل.</p><div className="flex flex-wrap gap-3"><input aria-label="النقدية المعدودة" className="app-field" type="number" min="0" step="0.01" value={counted || ""} onChange={event => setCounted(Number(event.target.value) || 0)} /><button disabled={busy} onClick={() => { if (window.confirm("تأكيد إغلاق الوردية؟")) act("close", { closing_cash: counted }); }} className="app-primary-button">إغلاق الوردية</button></div></div>
       </section>}
-      <section className="glass rounded-2xl p-6 space-y-3"><h2 className="font-bold">الورديات السابقة</h2>{history.map(shift => <p key={shift.id} className="border-b border-white/10 pb-2 text-sm">{new Date(shift.opened_at).toLocaleString("ar-EG")} — {shift.status === "OPEN" ? "مفتوحة" : "مغلقة"} — متوقع {shift.expected_cash.toFixed(2)} ج.م{shift.closing_cash !== null ? ` — معدود ${shift.closing_cash.toFixed(2)} — فرق ${shift.difference?.toFixed(2)}` : ""}</p>)}</section>
+      <section className="glass rounded-2xl p-6 space-y-3"><h2 className="font-bold">الورديات السابقة</h2>{history.map(shift => <p key={shift.id} data-search-id={shift.id} className="border-b border-white/10 pb-2 text-sm">{new Date(shift.opened_at).toLocaleString("ar-EG")} — {shift.status === "OPEN" ? "مفتوحة" : "مغلقة"} — متوقع {shift.expected_cash.toFixed(2)} ج.م{shift.closing_cash !== null ? ` — معدود ${shift.closing_cash.toFixed(2)} — فرق ${shift.difference?.toFixed(2)}` : ""}</p>)}</section>
     </main>
   </div>;
 }

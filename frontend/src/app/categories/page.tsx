@@ -9,6 +9,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
+import { useSectionSearchSelection } from "@/lib/useSectionSearchSelection";
 import { ProductSelect } from "@/components/ProductSelect";
 import { fetchApi } from "@/lib/api";
 import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
@@ -185,6 +186,17 @@ export default function CategoriesPage() {
   const [subcategories, setSubcategories] = useState<Subcategory[]>(() => readSectionSnapshot<{ subcategories: Subcategory[] }>("categories")?.subcategories || []);
   const [loading, setLoading] = useState(() => !readSectionSnapshot("categories"));
   const [expandedCats, setExpandedCats] = useState<Set<string>>(new Set());
+  useSectionSearchSelection(id => {
+    const parent = subcategories.find(item => item.id === id)?.category_id;
+    if (parent) setExpandedCats(current => new Set(current).add(parent));
+  });
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("focus");
+    const parent = subcategories.find(item => item.id === id)?.category_id;
+    if (!parent) return;
+    const timer = window.setTimeout(() => setExpandedCats(current => new Set(current).add(parent)), 0);
+    return () => window.clearTimeout(timer);
+  }, [subcategories]);
 
   // Modal state
   const [catModal, setCatModal] = useState<{ mode: "add" | "edit"; existing?: Category } | null>(null);
@@ -313,7 +325,7 @@ export default function CategoriesPage() {
               const subs = getSubsForCategory(cat.id);
               const isExpanded = expandedCats.has(cat.id);
               return (
-                <div key={cat.id} className="glass rounded-2xl overflow-hidden hi-fi-shadow">
+                <div key={cat.id} data-search-id={cat.id} className="glass rounded-2xl overflow-hidden hi-fi-shadow">
                   {/* Category Row */}
                   <div className="flex items-center justify-between p-6 border-b border-white/5">
                     <div className="flex items-center gap-4">
@@ -353,7 +365,7 @@ export default function CategoriesPage() {
                           لا توجد تصنيفات فرعية — اضغط &quot;فرعي&quot; لإضافة واحدة
                         </div>
                       ) : subs.map((sub, idx) => (
-                        <div key={sub.id} className={`flex items-center justify-between px-8 py-4 ${idx < subs.length - 1 ? "border-b border-white/5" : ""}`}>
+                        <div key={sub.id} data-search-id={sub.id} className={`flex items-center justify-between px-8 py-4 ${idx < subs.length - 1 ? "border-b border-white/5" : ""}`}>
                           <div className="flex items-center gap-4">
                             <div className="w-5 flex justify-center">
                               <div className="w-px h-4 bg-white/10" />

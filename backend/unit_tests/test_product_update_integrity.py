@@ -235,7 +235,7 @@ async def test_draft_delivery_is_idempotent_for_stock():
     async with session_factory() as db:
         db.add_all([
             User(id=user_id, role=RoleEnum.CASHIER_ORDERS),
-            User(id=preparer_id, role=RoleEnum.SALES_ASSISTANT),
+            User(id=preparer_id, role=RoleEnum.CASHIER_ORDERS),
             Product(id=product_id, sku="DRAFT-1", name_en="Book", name_ar="كتاب", base_unit="Piece"),
             Warehouse(id=warehouse_id, name="Main Warehouse"),
         ])

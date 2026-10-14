@@ -66,6 +66,9 @@ async def login(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    if user.role not in (RoleEnum.ADMIN, RoleEnum.INVENTORY_CONTROLLER, RoleEnum.CASHIER_ORDERS):
+        raise HTTPException(status_code=403, detail="Account role must be reassigned by an admin")
+
     token = create_access_token(
         subject=str(user.id),
         extra_claims={"role": user.role.value},
@@ -295,5 +298,8 @@ async def sync_user_profile(
         db.add(user)
         await db.commit()
         await db.refresh(user)
+
+    if user.role not in (RoleEnum.ADMIN, RoleEnum.INVENTORY_CONTROLLER, RoleEnum.CASHIER_ORDERS):
+        raise HTTPException(status_code=403, detail="Account role must be reassigned by an admin")
 
     return user

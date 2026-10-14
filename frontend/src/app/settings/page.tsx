@@ -16,10 +16,10 @@ interface StaffUser { id: string; email: string; username: string | null; role: 
 const roles = [
   { value: "ADMIN", label: "مدير النظام" },
   { value: "CASHIER_ORDERS", label: "كاشير والطلبات" },
-  { value: "SENIOR_SALES", label: "مبيعات أول" },
   { value: "INVENTORY_CONTROLLER", label: "مسؤول المخزون" },
-  { value: "SALES_ASSISTANT", label: "مساعد مبيعات" },
 ];
+const roleLabel = (role: string) => roles.find(option => option.value === role)?.label || "دور قديم — يحتاج إعادة تعيين";
+const accountStatus = (user: StaffUser) => !roles.some(option => option.value === user.role) ? "الدخول موقوف حتى تغيير الدور" : user.is_active ? "نشط" : "موقوف";
 
 export default function SettingsPage() {
   return <AdminGate><SettingsContent /></AdminGate>;
@@ -36,7 +36,7 @@ function SettingsContent() {
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState("SALES_ASSISTANT");
+  const [role, setRole] = useState("CASHIER_ORDERS");
 
   useEffect(() => {
     fetchApi("/auth/users")
@@ -73,7 +73,7 @@ function SettingsContent() {
       setEmail("");
       setUsername("");
       setPassword("");
-      setRole("SALES_ASSISTANT");
+      setRole("CASHIER_ORDERS");
       setEditing(null);
       notifySuccess(editing ? "تم تحديث المستخدم" : "تم إضافة المستخدم");
       await loadUsers();
@@ -89,7 +89,7 @@ function SettingsContent() {
     setEmail(user.email);
     setUsername(user.username || "");
     setPassword("");
-    setRole(user.role);
+      setRole(roles.some(option => option.value === user.role) ? user.role : "");
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -132,7 +132,7 @@ function SettingsContent() {
             <div className="grid grid-cols-1 2xl:grid-cols-[minmax(17rem,22rem)_minmax(0,1fr)] gap-6">
               <div>
                 <div className="app-panel max-w-[40rem] p-5 sm:p-6 2xl:max-w-none">
-                  <div className="mb-4 flex items-center justify-between gap-3"><h2 className="text-lg font-bold">{editing ? "تعديل المستخدم" : "إضافة مستخدم جديد"}</h2>{editing && <button type="button" onClick={() => { setEditing(null); setEmail(""); setUsername(""); setPassword(""); setRole("SALES_ASSISTANT"); }} className="app-muted text-sm hover:text-primary">إلغاء</button>}</div>
+                  <div className="mb-4 flex items-center justify-between gap-3"><h2 className="text-lg font-bold">{editing ? "تعديل المستخدم" : "إضافة مستخدم جديد"}</h2>{editing && <button type="button" onClick={() => { setEditing(null); setEmail(""); setUsername(""); setPassword(""); setRole("CASHIER_ORDERS"); }} className="app-muted text-sm hover:text-primary">إلغاء</button>}</div>
                   <form onSubmit={handleRegister} className="space-y-4">
                     <div>
                       <label htmlFor="staff-email" className="block text-sm font-semibold mb-2">البريد الإلكتروني</label>
@@ -198,26 +198,26 @@ function SettingsContent() {
                       </thead>
                       <tbody>
                         {users.map((u) => (
-                          <tr key={u.id} className="app-table-row align-middle">
+                          <tr key={u.id} data-search-id={u.id} className="app-table-row align-middle">
                             <td className="px-5 py-4"><div className="font-semibold" dir="ltr">{u.email}</div>{u.username && <div className="app-muted mt-1 text-xs" dir="ltr">@{u.username}</div>}</td>
                             <td className="px-6 py-4">
                               <span className={`px-2.5 py-1 rounded-full text-xs ${
                                 u.role === "ADMIN" ? "bg-primary/10 text-primary" : "bg-white/5 text-[#e2bfb0]"
                               }`}>
-                                {roles.find(role => role.value === u.role)?.label || u.role}
+                                {roleLabel(u.role)}
                               </span>
                             </td>
-                            <td className="px-6 py-4"><span className={`rounded-full px-3 py-1.5 text-xs font-semibold ${u.is_active ? "bg-emerald-500/10 text-emerald-400" : "bg-white/10 app-muted"}`}>{u.is_active ? "نشط" : "موقوف"}</span></td>
+                            <td className="px-6 py-4"><span className={`rounded-full px-3 py-1.5 text-xs font-semibold ${u.is_active && roles.some(option => option.value === u.role) ? "bg-emerald-500/10 text-emerald-400" : "bg-white/10 app-muted"}`}>{accountStatus(u)}</span></td>
                             <td className="px-6 py-4">{new Date(u.created_at).toLocaleDateString("ar-EG")}</td>
-                            <td className="px-5 py-4"><div className="flex flex-wrap gap-2"><button type="button" disabled={busy} onClick={() => startEdit(u)} className="app-secondary-button px-3 py-2 text-xs">تعديل</button><button type="button" disabled={busy || u.id === currentUserId} title={u.id === currentUserId ? "لا يمكنك إلغاء تفعيل حسابك الحالي" : undefined} onClick={() => void toggleStatus(u)} className="app-secondary-button px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">{u.is_active ? "إلغاء التفعيل" : "تفعيل"}</button><button type="button" disabled={busy || u.id === currentUserId} title={u.id === currentUserId ? "لا يمكنك حذف حسابك الحالي" : undefined} onClick={() => void deleteUser(u)} className="rounded-xl border border-red-500/20 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-40">حذف</button></div>{u.id === currentUserId && <p className="app-muted mt-2 text-xs">لا يمكن إلغاء تفعيل حسابك الحالي أو حذفه.</p>}</td>
+                            <td className="px-5 py-4"><div className="flex flex-wrap gap-2"><button type="button" disabled={busy} onClick={() => startEdit(u)} className="app-secondary-button px-3 py-2 text-xs">تعديل</button><button type="button" disabled={busy || u.id === currentUserId || (!u.is_active && !roles.some(option => option.value === u.role))} title={u.id === currentUserId ? "لا يمكنك إلغاء تفعيل حسابك الحالي" : !u.is_active && !roles.some(option => option.value === u.role) ? "غيّر الدور أولًا" : undefined} onClick={() => void toggleStatus(u)} className="app-secondary-button px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">{u.is_active ? "إلغاء التفعيل" : "تفعيل"}</button><button type="button" disabled={busy || u.id === currentUserId} title={u.id === currentUserId ? "لا يمكنك حذف حسابك الحالي" : undefined} onClick={() => void deleteUser(u)} className="rounded-xl border border-red-500/20 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-40">حذف</button></div>{u.id === currentUserId && <p className="app-muted mt-2 text-xs">لا يمكن إلغاء تفعيل حسابك الحالي أو حذفه.</p>}</td>
                           </tr>
                         ))}
                       </tbody>
                     </table></div>
-                    <div className="divide-y divide-white/10 2xl:hidden">{users.map(user => <article key={user.id} className="space-y-3 p-5">
-                      <div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0"><p className="break-all font-semibold" dir="ltr">{user.email}</p>{user.username && <p className="app-muted mt-1 text-xs" dir="ltr">@{user.username}</p>}</div><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${user.is_active ? "bg-emerald-500/10 text-emerald-400" : "bg-white/10 app-muted"}`}>{user.is_active ? "نشط" : "موقوف"}</span></div>
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm"><span className="text-primary">{roles.find(item => item.value === user.role)?.label || user.role}</span><span className="app-muted text-xs">{new Date(user.created_at).toLocaleDateString("ar-EG")}</span></div>
-                      <div className="flex flex-wrap gap-2"><button type="button" disabled={busy} onClick={() => startEdit(user)} className="app-secondary-button px-3 py-2 text-xs">تعديل</button><button type="button" disabled={busy || user.id === currentUserId} title={user.id === currentUserId ? "لا يمكنك إلغاء تفعيل حسابك الحالي" : undefined} onClick={() => void toggleStatus(user)} className="app-secondary-button px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">{user.is_active ? "إلغاء التفعيل" : "تفعيل"}</button><button type="button" disabled={busy || user.id === currentUserId} title={user.id === currentUserId ? "لا يمكنك حذف حسابك الحالي" : undefined} onClick={() => void deleteUser(user)} className="rounded-xl border border-red-500/20 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-40">حذف</button></div>
+                    <div className="divide-y divide-white/10 2xl:hidden">{users.map(user => <article key={user.id} data-search-id={user.id} className="space-y-3 p-5">
+                      <div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0"><p className="break-all font-semibold" dir="ltr">{user.email}</p>{user.username && <p className="app-muted mt-1 text-xs" dir="ltr">@{user.username}</p>}</div><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${user.is_active && roles.some(option => option.value === user.role) ? "bg-emerald-500/10 text-emerald-400" : "bg-white/10 app-muted"}`}>{accountStatus(user)}</span></div>
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm"><span className="text-primary">{roleLabel(user.role)}</span><span className="app-muted text-xs">{new Date(user.created_at).toLocaleDateString("ar-EG")}</span></div>
+                      <div className="flex flex-wrap gap-2"><button type="button" disabled={busy} onClick={() => startEdit(user)} className="app-secondary-button px-3 py-2 text-xs">تعديل</button><button type="button" disabled={busy || user.id === currentUserId || (!user.is_active && !roles.some(option => option.value === user.role))} title={user.id === currentUserId ? "لا يمكنك إلغاء تفعيل حسابك الحالي" : !user.is_active && !roles.some(option => option.value === user.role) ? "غيّر الدور أولًا" : undefined} onClick={() => void toggleStatus(user)} className="app-secondary-button px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40">{user.is_active ? "إلغاء التفعيل" : "تفعيل"}</button><button type="button" disabled={busy || user.id === currentUserId} title={user.id === currentUserId ? "لا يمكنك حذف حسابك الحالي" : undefined} onClick={() => void deleteUser(user)} className="rounded-xl border border-red-500/20 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-40">حذف</button></div>
                       {user.id === currentUserId && <p className="app-muted text-xs">لا يمكن إلغاء تفعيل حسابك الحالي أو حذفه.</p>}
                     </article>)}</div></>
                   )}
