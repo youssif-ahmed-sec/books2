@@ -2,6 +2,7 @@ from decimal import Decimal
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy import event, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -9,7 +10,7 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.pool import StaticPool
 
 from models.user import Base, RoleEnum, User
-from models.product import Product, ProductBundleComponent, ProductPrice, ProductUnit
+from models.product import Brand, Category, Product, ProductBundleComponent, ProductPrice, ProductUnit, Subcategory, Supplier
 from models.order import Order, OrderItem, OrderStatusEnum
 from models.inventory import InventoryBalance, InventoryTransaction, Warehouse
 from models.inventory import TransactionTypeEnum
@@ -26,6 +27,19 @@ def compile_jsonb_for_test(_element, _compiler, **_kwargs):
     return "JSON"
 
 
+async def seed_product_catalog(db):
+    category_id, subcategory_id, brand_id, supplier_id = [uuid4() for _ in range(4)]
+    db.add_all([
+        Category(id=category_id, name_en="Books", name_ar="كتب"),
+        Subcategory(id=subcategory_id, category_id=category_id, name_en="General", name_ar="عام"),
+        Brand(id=brand_id, name_en="Local", name_ar="محلي"),
+        Supplier(id=supplier_id, name="Local supplier"),
+    ])
+    await db.commit()
+    return dict(category_id=category_id, subcategory_id=subcategory_id,
+                brand_id=brand_id, supplier_id=supplier_id)
+
+
 @pytest.mark.asyncio
 async def test_product_english_name_can_be_omitted_or_cleared():
     engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
@@ -36,8 +50,9 @@ async def test_product_english_name_can_be_omitted_or_cleared():
     async with session_factory() as db:
         db.add(User(id=user_id, role=RoleEnum.ADMIN))
         await db.commit()
+        catalog = await seed_product_catalog(db)
         created = await ProductService.create_product(
-            db, ProductCreate(sku="AR-ONLY", name_ar="كتاب عربي", base_unit="Piece"), user_id,
+            db, ProductCreate(sku="AR-ONLY", name_ar="كتاب عربي", base_unit="Piece", **catalog), user_id,
         )
         product_id = created["id"]
         assert (await db.execute(select(Product.name_en).where(Product.id == product_id))).scalar_one() == ""
@@ -57,8 +72,9 @@ async def test_unit_barcodes_are_distinct_and_product_edit_accepts_blank_barcode
     async with session_factory() as db:
         db.add(User(id=user_id, role=RoleEnum.ADMIN))
         await db.commit()
+        catalog = await seed_product_catalog(db)
         created = await ProductService.create_product(db, ProductCreate(
-            sku="PENS-1", name_ar="قلم جاف", base_unit="قطعة",
+            sku="PENS-1", name_ar="قلم جاف", base_unit="قطعة", **catalog,
             units=[
                 {"unit_name": "قطعة", "conversion_factor": 1, "prices": [{"price_level": "Retail", "price": 7}]},
                 {"unit_name": "دستة", "conversion_factor": 12, "prices": [{"price_level": "Wholesale", "price": 66}]},
@@ -108,30 +124,31 @@ async def test_offer_keeps_selected_dozen_and_wholesale_tier_with_base_stock_qua
     async with session_factory() as db:
         db.add(User(id=user_id, role=RoleEnum.ADMIN))
         await db.commit()
+        catalog = await seed_product_catalog(db)
         item = await ProductService.create_product(db, ProductCreate(
-            sku="OFFER-PENS", name_ar="قلم", base_unit="قطعة",
+            sku="OFFER-PENS", name_ar="قلم", base_unit="قطعة", **catalog,
             units=[{"unit_name": "دستة", "conversion_factor": 12,
                     "prices": [{"price_level": "Wholesale", "price": 66}]}],
         ), user_id)
         unit = (await db.execute(select(ProductUnit).where(ProductUnit.product_id == item["id"]))).scalar_one()
         offer = await ProductService.create_product(db, ProductCreate(
-            sku="OFFER-1", name_ar="عرض أقلام", base_unit="عرض", is_bundle=True,
+            sku="OFFER-1", name_ar="عرض أقلام", base_unit="عرض", is_bundle=True, **catalog,
             bundle_components=[{"component_id": item["id"], "unit_id": unit.id,
                                 "price_level": "Wholesale", "quantity": 24}],
         ), user_id)
         component = (await db.execute(select(ProductBundleComponent).where(
             ProductBundleComponent.bundle_id == offer["id"]))).scalar_one()
         assert (component.unit_id, component.price_level, component.quantity) == (unit.id, "Wholesale", Decimal("24"))
-        with pytest.raises(ValueError, match="component stock"):
-            await ProductService.update_product(db, offer["id"], ProductUpdate(total_stock=1), user_id)
+        with pytest.raises(ValidationError, match="total_stock"):
+            ProductUpdate(total_stock=1)
         with pytest.raises(ValueError, match="component stock"):
             await ProductService.create_product(db, ProductCreate(
-                sku="OFFER-WITH-STOCK", name_ar="عرض بمخزون", base_unit="عرض",
+                sku="OFFER-WITH-STOCK", name_ar="عرض بمخزون", base_unit="عرض", **catalog,
                 is_bundle=True, initial_stock=1,
             ), user_id)
         with pytest.raises(ValueError, match="whole number"):
             await ProductService.validate_bundle_components(db, uuid4(), [
-                ProductCreate(sku="X", name_ar="X", base_unit="X", is_bundle=True,
+                ProductCreate(sku="X", name_ar="X", base_unit="X", is_bundle=True, **catalog,
                     bundle_components=[{"component_id": item["id"], "unit_id": unit.id,
                                         "price_level": "Wholesale", "quantity": 13}]).bundle_components[0]
             ])
@@ -152,9 +169,11 @@ async def test_editing_product_preserves_order_unit_reference_and_archives_remov
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     user_id, product_id, kept_unit_id, removed_unit_id, order_id = [uuid4() for _ in range(5)]
     async with session_factory() as db:
+        db.add(User(id=user_id, role=RoleEnum.ADMIN))
+        await db.commit()
+        catalog = await seed_product_catalog(db)
         db.add_all([
-            User(id=user_id, role=RoleEnum.ADMIN),
-            Product(id=product_id, sku="BOOK-1", name_en="Book", name_ar="كتاب", base_unit="Piece"),
+            Product(id=product_id, sku="BOOK-1", name_en="Book", name_ar="كتاب", base_unit="Piece", **catalog),
         ])
         await db.flush()
         db.add_all([
@@ -186,7 +205,7 @@ async def test_editing_product_preserves_order_unit_reference_and_archives_remov
         assert (await db.execute(select(OrderItem.unit_id).where(OrderItem.order_id == order_id))).scalar_one() == removed_unit_id
         removed = (await db.execute(select(ProductUnit).where(ProductUnit.id == removed_unit_id))).scalar_one()
         assert removed.is_deleted is True
-        assert removed.barcode is None
+        assert removed.barcode == "BOOK-1-BOX"
 
     await engine.dispose()
 
@@ -218,8 +237,8 @@ async def test_reports_use_current_order_and_inventory_columns():
         inventory = await get_inventory_report(db=db, current_user=user)
         assert sales["metrics"]["total_revenue"] == 20
         assert sales["data"][0]["final_total"] == 20
-        assert inventory[0]["transaction_type"] == "Receiving"
-        assert inventory[0]["quantity_changed"] == 2
+        assert inventory["data"][0]["transaction_type"] == "Receiving"
+        assert inventory["data"][0]["quantity_changed"] == 2
 
     await engine.dispose()
 

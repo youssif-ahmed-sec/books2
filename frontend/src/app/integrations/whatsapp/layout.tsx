@@ -2,8 +2,8 @@
 
 import type { ReactNode } from "react";
 import RoleGate from "@/components/RoleGate";
-import { inventoryRoles } from "@/lib/routeRoles";
+import { adminRoles } from "@/lib/routeRoles";
 
 export default function WhatsAppLayout({ children }: { children: ReactNode }) {
-  return <RoleGate allowedRoles={inventoryRoles}>{children}</RoleGate>;
+  return <RoleGate allowedRoles={adminRoles}>{children}</RoleGate>;
 }

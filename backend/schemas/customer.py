@@ -31,6 +31,7 @@ class CustomerUpdate(CustomerBase):
 
 class CustomerResponse(CustomerBase):
     id: UUID
+    addresses: List[str] = Field(default_factory=list)
     balance: Optional[float] = None
     credit_limit: Optional[float] = None
     purchase_count: int

@@ -95,7 +95,7 @@ export default function PurchasesPage() {
       <SideNav />
       <TopNav title="أوامر الشراء القديمة" />
       <main className="app-main space-y-6">
-        <div className="flex flex-wrap items-end justify-between gap-3"><div><h1 className="app-heading">أوامر الشراء القديمة</h1><p className="app-subtitle">السجلات السابقة محفوظة ويمكن إكمال استلام الأوامر المفتوحة.</p></div><Link href="/purchases" className="app-secondary-button">العودة للمشتريات</Link></div>
+        <div className="flex flex-wrap items-end justify-between gap-3"><div><h1 className="app-heading">أوامر الشراء القديمة</h1></div><Link href="/purchases" className="app-secondary-button">العودة للمشتريات</Link></div>
         {error && <div className="app-panel p-4 text-red-300" role="alert">{error}</div>}
         <div className="space-y-3">
           {purchases.map(purchase => {
@@ -116,7 +116,7 @@ export default function PurchasesPage() {
                   <button className="app-secondary-button" disabled={busy} onClick={() => act(`/purchases/${purchase.id}/reject`)}>رفض</button>
                 </>}
                 {role === "ADMIN" && purchase.status === "APPROVED" && <button className="app-primary-button" disabled={busy} onClick={() => act(`/purchases/${purchase.id}/place`)}>إصدار أمر الشراء</button>}
-                {["ORDERED", "PARTIALLY_RECEIVED"].includes(purchase.status) && <Link className="app-secondary-button inline-flex items-center gap-2" href={`/integrations/whatsapp?legacy_purchase_id=${purchase.id}`}><i className="bi bi-whatsapp" aria-hidden="true" />رسالة واتساب</Link>}
+                {role === "ADMIN" && ["ORDERED", "PARTIALLY_RECEIVED"].includes(purchase.status) && <Link className="app-secondary-button inline-flex items-center gap-2" href={`/integrations/whatsapp?legacy_purchase_id=${purchase.id}`}><i className="bi bi-whatsapp" aria-hidden="true" />رسالة واتساب</Link>}
               </div>
               {["ORDERED", "PARTIALLY_RECEIVED"].includes(purchase.status) && <div className="grid gap-2 md:grid-cols-3">
                 {warehouses.length === 1 ? <p className="app-muted self-center text-sm">الاستلام إلى: <strong className="text-[#e5e2e1]">{warehouses[0].name}</strong></p> : warehouses.length > 1 ?

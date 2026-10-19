@@ -1,7 +1,7 @@
 import { fetchApi } from "@/lib/api";
 import type { UserRole } from "@/utils/auth";
 
-export interface CurrentUser { id: string; email: string; username?: string | null; role: UserRole }
+export interface CurrentUser { id: string; email: string | null; username?: string | null; full_name?: string | null; role: UserRole }
 
 let cached: { token: string; user: CurrentUser } | null = null;
 let pending: { token: string; promise: Promise<CurrentUser> } | null = null;

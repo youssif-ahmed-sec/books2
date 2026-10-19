@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Optional, List
 from uuid import UUID
 from datetime import datetime
@@ -86,6 +86,17 @@ class InventoryCountCreate(BaseModel):
     warehouse_id: UUID
     observed_quantity: Decimal = Field(ge=0, max_digits=18, decimal_places=2, allow_inf_nan=False)
     request_id: UUID
+    reason: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def clean_reason(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = value.strip()
+        if value and len(value) < 3:
+            raise ValueError("Reason must be at least 3 characters")
+        return value or None
 
 
 class InventoryCountResponse(BaseModel):
@@ -96,7 +107,47 @@ class InventoryCountResponse(BaseModel):
     expected_quantity: Decimal
     observed_quantity: Decimal
     difference: Decimal
+    session_id: Optional[UUID] = None
+    reason: Optional[str] = None
+    status: str = "APPROVED"
+    unit_cost: Optional[Decimal] = None
+    reviewed_by: Optional[UUID] = None
+    reviewed_at: Optional[datetime] = None
+    rejection_reason: Optional[str] = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class CountSessionLine(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    product_id: UUID
+    expected_quantity: Decimal = Field(ge=0, max_digits=18, decimal_places=2, allow_inf_nan=False)
+    observed_quantity: Decimal = Field(ge=0, max_digits=18, decimal_places=2, allow_inf_nan=False)
+    reason: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def clean_reason(cls, value: Optional[str]) -> Optional[str]:
+        return InventoryCountCreate.clean_reason(value)
+
+
+class CountSessionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_id: UUID
+    warehouse_id: UUID
+    lines: List[CountSessionLine] = Field(min_length=1, max_length=100)
+
+
+class CountRejectBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    reason: str = Field(min_length=3, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def clean_reason(cls, value: str) -> str:
+        value = value.strip()
+        if len(value) < 3:
+            raise ValueError("Rejection reason must be at least 3 characters")
+        return value
 

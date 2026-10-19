@@ -146,7 +146,7 @@ function QuotationContent() {
 
 export default function QuotationPrintPage() {
   return (
-    <Suspense fallback={<div className="p-10 text-center">جاري التحميل...</div>}>
+    <Suspense fallback={<div className="app-panel m-8 space-y-4 rounded-2xl p-6" role="status" aria-label="جاري تحميل عرض السعر"><span className="app-skeleton h-7 w-44" /><span className="app-skeleton h-12 w-full rounded-xl" /><span className="app-skeleton h-32 w-full rounded-xl" /></div>}>
       <QuotationContent />
     </Suspense>
   );

@@ -1,7 +1,7 @@
 from pydantic import BaseModel, ConfigDict, Field
 from typing import List, Optional, Literal
 from uuid import UUID
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from models.product import PriceLevelEnum, PaymentMethodEnum
 
@@ -198,13 +198,26 @@ class SupplierResponse(SupplierBase):
     id: UUID
     model_config = ConfigDict(from_attributes=True)
 
+class SupplierAllocationCreate(BaseModel):
+    debt_entry_id: UUID
+    amount: Decimal = Field(gt=0, allow_inf_nan=False, max_digits=18, decimal_places=2)
+
+
 class SupplierPaymentCreate(BaseModel):
     request_id: UUID
-    amount: Decimal = Field(gt=0, allow_inf_nan=False)
+    amount: Decimal = Field(gt=0, allow_inf_nan=False, max_digits=18, decimal_places=2)
     payment_method: PaymentMethodEnum = PaymentMethodEnum.CASH
     cash_source: Optional[Literal["SHIFT", "OUTSIDE_SHIFT"]] = None
     reference_number: Optional[str] = None
     notes: Optional[str] = None
+    allocations: List[SupplierAllocationCreate] = []
+    allow_unallocated: bool = False
+
+
+class SupplierAllocationResponse(BaseModel):
+    debt_entry_id: UUID
+    amount: Decimal
+    model_config = ConfigDict(from_attributes=True)
 
 class SupplierPaymentResponse(BaseModel):
     id: UUID
@@ -215,6 +228,7 @@ class SupplierPaymentResponse(BaseModel):
     reference_number: Optional[str] = None
     notes: Optional[str] = None
     payment_date: datetime
+    allocations: List[SupplierAllocationResponse] = []
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -223,6 +237,8 @@ class SupplierDebtCreate(BaseModel):
     amount: Decimal = Field(gt=0, allow_inf_nan=False, max_digits=18, decimal_places=2)
     note: str = Field(min_length=2, max_length=500)
     reference_number: Optional[str] = Field(default=None, max_length=100)
+    due_date: date
+    approved_credit_limit: Optional[Decimal] = Field(default=None, ge=0, allow_inf_nan=False, max_digits=18, decimal_places=2)
 
 
 class SupplierDebtReverse(BaseModel):
@@ -237,6 +253,8 @@ class SupplierDebtEntryResponse(BaseModel):
     amount: Decimal
     note: str
     reference_number: Optional[str] = None
+    due_date: Optional[date] = None
+    allocated_amount: Decimal = Decimal("0")
     reverses_entry_id: Optional[UUID] = None
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)

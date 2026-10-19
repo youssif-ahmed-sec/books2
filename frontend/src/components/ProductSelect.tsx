@@ -17,9 +17,11 @@ interface ProductSelectProps {
   invalid?: boolean;
   compact?: boolean;
   filter?: boolean;
+  allowClear?: boolean;
+  disabled?: boolean;
 }
 
-export function ProductSelect({ label, value, options, placeholder, onChange, invalid = false, compact = false, filter = false }: ProductSelectProps) {
+export function ProductSelect({ label, value, options, placeholder, onChange, invalid = false, compact = false, filter = false, allowClear = true, disabled = false }: ProductSelectProps) {
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const [position, setPosition] = useState({ top: 0, left: 0, width: 0 });
@@ -27,7 +29,7 @@ export function ProductSelect({ label, value, options, placeholder, onChange, in
   const menuRef = useRef<HTMLDivElement>(null);
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const menuId = useId();
-  const allOptions = [{ value: "", label: placeholder }, ...options];
+  const allOptions = allowClear ? [{ value: "", label: placeholder }, ...options] : options;
   const selected = allOptions.find(option => option.value === value);
 
   const showMenu = () => {
@@ -38,7 +40,9 @@ export function ProductSelect({ label, value, options, placeholder, onChange, in
     const top = roomBelow >= estimatedHeight + 12 || roomBelow >= rect.top
       ? rect.bottom + 8
       : Math.max(8, rect.top - estimatedHeight - 8);
-    setPosition({ top, left: rect.left, width: rect.width });
+    const width = Math.min(rect.width, window.innerWidth - 16);
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+    setPosition({ top, left, width });
     setActiveIndex(Math.max(0, allOptions.findIndex(option => option.value === value)));
     setOpen(true);
   };
@@ -98,8 +102,10 @@ export function ProductSelect({ label, value, options, placeholder, onChange, in
         ref={triggerRef}
         type="button"
         aria-label={label}
+        aria-invalid={invalid}
         aria-haspopup="listbox"
         aria-expanded={open}
+        disabled={disabled}
         aria-controls={open ? menuId : undefined}
         className={`product-select-trigger${compact ? " product-select-trigger--compact" : ""}${filter ? " product-select-trigger--filter" : ""}${invalid ? " product-select-trigger--invalid" : ""}`}
         onClick={() => open ? setOpen(false) : showMenu()}

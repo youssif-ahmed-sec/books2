@@ -1,7 +1,7 @@
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.financial import CashAdjustment, CashShift, Payment
@@ -17,9 +17,12 @@ async def open_shift(db: AsyncSession, user_id: UUID) -> CashShift:
 
 
 async def expected_cash(db: AsyncSession, shift: CashShift) -> Decimal:
-    payments = (await db.execute(select(Payment).where(Payment.shift_id == shift.id))).scalars().all()
-    adjustments = (await db.execute(select(CashAdjustment).where(CashAdjustment.shift_id == shift.id))).scalars().all()
-    paid_in = sum((Decimal(str(entry.amount)) for entry in payments if entry.kind in ("SALE", "COLLECTION")), Decimal("0"))
-    refunded = sum((Decimal(str(entry.amount)) for entry in payments if entry.kind == "REFUND"), Decimal("0"))
-    adjustment_total = sum((Decimal(str(entry.amount)) for entry in adjustments), Decimal("0"))
-    return Decimal(str(shift.opening_cash)) + paid_in - refunded + adjustment_total
+    payment_total = (await db.execute(select(func.coalesce(func.sum(case(
+        (Payment.kind.in_(("SALE", "COLLECTION")), Payment.amount),
+        (Payment.kind == "REFUND", -Payment.amount),
+        else_=0,
+    )), 0)).where(Payment.shift_id == shift.id))).scalar_one()
+    adjustment_total = (await db.execute(select(func.coalesce(func.sum(CashAdjustment.amount), 0)).where(
+        CashAdjustment.shift_id == shift.id,
+    ))).scalar_one()
+    return Decimal(str(shift.opening_cash)) + Decimal(str(payment_total)) + Decimal(str(adjustment_total))

@@ -6,6 +6,7 @@ import { useState, useEffect } from "react";
 import { fetchApi } from "@/lib/api";
 import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
+import { LoadingCards } from "@/components/LoadingState";
 import { orderStatusLabels } from "@/lib/orderLabels";
 import { errorMessage } from "@/lib/errors";
 import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
@@ -23,11 +24,13 @@ interface InboxOrder {
   notes: string | null;
 }
 
-const inboxStatuses = ["New Lead", "Draft Order", "Waiting Quotation", "Quotation Sent", "Waiting Customer Approval"];
+const INBOX_PAGE_SIZE = 50;
 
 export default function InboxPage() {
   const [orders, setOrders] = useState<InboxOrder[]>(() => readSectionSnapshot<InboxOrder[]>("inbox-orders") || []);
   const [isLoading, setIsLoading] = useState(() => !readSectionSnapshot("inbox-orders"));
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [customers, setCustomers] = useState<{ id: string; name: string }[]>([]);
   const [leadCustomer, setLeadCustomer] = useState("");
   const [leadSource, setLeadSource] = useState("Phone Call");
@@ -39,12 +42,9 @@ export default function InboxPage() {
   const loadOrders = async () => {
     if (!readSectionSnapshot("inbox-orders")) setIsLoading(true);
     try {
-      const data = await fetchApi("/orders");
-      // Filter for inbox-relevant statuses
-      const inboxOrders = data.filter((o: InboxOrder) =>
-        inboxStatuses.includes(o.status)
-      );
+      const inboxOrders = await fetchApi(`/orders?group=inbox&limit=${INBOX_PAGE_SIZE}&offset=0`) as InboxOrder[];
       setOrders(inboxOrders);
+      setHasMore(inboxOrders.length === INBOX_PAGE_SIZE);
       writeSectionSnapshot("inbox-orders", inboxOrders);
     } catch (err) {
       console.error("Failed to load inbox orders:", err);
@@ -56,11 +56,31 @@ export default function InboxPage() {
   useEffect(() => {
     fetchApi("/customers").then(setCustomers).catch(console.error);
     fetchApi("/orders/preparation-alerts").then(setDelays).catch(console.error);
-    fetchApi("/orders")
-      .then((data: InboxOrder[]) => { const rows = data.filter((o) => inboxStatuses.includes(o.status)); setOrders(rows); writeSectionSnapshot("inbox-orders", rows); })
-      .catch((err) => console.error("Failed to load inbox orders:", err))
+    fetchApi(`/orders?group=inbox&limit=${INBOX_PAGE_SIZE}&offset=0`)
+      .then((rows: InboxOrder[]) => {
+        setOrders(rows);
+        setHasMore(rows.length === INBOX_PAGE_SIZE);
+        writeSectionSnapshot("inbox-orders", rows);
+      })
+      .catch((error) => console.error("Failed to load inbox orders:", error))
       .finally(() => setIsLoading(false));
   }, []);
+
+  const loadMoreOrders = async () => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    try {
+      const page = await fetchApi(`/orders?group=inbox&limit=${INBOX_PAGE_SIZE}&offset=${orders.length}`) as InboxOrder[];
+      const combined = [...orders, ...page.filter(order => !orders.some(existing => existing.id === order.id))];
+      setOrders(combined);
+      setHasMore(page.length === INBOX_PAGE_SIZE);
+      writeSectionSnapshot("inbox-orders", combined);
+    } catch (error) {
+      notifyError(errorMessage(error, "تعذر تحميل المزيد من الطلبات"));
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const createLead = async () => {
     try {
@@ -90,14 +110,13 @@ export default function InboxPage() {
         <div className="space-y-6">
           <div>
             <h1 className="app-heading">متابعة الطلبات</h1>
-            <p className="app-subtitle">المسودات وعروض الأسعار وموافقات العملاء</p>
           </div>
           {message && <p role="status" className="app-panel p-3">{message}</p>}
           {delays.length > 0 && <section className="app-panel p-5 border border-amber-500/30"><h2 className="font-bold mb-2">تأخر تجهيز الطلبات</h2>{delays.map(delay => <p key={delay.id} className="text-sm">طلب #{delay.id.slice(0, 8)} — {delay.hours} ساعة {delay.escalate_to_admin ? "— تجاوز 4 ساعات ويحتاج تدخل المدير" : ""}</p>)}</section>}
           <section className="app-panel p-5 space-y-3"><h2 className="font-bold">تسجيل استفسار هاتفي أو مباشر</h2><div className="flex flex-wrap gap-3"><select className="app-field" value={leadCustomer} onChange={event => setLeadCustomer(event.target.value)}><option value="">عميل غير مسجل</option>{customers.map(customer => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select><select className="app-field" value={leadSource} onChange={event => setLeadSource(event.target.value)}><option value="Phone Call">هاتف</option><option value="Walk-In Customer">حضور مباشر</option><option value="Manual Entry">إدخال يدوي</option></select><select className="app-field" value={leadPriority} onChange={event => setLeadPriority(event.target.value)}><option value="Low">أولوية منخفضة</option><option value="Normal">عادية</option><option value="High">عالية</option></select></div><textarea className="app-field w-full" placeholder="طلب العميل أو ملخص الاستفسار" value={leadNotes} onChange={event => setLeadNotes(event.target.value)} /><button className="app-primary-button" disabled={leadNotes.trim().length < 2} onClick={createLead}>تسجيل الاستفسار</button></section>
 
       {isLoading ? (
-        <div className="app-panel app-muted p-8">جاري تحميل الطلبات...</div>
+        <LoadingCards label="جاري تحميل الطلبات المعلقة" />
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-6">
           {/* New Leads / Drafts */}
@@ -179,6 +198,9 @@ export default function InboxPage() {
           </div>
         </div>
       )}
+      {hasMore && !isLoading && <button className="app-secondary-button" disabled={loadingMore} onClick={loadMoreOrders}>
+        {loadingMore ? "جارٍ التحميل..." : "تحميل المزيد من الطلبات"}
+      </button>}
         </div>
       </main>
     </div>

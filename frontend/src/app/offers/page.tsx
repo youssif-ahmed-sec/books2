@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
 import { ProductSelect } from "@/components/ProductSelect";
+import { ZeroHintNumberInput } from "@/components/ZeroHintNumberInput";
 import { fetchApi } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
 import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
@@ -98,13 +99,13 @@ function OfferEditor({ offer, onClose, onSaved }: { offer: Offer | null; onClose
   return <div className="motion-overlay fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-3 sm:p-6" dir="rtl" role="dialog" aria-modal="true" aria-label={offer ? "تعديل العرض" : "إضافة عرض"}>
     <div className="motion-dialog app-panel flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden">
       <header className="flex items-center justify-between gap-4 border-b border-white/10 px-5 py-4 sm:px-7">
-        <div><h2 className="text-xl font-bold">{offer ? "تعديل العرض" : "عرض جديد"}</h2><p className="app-muted mt-1 text-sm">اختَر الأصناف الموجودة، ثم وحدة وتسعير وكمية كل صنف.</p></div>
+        <div><h2 className="text-xl font-bold">{offer ? "تعديل العرض" : "عرض جديد"}</h2></div>
         <button type="button" onClick={onClose} className="app-icon-button" aria-label="إغلاق"><span className="material-symbols-outlined">close</span></button>
       </header>
       <div className="custom-scrollbar grid gap-6 overflow-y-auto p-5 sm:p-7 lg:grid-cols-[minmax(0,1fr)_290px]">
         <div className="min-w-0 space-y-5">
           <label className="block text-sm font-bold">اسم العرض<input className="app-field mt-2" value={name} onChange={event => setName(event.target.value)} maxLength={160} placeholder="مثال: باقة العودة للمدارس" autoFocus /></label>
-          <section className="space-y-3"><div><h3 className="font-bold">منتجات العرض</h3><p className="app-muted text-sm">ابحث بالاسم أو الباركود وأضف المنتج.</p></div>
+          <section className="space-y-3"><div><h3 className="font-bold">منتجات العرض</h3></div>
             <input className="app-field app-search-focus" value={search} onChange={event => setSearch(event.target.value)} placeholder="ابحث عن صنف موجود..." aria-label="بحث عن منتج للعرض" />
             <div className="custom-scrollbar max-h-40 overflow-y-auto rounded-xl border border-white/10 p-1">
               {searching ? <p className="app-muted p-3 text-sm">جاري البحث...</p> : results.length ? results.map(product =>
@@ -123,7 +124,7 @@ function OfferEditor({ offer, onClose, onSaved }: { offer: Offer | null; onClose
                   updateLine(line.key, { unitId: value, priceLevel: tier?.price_level || "" });
                 }} compact /></label>
                 <label className="min-w-0 text-sm">التسعير<ProductSelect label={`تسعير ${product?.name_ar || "الصنف"}`} value={line.priceLevel} placeholder="اختر التسعير" options={available.map(price => ({ value: price.price_level, label: `${tierName(price.price_level)} · ${money(Number(price.price))} ج.م` }))} onChange={value => updateLine(line.key, { priceLevel: value })} compact /></label>
-                <label className="text-sm">العدد من هذه الوحدة<input className="app-field mt-1 h-11" type="number" min="1" step="1" value={line.quantity} onChange={event => updateLine(line.key, { quantity: event.target.value })} /></label>
+                <label className="text-sm">العدد من هذه الوحدة<ZeroHintNumberInput className="app-field mt-1 h-11" min="1" step="1" value={line.quantity} placeholder="1" onChange={event => updateLine(line.key, { quantity: event.target.value })} /></label>
               </div>
               <p className="app-muted mt-3 text-sm">{money(priceFor(line))} × {line.quantity || "0"} = <strong className="text-primary" dir="ltr">{money(priceFor(line) * Number(line.quantity || 0))} ج.م</strong></p>
             </div>;
@@ -131,7 +132,7 @@ function OfferEditor({ offer, onClose, onSaved }: { offer: Offer | null; onClose
         </div>
         <aside className="app-panel h-fit space-y-4 p-5 lg:sticky lg:top-0"><h3 className="font-bold">معاينة السعر</h3>
           <div className="flex justify-between gap-3 text-sm"><span className="app-muted">مجموع الأسعار المختارة</span><strong dir="ltr">{money(referenceTotal)} ج.م</strong></div>
-          <label className="block text-sm font-bold">سعر بيع العرض<input className="app-field mt-2 text-xl font-bold" type="number" min="0.01" step="0.01" value={manualPrice ? priceInput : money(referenceTotal)} onChange={event => { setManualPrice(true); setPriceInput(event.target.value); }} dir="ltr" /></label>
+          <label className="block text-sm font-bold">سعر بيع العرض<ZeroHintNumberInput className="app-field mt-2 text-xl font-bold" min="0.01" step="0.01" value={manualPrice ? priceInput : money(referenceTotal)} onChange={event => { setManualPrice(true); setPriceInput(event.target.value); }} dir="ltr" /></label>
           {manualPrice && <button type="button" onClick={() => { setManualPrice(false); setPriceInput(""); }} className="text-sm font-semibold text-primary hover:underline">استخدم المجموع المحسوب</button>}
           {referenceTotal > 0 && finalPrice > 0 && <p className="app-muted border-t border-white/10 pt-3 text-sm">{finalPrice < referenceTotal ? `توفير ${money(referenceTotal - finalPrice)} ج.م` : finalPrice > referenceTotal ? `زيادة ${money(finalPrice - referenceTotal)} ج.م عن المجموع` : "السعر يساوي مجموع المنتجات"}</p>}
           <p className="app-muted text-xs leading-6">سعر العرض النهائي واحد لكل شرائح العملاء. المخزون يُخصم من المنتجات المكوِّنة عند البيع.</p>
@@ -150,13 +151,14 @@ export default function OffersPage() {
   const [editing, setEditing] = useState<Offer | "new" | null>(null);
   const [deleting, setDeleting] = useState<Offer | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [canCreate, setCanCreate] = useState(false);
   const [canManage, setCanManage] = useState(false);
   const load = useCallback(async () => {
     try { const data = await fetchApi("/offers") as Offer[]; setOffers(data); writeSectionSnapshot("offers", data); setError(""); }
     catch (cause) { setError(errorMessage(cause, "تعذر تحميل العروض")); }
     finally { setLoading(false); }
   }, []);
-  useEffect(() => { const timer = window.setTimeout(() => { setCanManage(getUserRole() === "ADMIN"); void load(); }, 0); return () => window.clearTimeout(timer); }, [load]);
+  useEffect(() => { const timer = window.setTimeout(() => { const role = getUserRole(); setCanCreate(role === "ADMIN" || role === "INVENTORY_CONTROLLER"); setCanManage(role === "ADMIN"); void load(); }, 0); return () => window.clearTimeout(timer); }, [load]);
   const toggle = async (offer: Offer) => {
     setBusyId(offer.id); setError("");
     try { await fetchApi(`/offers/${offer.id}/status`, { method: "PATCH", body: JSON.stringify({ is_active: !offer.is_active }) }); await load(); }
@@ -171,7 +173,7 @@ export default function OffersPage() {
     finally { setBusyId(null); }
   };
   return <div className="min-h-screen" dir="rtl"><SideNav /><TopNav title="العروض" />
-    <main className="app-main space-y-6"><div className="flex flex-wrap items-end justify-between gap-4"><div><h1 className="app-heading">العروض</h1><p className="app-subtitle">اجمع منتجات موجودة وحدد وحدة وتسعير كل منتج، ثم اضبط سعر الباقة.</p></div>{canManage && <button type="button" onClick={() => setEditing("new")} className="app-primary-button"><span className="material-symbols-outlined text-lg">add</span>إنشاء عرض</button>}</div>
+    <main className="app-main space-y-6"><div className="flex flex-wrap items-end justify-between gap-4"><div><h1 className="app-heading">العروض</h1></div>{canCreate && <button type="button" onClick={() => setEditing("new")} className="app-primary-button"><span className="material-symbols-outlined text-lg">add</span>إنشاء عرض</button>}</div>
       {error && <p role="alert" className="app-panel p-4 text-red-300">{error}</p>}
       {loading ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3" aria-label="جاري تحميل العروض">{[0, 1, 2].map(index => <div key={index} className="app-panel space-y-4 p-5"><span className="app-skeleton h-5 w-36" /><span className="app-skeleton h-4 w-52 max-w-full" /><span className="app-skeleton h-4 w-28" /></div>)}</div> : offers.length === 0 ?
         <div className="app-panel p-10 text-center"><span className="material-symbols-outlined mb-2 text-4xl text-primary">sell</span><p className="font-bold">مفيش عروض مسجلة لسه</p><p className="app-muted mt-1 text-sm">ابدأ بتجميع أصناف من المخزون في عرض جديد.</p></div> :

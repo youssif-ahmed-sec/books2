@@ -69,9 +69,7 @@ export default function LoginPage() {
         <div className="w-full max-w-[440px] animate-fade-in">
           <div className="mb-10 flex items-center gap-4 lg:hidden"><BrandMark /><p className="text-xl font-bold">مكتبة سعود الشافعي</p></div>
           <div className="mb-9">
-            <p className="login-eyebrow">مرحبًا بعودتك</p>
-            <h2 className="mt-3 text-4xl font-bold tracking-tight">تسجيل الدخول</h2>
-            <p className="app-muted mt-3 text-sm leading-7">أدخل بيانات حسابك للوصول إلى مساحة عملك.</p>
+            <h2 className="text-4xl font-bold tracking-tight">تسجيل الدخول</h2>
           </div>
           <form className="space-y-6" onSubmit={handleSubmit}>
             {error && (
@@ -90,7 +88,7 @@ export default function LoginPage() {
                   autoComplete="username"
                   dir="ltr"
                   required
-                  placeholder="name@example.com أو اسم المستخدم"
+                  placeholder="البريد الإلكتروني أو اسم المستخدم"
                   value={identifier}
                   onChange={(e) => setIdentifier(e.target.value)}
                   className="login-input w-full py-4 pl-12 pr-5 text-left text-base"

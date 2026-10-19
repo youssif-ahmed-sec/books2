@@ -1,12 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from uuid import UUID
 from typing import List
 from decimal import Decimal
+from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 
-from core.dependencies import require_admin, require_basic_staff_access, require_pos_orders_access
+from core.dependencies import require_admin, require_pos_orders_access
 from database import get_db
 from models.customer import Customer
 from models.financial import Payment
@@ -48,17 +49,49 @@ def default_price_level(customer_type: CustomerTypeEnum) -> PriceLevelEnum:
 
 def visible_customer(customer: Customer, role: RoleEnum) -> CustomerResponse:
     response = CustomerResponse.model_validate(customer)
+    response.addresses = list(dict.fromkeys(address for address in [customer.address, *(customer.addresses or [])] if address))
     if role not in (RoleEnum.ADMIN, RoleEnum.CASHIER_ORDERS):
         response.balance = None
         response.credit_limit = None
     return response
 
+
+class CustomerAddressInput(BaseModel):
+    address: str = Field(min_length=5, max_length=300)
+
+
+@router.post("/{customer_id}/addresses", response_model=CustomerResponse)
+async def add_customer_address(
+    customer_id: UUID, payload: CustomerAddressInput,
+    db: AsyncSession = Depends(get_db), current_user: User = Depends(require_pos_orders_access),
+):
+    address = " ".join(payload.address.split())
+    if len(address) < 5:
+        raise HTTPException(status_code=422, detail="اكتب عنوانًا واضحًا")
+    customer = (await db.execute(select(Customer).where(
+        Customer.id == customer_id, Customer.is_deleted == False, Customer.is_active == True,
+    ).with_for_update())).scalar_one_or_none()
+    if customer is None:
+        raise HTTPException(status_code=404, detail="العميل غير موجود")
+    if address not in [customer.address, *(customer.addresses or [])]:
+        if not customer.address:
+            customer.address = address
+        else:
+            customer.addresses = [*(customer.addresses or []), address]
+        db.add(AuditLog(user_id=current_user.id, action="ADD_CUSTOMER_ADDRESS", entity_type="Customer", entity_id=str(customer.id)))
+        await db.commit()
+        await db.refresh(customer)
+    return visible_customer(customer, current_user.role)
+
 @router.get("", response_model=List[CustomerResponse])
 async def get_customers(
+    phone: str | None = Query(default=None, pattern=r"^[0-9]{11}$"),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_basic_staff_access),
+    current_user: User = Depends(require_pos_orders_access),
 ):
     query = select(Customer).where(Customer.is_deleted == False).order_by(Customer.name)
+    if phone is not None:
+        query = query.where(Customer.phone == phone, Customer.is_active == True)
     result = await db.execute(query)
     return [visible_customer(customer, current_user.role) for customer in result.scalars().all()]
 
@@ -66,9 +99,16 @@ async def get_customers(
 async def create_customer(
     customer_in: CustomerCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_basic_staff_access)
+    current_user: User = Depends(require_pos_orders_access)
 ):
     values = customer_in.model_dump()
+    if values.get("phone"):
+        values["phone"] = values["phone"].strip()
+        existing = (await db.execute(select(Customer.id).where(
+            Customer.phone == values["phone"], Customer.is_deleted == False,
+        ))).scalar_one_or_none()
+        if existing is not None:
+            raise HTTPException(status_code=409, detail="رقم التليفون مسجل لعميل بالفعل")
     if current_user.role != RoleEnum.ADMIN:
         values["price_level"] = default_price_level(customer_in.customer_type)
     new_customer = Customer(**values)
@@ -84,7 +124,7 @@ async def update_customer(
     customer_id: UUID,
     customer_in: CustomerUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_basic_staff_access)
+    current_user: User = Depends(require_pos_orders_access)
 ):
     result = await db.execute(select(Customer).where(Customer.id == customer_id, Customer.is_deleted == False))
     customer = result.scalar_one_or_none()
@@ -94,6 +134,8 @@ async def update_customer(
         raise HTTPException(status_code=403, detail="Admin access required to change customer pricing")
         
     changes = customer_in.model_dump(exclude_unset=True)
+    if "address" in changes and customer.address and changes["address"] != customer.address:
+        customer.addresses = list(dict.fromkeys([*(customer.addresses or []), customer.address]))
     if current_user.role != RoleEnum.ADMIN and "customer_type" in changes:
         changes["price_level"] = default_price_level(changes["customer_type"])
     for k, v in changes.items():
@@ -107,7 +149,7 @@ async def update_customer(
 async def delete_customer(
     customer_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_basic_staff_access)
+    current_user: User = Depends(require_pos_orders_access)
 ):
     result = await db.execute(select(Customer).where(Customer.id == customer_id, Customer.is_deleted == False))
     customer = result.scalar_one_or_none()
@@ -200,7 +242,7 @@ async def customer_payment_history(
 async def interaction_history(
     customer_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_basic_staff_access),
+    _user: User = Depends(require_pos_orders_access),
 ):
     return (await db.execute(select(CustomerInteraction).where(CustomerInteraction.customer_id == customer_id).order_by(CustomerInteraction.created_at.desc()))).scalars().all()
 
@@ -210,7 +252,7 @@ async def record_interaction(
     customer_id: UUID,
     payload: InteractionCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_basic_staff_access),
+    user: User = Depends(require_pos_orders_access),
 ):
     exists = (await db.execute(select(Customer.id).where(Customer.id == customer_id, Customer.is_deleted == False))).scalar_one_or_none()
     if exists is None:
@@ -228,8 +270,8 @@ async def record_interaction(
 async def customer_order_history(
     customer_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_basic_staff_access),
+    _user: User = Depends(require_pos_orders_access),
 ):
     rows = (await db.execute(select(Order).where(Order.customer_id == customer_id).order_by(Order.created_at.desc()))).scalars().all()
-    return [{"id": order.id, "status": order.status, "total_amount": float(order.total_amount),
+    return [{"id": order.id, "public_number": order.public_number, "status": order.status, "total_amount": float(order.total_amount),
              "created_at": order.created_at, "source": order.source} for order in rows]

@@ -1,6 +1,6 @@
 "use client";
 
-import { notifyError } from "@/lib/notifications";
+import { notifyError, notifySuccess } from "@/lib/notifications";
 
 import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
@@ -14,8 +14,9 @@ import InventoryMovementsModal from "@/components/InventoryMovementsModal";
 import ReceiveStockPanel from "@/components/ReceiveStockPanel";
 import { fetchApi } from "@/lib/api";
 import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
-import { getUserRole, canViewCost, canEditProduct, UserRole } from "@/utils/auth";
+import { getUserRole, canViewCost, UserRole } from "@/utils/auth";
 import { useHydrated } from "@/lib/useHydrated";
+import { useConfirmAction } from "@/components/ConfirmationProvider";
 
 interface InventoryItem {
   id: string;
@@ -52,7 +53,7 @@ interface CatalogProduct {
   units: Array<{ id: string; unit_name: string; barcode: string; prices: Array<{ price_level: string; price: string }> }>;
 }
 interface Balance { product_id: string; current_stock: string }
-interface RecentTransaction { transaction_type: string; product_name?: string; created_at: string }
+interface RecentTransaction { transaction_type: string; product_name?: string; created_at: string; notes?: string | null }
 interface StockMovement { product: string; type: string; date: string; typeStyle: string }
 interface PurchaseNeeded { id: string; name: string; stock: string; image?: string }
 interface StockAlert { product_id: string; name: string; stock: number; base_unit: string; image_url?: string }
@@ -65,6 +66,7 @@ interface InventorySnapshot {
 }
 
 export default function InventoryPage() {
+  const confirmAction = useConfirmAction();
   const [showAddPanel, setShowAddPanel] = useState(false);
   const [showEditPanel, setShowEditPanel] = useState(false);
   const [showMovementsModal, setShowMovementsModal] = useState(false);
@@ -83,6 +85,7 @@ export default function InventoryPage() {
   const [loading, setLoading] = useState(() => !readSectionSnapshot<InventorySnapshot>("inventory"));
   const hydrated = useHydrated();
   const userRole: UserRole | null = hydrated ? getUserRole() : null;
+  const hasInventoryAccess = userRole === "ADMIN" || userRole === "INVENTORY_CONTROLLER";
 
   const [suppliers, setSuppliers] = useState<SupplierOption[]>([]);
   const [categories, setCategories] = useState<CategoryOption[]>([]);
@@ -94,6 +97,13 @@ export default function InventoryPage() {
   const [page, setPage] = useState(() => readSectionSnapshot<InventorySnapshot>("inventory")?.page || 1);
   const [totalItems, setTotalItems] = useState(() => readSectionSnapshot<InventorySnapshot>("inventory")?.total || 0);
   const limit = 10;
+  const totalPages = Math.max(1, Math.ceil(totalItems / limit));
+  const pageNumbers = Array.from(new Set([
+    1,
+    ...Array.from({ length: 5 }, (_, index) => page + index - 2)
+      .filter(number => number > 1 && number < totalPages),
+    totalPages,
+  ])).sort((left, right) => left - right);
 
   useEffect(() => {
     fetchApi("/suppliers").then(res => setSuppliers(res.data || res)).catch(console.error);
@@ -201,7 +211,7 @@ export default function InventoryPage() {
         
         // Map stats
         const mappedStats: StatCard[] = [
-          ...(userRole === "ADMIN" ? [{ icon: "trending_up", iconColor: "text-primary", label: "حركات اليوم", value: String(statsRes.today_movements ?? 0), sub: "", subColor: "text-green-400" }] : []),
+          ...(hasInventoryAccess ? [{ icon: "trending_up", iconColor: "text-primary", label: "حركات اليوم", value: String(statsRes.today_movements ?? 0), sub: "", subColor: "text-green-400" }] : []),
           { icon: "warning", iconColor: "text-primary", label: "منخفض المخزون", value: statsRes.low_stock_count.toString(), valueColor: "text-primary", sub: "يحتاج إعادة طلب", subColor: "text-[#e2bfb0]/60" },
           { icon: "error", iconColor: "text-[#ffb4ab]", label: "مخزون حرج", value: statsRes.critical_stock_count.toString(), valueColor: "text-[#ffb4ab]", sub: "أصناف نفدت", subColor: "text-[#e2bfb0]/60" },
           { icon: "payments", iconColor: "text-primary", label: "قيمة المخزون", value: parseFloat(statsRes.total_value).toLocaleString(), valueExtra: "ج.م", sub: "تقدير القيمة الحالية", subColor: "text-[#e2bfb0]/60" },
@@ -220,7 +230,7 @@ export default function InventoryPage() {
             typeLabel = "صادر";
             style = "bg-red-500/10 text-red-400 border-red-500/20";
           } else if (tx.transaction_type === "Adjustment") {
-            typeLabel = "تسوية";
+            typeLabel = tx.notes === "Initial stock from product creation" ? "رصيد افتتاحي" : "تسوية";
             style = "bg-[#ffb4ab]/10 text-[#ffb4ab] border-[#ffb4ab]/20";
           }
           
@@ -245,7 +255,7 @@ export default function InventoryPage() {
       } finally {
         setLoading(false);
       }
-  }, [page, limit, selectedSupplier, selectedCategory, selectedStockStatus, userRole]);
+  }, [page, limit, selectedSupplier, selectedCategory, selectedStockStatus, userRole, hasInventoryAccess]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void loadData(); }, 0);
@@ -284,8 +294,15 @@ export default function InventoryPage() {
   }, [loadData, loadPurchaseNeeded]);
 
   const handleDelete = async (item: InventoryItem) => {
-    if (confirm(`حذف المنتج "${item.nameAr}" من القائمة؟ سيبقى سجله محفوظًا، ويجب أن يكون رصيده صفرًا ولا يوجد له أمر شراء مفتوح.`)) {
+    const needsApproval = userRole === "INVENTORY_CONTROLLER";
+    if (await confirmAction({ title: needsApproval ? `طلب حذف «${item.nameAr}»؟` : `حذف «${item.nameAr}»؟`, message: needsApproval ? "سيصل الطلب للمدير. لن يُحذف المنتج إلا بعد موافقته والتحقق من الرصيد وأوامر الشراء." : "سيبقى سجل المنتج محفوظًا. لا يمكن حذفه إذا كان له رصيد أو أمر شراء مفتوح.", confirmLabel: needsApproval ? "إرسال للمدير" : "حذف المنتج", tone: "danger" })) {
       try {
+        if (needsApproval) {
+          await fetchApi("/product-approvals", { method: "POST", body: JSON.stringify({ product_id: item.id, action: "DELETE" }) });
+          notifySuccess("اترسل طلب الحذف للمدير. المنتج متاح لحد ما يوافق.");
+          setShowEditPanel(false);
+          return;
+        }
         await fetchApi(`/products/${item.id}`, { method: 'DELETE' });
         setShowEditPanel(false);
         if (inventoryItems.length === 1 && page > 1) setPage(page - 1);
@@ -310,19 +327,12 @@ export default function InventoryPage() {
       <TopNav title="إدارة المخزون" />
 
       {/* Main Content */}
-      <main className="app-main space-y-10">
+      <main className="app-main space-y-6">
         {/* Header Actions */}
-        <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
-          <div>
-            <h3 className="app-heading">قائمة المنتجات</h3>
-            {loading ? <span className="app-skeleton mt-3 h-5 w-40" aria-label="جاري تحميل عدد المنتجات" /> : (
-              <p className="text-[#e2bfb0]/70 mt-2 text-lg">
-                إجمالي المسجل: <span className="text-primary font-bold">{totalItems.toLocaleString()}</span> صنف متاح
-              </p>
-            )}
-          </div>
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <h1 className="app-heading">المنتجات</h1>
           <div className="flex flex-wrap items-center gap-4">
-            {canEditProduct(userRole) && (
+            {hasInventoryAccess && (
               <>
                 <button
                   onClick={() => setShowReceivePanel(true)}
@@ -345,7 +355,7 @@ export default function InventoryPage() {
 
         {/* Stats Row */}
         <div className="motion-stagger grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5" aria-label={loading ? "جاري تحميل إحصاءات المخزون" : undefined}>
-          {(loading && userRole === "ADMIN" && statCards.length === 3
+          {(loading && hasInventoryAccess && statCards.length === 3
             ? [{ icon: "trending_up", iconColor: "text-primary", label: "حركات اليوم", value: "", sub: "", subColor: "text-green-400" }, ...statCards]
             : statCards).map((card) => (
             <div key={card.label} className={`motion-surface glass p-8 rounded-2xl hi-fi-shadow flex flex-col gap-4 text-right ${loading ? "inventory-stat-loading" : ""}`}>
@@ -383,12 +393,9 @@ export default function InventoryPage() {
           <div className="col-span-12 lg:col-span-9 space-y-8 min-w-0">
             {/* Filters */}
             <div className="glass p-8 rounded-2xl grid grid-cols-1 md:grid-cols-3 gap-6 hi-fi-shadow">
-              <div className="flex flex-col gap-3">
-                <label className="text-sm font-bold text-[#e2bfb0]/80 px-4">
-                  الفئة المستهدفة
-                </label>
+              <div>
                 <ProductSelect
-                  label="الفئة المستهدفة"
+                  label="التصنيف"
                   value={selectedCategory}
                   onChange={(value) => { setSelectedCategory(value); setPage(1); }}
                   placeholder="جميع الفئات"
@@ -397,12 +404,9 @@ export default function InventoryPage() {
                 />
               </div>
 
-              <div className="flex flex-col gap-3">
-                <label className="text-sm font-bold text-[#e2bfb0]/80 px-4">
-                  المورد الرئيسي
-                </label>
+              <div>
                 <ProductSelect
-                  label="المورد الرئيسي"
+                  label="المورد"
                   value={selectedSupplier}
                   onChange={(value) => { setSelectedSupplier(value); setPage(1); }}
                   placeholder="كافة الموردين"
@@ -411,10 +415,7 @@ export default function InventoryPage() {
                 />
               </div>
 
-              <div className="flex flex-col gap-3">
-                <label className="text-sm font-bold text-[#e2bfb0]/80 px-4">
-                  حالة المخزون
-                </label>
+              <div>
                 <ProductSelect
                   label="حالة المخزون"
                   value={selectedStockStatus}
@@ -485,57 +486,66 @@ export default function InventoryPage() {
               </div>
 
               {/* Pagination */}
-              <div className="px-8 py-5 border-t border-white/5 flex items-center justify-between">
-                <span className="text-xs font-medium text-[#e2bfb0]/60">
-                  عرض {Math.min((page - 1) * limit + 1, totalItems)} إلى {Math.min(page * limit, totalItems)} من أصل {totalItems} منتج
+              <div className="px-4 sm:px-8 py-5 border-t border-white/5 flex flex-wrap items-center justify-between gap-4">
+                <span className="shrink-0 whitespace-nowrap text-xs font-medium text-[#e2bfb0]/60">
+                  عرض {totalItems ? Math.min((page - 1) * limit + 1, totalItems) : 0} إلى {Math.min(page * limit, totalItems)} من أصل {totalItems} منتج
                 </span>
-                <div className="flex gap-2">
+                <nav aria-label="صفحات المنتجات" className="flex max-w-full items-center gap-2 overflow-x-auto pb-1">
                   <button 
-                    disabled={page >= Math.ceil(totalItems / limit)}
+                    type="button"
+                    aria-label="الصفحة التالية"
+                    disabled={page >= totalPages}
                     onClick={() => setPage(page + 1)}
-                    className="w-10 h-10 flex items-center justify-center glass rounded-full hover:bg-white/10 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-10 h-10 shrink-0 flex items-center justify-center glass rounded-full hover:bg-white/10 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <span className="material-symbols-outlined text-[20px]">chevron_right</span>
                   </button>
-                  {[...Array(Math.ceil(totalItems / limit) || 1)].map((_, i) => (
+                  {pageNumbers.map((number, index) => (
+                    <div key={number} className="flex shrink-0 items-center gap-2">
+                    {index > 0 && number - pageNumbers[index - 1] > 1 && <span aria-hidden="true" className="px-1 text-[#e2bfb0]/60">…</span>}
                     <button
-                      key={i}
-                      onClick={() => setPage(i + 1)}
+                      type="button"
+                      aria-label={`الصفحة ${number}`}
+                      aria-current={page === number ? "page" : undefined}
+                      onClick={() => setPage(number)}
                       className={`w-10 h-10 flex items-center justify-center rounded-full font-bold text-sm transition-all ${
-                        page === i + 1 
+                        page === number 
                           ? "bg-primary text-white shadow-[0_0_10px_rgba(255,107,0,0.3)]"
                           : "glass hover:bg-white/10"
                       }`}
                     >
-                      {i + 1}
+                      {number}
                     </button>
+                    </div>
                   ))}
                   <button 
+                    type="button"
+                    aria-label="الصفحة السابقة"
                     disabled={page <= 1}
                     onClick={() => setPage(page - 1)}
-                    className="w-10 h-10 flex items-center justify-center glass rounded-full hover:bg-white/10 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-10 h-10 shrink-0 flex items-center justify-center glass rounded-full hover:bg-white/10 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <span className="material-symbols-outlined text-[20px]">chevron_left</span>
                   </button>
-                </div>
+                </nav>
               </div>
             </div>
           </div>
 
           {/* Side Panels */}
-          <div className="col-span-12 lg:col-span-3 flex flex-col gap-8">
+          <div className="col-span-12 lg:col-span-3 flex min-w-0 flex-col gap-8">
             {/* Stock Movements */}
-            {userRole === "ADMIN" && <div className="glass rounded-2xl hi-fi-shadow p-6">
-              <div className="flex items-center justify-between mb-6 px-2">
-                <h4 className="font-bold text-lg text-[#e5e2e1] flex items-center gap-2">
+            {hasInventoryAccess && <div className="glass min-w-0 rounded-2xl hi-fi-shadow p-4 sm:p-6">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-6 px-2">
+                <h4 className="font-bold text-lg text-[#e5e2e1] flex items-center gap-2 whitespace-nowrap">
                   <span className="material-symbols-outlined text-primary">history</span>
                   آخر حركة المخزون
                 </h4>
-                <button onClick={() => setShowMovementsModal(true)} className="text-xs text-primary font-bold hover:underline">عرض الكل</button>
+                <button onClick={() => setShowMovementsModal(true)} className="shrink-0 whitespace-nowrap text-xs text-primary font-bold hover:underline">عرض الكل</button>
               </div>
-              <div className="space-y-1">
-                <table className="w-full text-right text-sm">
-                  <thead className="text-[#e2bfb0]/60 border-b border-white/5">
+              <div className="max-h-80 overflow-auto custom-scrollbar">
+                <table className="min-w-[320px] w-full text-right text-sm">
+                  <thead className="sticky top-0 z-10 bg-[#1c1b1a] text-[#e2bfb0]/60 border-b border-white/5">
                     <tr>
                       <th className="pb-3 font-bold text-xs px-2">المنتج</th>
                       <th className="pb-3 font-bold text-center text-xs">النوع</th>
@@ -556,8 +566,8 @@ export default function InventoryPage() {
                     ) : (
                       stockMovements.map((move, i) => (
                         <tr key={i} className="hover:bg-white/5 transition-colors">
-                          <td className="py-4 font-medium px-2">{move.product}</td>
-                          <td className="py-4 text-center">
+                          <td className="py-4 font-medium px-2"><span className="block max-w-32 truncate" title={move.product}>{move.product}</span></td>
+                          <td className="py-4 text-center whitespace-nowrap">
                             <span className={`px-2 py-0.5 text-[9px] rounded-full font-bold border ${move.typeStyle}`}>
                               {move.type}
                             </span>
@@ -576,13 +586,12 @@ export default function InventoryPage() {
             {/* Needs Purchase Order */}
             <div className="glass rounded-2xl hi-fi-shadow p-6">
               <div className="flex items-center justify-between mb-6 px-2">
-                <h4 className="font-bold text-lg text-[#e5e2e1] flex items-center gap-2">
+                <h4 className="font-bold text-lg text-[#e5e2e1] flex items-center gap-2 whitespace-nowrap">
                   <span>تحتاج أمر شراء</span>
                   <span className="material-symbols-outlined text-[#ffb4ab]" aria-hidden="true">shopping_cart_checkout</span>
                 </h4>
-                {!purchaseNeededLoading && purchaseNeeded.length > 0 && <span className="text-xs text-[#e2bfb0]/60">{purchaseNeeded.length} صنف</span>}
               </div>
-              <div className="space-y-4 max-h-[32rem] overflow-y-auto pe-1">
+              <div className="space-y-4 max-h-80 overflow-y-auto pe-1 custom-scrollbar">
                 {purchaseNeededLoading ? (
                   <div className="inventory-row-skeleton space-y-4 py-2" aria-label="جاري تحميل الأصناف التي تحتاج أمر شراء">
                     {[0, 1, 2].map((index) => <div key={index} className="flex items-center gap-3"><span className="app-skeleton h-10 w-10 shrink-0 rounded-xl" /><span className="app-skeleton h-4 w-32" /><span className="app-skeleton mr-auto h-5 w-12" /></div>)}
@@ -593,18 +602,18 @@ export default function InventoryPage() {
                   purchaseNeeded.map((item) => (
                     <div
                       key={item.id}
-                      className="flex items-center justify-between p-4 rounded-2xl bg-white/5 border border-white/5"
+                      className="flex min-w-0 items-center justify-between p-4 rounded-2xl bg-white/5 border border-white/5"
                     >
-                      <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-2xl bg-[#131313] flex items-center justify-center border border-white/5 overflow-hidden">
+                      <div className="flex min-w-0 items-center gap-4">
+                        <div className="w-12 h-12 shrink-0 rounded-2xl bg-[#131313] flex items-center justify-center border border-white/5 overflow-hidden">
                           {item.image ? (
                             <Image src={item.image} alt={item.name} width={32} height={32} className="w-8 h-8 object-contain" unoptimized />
                           ) : (
                             <span className="material-symbols-outlined text-[#e2bfb0]/60">inventory</span>
                           )}
                         </div>
-                        <div>
-                          <p className="text-sm font-bold">{item.name}</p>
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-bold" title={item.name}>{item.name}</p>
                           <p className="text-xs text-[#ffb4ab]">مخزون: {item.stock}</p>
                         </div>
                       </div>
@@ -618,18 +627,19 @@ export default function InventoryPage() {
       </main>
 
       {/* Panels */}
-      {showAddPanel && <AddProductPanel onClose={() => setShowAddPanel(false)} onSaved={refreshData} />}
+      {hasInventoryAccess && showAddPanel && <AddProductPanel onClose={() => setShowAddPanel(false)} onSaved={refreshData} />}
       {showEditPanel && selectedItem && (
         <EditProductPanel
           productId={selectedItem.id}
           onClose={() => setShowEditPanel(false)}
           onSuccess={refreshData}
-          onDelete={userRole === "ADMIN" ? () => handleDelete(selectedItem) : undefined}
+          approvalRequired={userRole === "INVENTORY_CONTROLLER"}
+          onDelete={() => handleDelete(selectedItem)}
         />
       )}
       {/* Modals */}
-      {userRole === "ADMIN" && showMovementsModal && <InventoryMovementsModal onClose={() => setShowMovementsModal(false)} />}
-      {showReceivePanel && <ReceiveStockPanel onClose={() => setShowReceivePanel(false)} onSaved={refreshData} />}
+      {hasInventoryAccess && showMovementsModal && <InventoryMovementsModal onClose={() => setShowMovementsModal(false)} />}
+      {hasInventoryAccess && showReceivePanel && <ReceiveStockPanel onClose={() => setShowReceivePanel(false)} onSaved={refreshData} />}
     </div>
   );
 }

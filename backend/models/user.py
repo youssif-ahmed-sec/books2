@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean, DateTime, Enum, JSON
+from sqlalchemy import Column, String, Boolean, DateTime, Enum, JSON, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.sql import func
@@ -21,6 +21,7 @@ class User(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email = Column(String, unique=True, nullable=True, index=True)
     username = Column(String(50), unique=True, nullable=True, index=True)
+    full_name = Column(String(100), nullable=True)
     hashed_password = Column(String, nullable=True)
     role = Column(Enum(RoleEnum), nullable=False)
     is_active = Column(Boolean, default=True)
@@ -40,3 +41,13 @@ class AuditLog(Base):
     new_value = Column(JSONB, nullable=True)
     ip_address = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class RevokedAccessToken(Base):
+    __tablename__ = "revoked_access_tokens"
+    __table_args__ = (Index("ix_revoked_access_tokens_expires_at", "expires_at"),)
+
+    token_hash = Column(String(64), primary_key=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

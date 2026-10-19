@@ -1,6 +1,6 @@
 "use client";
 
-import { notifyError } from "@/lib/notifications";
+import { notifyError, notifySuccess } from "@/lib/notifications";
 
 import { useState, useEffect } from "react";
 import Image from "next/image";
@@ -8,7 +8,10 @@ import { fetchApi } from "@/lib/api";
 import { marginFromPrice, pricesFromMargins, type PriceMargins, type TierPrices } from "@/lib/pricing";
 import { z } from "zod";
 import UnitBarcodeField from "@/components/UnitBarcodeField";
+import { ZeroHintNumberInput } from "@/components/ZeroHintNumberInput";
 import { ProductSelect } from "@/components/ProductSelect";
+import { productFormErrors, productSaveError } from "@/lib/productFormErrors";
+import { refreshNotificationBell } from "@/lib/notificationEvents";
 
 const unitSchema = z.object({
   id: z.string(),
@@ -79,9 +82,10 @@ interface EditProductPanelProps {
   onClose: () => void;
   onSuccess: () => void;
   onDelete?: () => void;
+  approvalRequired?: boolean;
 }
 
-export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: EditProductPanelProps) {
+export function EditProductPanel({ productId, onClose, onSuccess, onDelete, approvalRequired = false }: EditProductPanelProps) {
   useEffect(() => {
     document.body.classList.add("product-panel-open");
     return () => document.body.classList.remove("product-panel-open");
@@ -368,15 +372,10 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
       });
 
       if (!validationResult.success) {
-        const fieldErrors = validationResult.error.issues.map((err) => {
-           if (err.path[0] === 'units') {
-             return `${String(err.path[err.path.length - 1])}_${units[err.path[1] as number]?.id}`;
-           }
-           return err.path[0].toString();
-        });
-        setErrors(fieldErrors);
+        const validation = productFormErrors(validationResult.error.issues, units);
+        setErrors(validation.fields);
         console.error("Validation Failed:", validationResult.error.issues);
-        notifyError(`يرجى مراجعة الحقول التالية: ${fieldErrors.join(", ")}`);
+        notifyError(validation.message);
         return;
       }
       setErrors([]);
@@ -417,17 +416,26 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
         bundle_components: [],
       };
 
-      await fetchApi(`/products/${productId}`, {
-        method: "PUT",
-        body: JSON.stringify(payload),
-      });
+      if (approvalRequired) {
+        await fetchApi("/product-approvals", {
+          method: "POST",
+          body: JSON.stringify({ product_id: productId, action: "UPDATE", proposed: payload }),
+        });
+        notifySuccess("اترسل طلب التعديل للمدير. بيانات المنتج لسه زي ما هي لحد الموافقة.");
+      } else {
+        await fetchApi(`/products/${productId}`, {
+          method: "PUT",
+          body: JSON.stringify(payload),
+        });
+      }
+      refreshNotificationBell();
 
       // Close panel and trigger the parent's refresh.
       onClose();
-      onSuccess();
+      if (!approvalRequired) onSuccess();
     } catch (err) {
       console.error("Failed to save product:", err);
-      notifyError(err instanceof Error ? err.message : "تعذر حفظ المنتج");
+      notifyError(productSaveError(err));
     } finally {
       setIsSaving(false);
     }
@@ -444,16 +452,9 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
       {/* Slide-over Panel */}
       <aside className="product-editor-panel fixed top-0 bottom-0 left-0 w-full max-w-[850px] bg-[#0e0e0e] z-[70] shadow-[0_0_80px_rgba(0,0,0,0.8)] flex flex-col animate-slide-in-left border-r border-white/10">
         {/* Header */}
-        <header className="px-5 py-7 sm:px-8 xl:px-12 xl:py-9 flex justify-between items-center border-b border-white/5 bg-[#0e0e0e]/50 backdrop-blur-md sticky top-0 z-10">
+        <header className="px-5 py-5 sm:px-8 xl:px-12 xl:py-6 flex justify-between items-center border-b border-white/5 bg-[#0e0e0e]/50 backdrop-blur-md sticky top-0 z-10">
           <div>
-            <div className="flex items-center gap-2 text-primary mb-2">
-              <span className="material-symbols-outlined text-xl">edit_note</span>
-              <span className="text-xs font-bold">نظام إدارة المخزون المركزي</span>
-            </div>
             <h2 className="text-2xl font-bold text-[#e5e2e1] leading-tight">تعديل منتج</h2>
-            <p className="text-[#e2bfb0] text-sm mt-1">
-              قم بتحديث تفاصيل المنتج بدقة لضمان دقة التقارير
-            </p>
           </div>
           <button
             onClick={onClose}
@@ -668,8 +669,8 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
               <div className="space-y-5">
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">الحد الأدنى للكمية</label>
                 <div className="relative">
-                  <input
-                    type="number"
+                  <ZeroHintNumberInput
+
                     value={form.minStockLevel}
                     onChange={(e) => setForm({ ...form, minStockLevel: e.target.value })}
                     className="w-full bg-[#201f1f] border border-white/5 rounded-full p-4 text-[#e5e2e1] focus:ring-2 focus:ring-primary/30 transition-all"
@@ -680,8 +681,8 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
               <div className="space-y-5">
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">الحد الأقصى للكمية</label>
                 <div className="relative">
-                  <input
-                    type="number"
+                  <ZeroHintNumberInput
+
                     value={form.maxStockLevel}
                     onChange={(e) => setForm({ ...form, maxStockLevel: e.target.value })}
                     className="w-full bg-[#201f1f] border border-white/5 rounded-full p-4 text-[#e5e2e1] focus:ring-2 focus:ring-primary/30 transition-all"
@@ -737,8 +738,8 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
                         {unit.isBase ? (
                           <span className="text-[#e2bfb0] font-mono">{Number(unit.conversionFactor || 0).toFixed(1)}</span>
                         ) : (
-                          <input
-                            type="number"
+                          <ZeroHintNumberInput
+
                             value={unit.conversionFactor || ""}
                             onChange={(e) => updateUnit(unit.id, "conversionFactor", parseFloat(e.target.value) || 0)}
                             className="product-unit-number"
@@ -785,8 +786,8 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
               <div className="space-y-5" style={{ flexBasis: `${Math.max(18, form.costPrice.length + 12)}ch` }}>
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">تكلفة شراء القطعة الواحدة</label>
                 <div className="relative">
-                  <input
-                    type="number"
+                  <ZeroHintNumberInput
+
                     value={form.costPrice}
                     onChange={(e) => {
                       const newCost = e.target.value;
@@ -805,8 +806,8 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
               <div className="space-y-5" style={{ flexBasis: `${Math.max(18, form.vatRate.length + 12)}ch` }}>
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">نسبة ضريبة القيمة المضافة</label>
                 <div className="relative">
-                  <input
-                    type="number"
+                  <ZeroHintNumberInput
+
                     value={form.vatRate}
                     onChange={(e) => {
                       const newVat = e.target.value;
@@ -825,8 +826,8 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
               <div className="space-y-5" style={{ flexBasis: `${Math.max(18, form.profitMargin.length + 12)}ch` }}>
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">هامش الربح (المستهلك)</label>
                 <div className="relative">
-                  <input
-                    type="number"
+                  <ZeroHintNumberInput
+
                     value={form.profitMargin}
                     onChange={(e) => {
                       const newMargin = e.target.value;
@@ -847,8 +848,8 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
                 <div className="space-y-5" key={key} style={{ flexBasis: `${Math.max(18, form[key].length + 12)}ch` }}>
                   <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">{label}</label>
                   <div className="relative">
-                    <input
-                      type="number"
+                    <ZeroHintNumberInput
+
                       step="0.01"
                       value={form[key]}
                       onChange={(event) => {
@@ -911,8 +912,8 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
                             {tier.label}
                           </span>
                           <div className="relative">
-                            <input
-                              type="number"
+                            <ZeroHintNumberInput
+
                               value={unit[tier.key]}
                               onChange={(e) => {
                                 updateUnit(unit.id, tier.key, e.target.value);
@@ -950,7 +951,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
             <span className="material-symbols-outlined font-bold">
               {isSaving ? "sync" : "check_circle"}
             </span>
-            {isSaving ? "جاري الحفظ..." : "حفظ التعديلات"}
+            {isSaving ? "جاري الحفظ..." : approvalRequired ? "إرسال التعديل للمدير" : "حفظ التعديلات"}
           </button>
           {onDelete && (
             <button
@@ -960,7 +961,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
               title="حذف المنتج"
             >
               <span className="material-symbols-outlined" aria-hidden="true">delete</span>
-              حذف المنتج
+              {approvalRequired ? "طلب حذف المنتج" : "حذف المنتج"}
             </button>
           )}
           <button
@@ -990,8 +991,8 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete }: Ed
               </div>
               <div>
                 <label className="block text-sm font-bold text-[#e2bfb0] mb-2">معامل التحويل (كم قطعة في هذه الوحدة؟)</label>
-                <input
-                  type="number"
+                <ZeroHintNumberInput
+
                   value={newGlobalUnit.conversion_factor || ""}
                   onChange={(e) => setNewGlobalUnit({ ...newGlobalUnit, conversion_factor: parseFloat(e.target.value) || 1 })}
                   placeholder="عدد القطع"

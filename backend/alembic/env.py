@@ -18,6 +18,8 @@ import models.purchase
 import models.purchase_document
 import models.returns
 import models.notification
+import models.product_approval
+import models.shift_email
 from database import engine, DATABASE_URL
 
 config = context.config

@@ -1,5 +1,5 @@
 from sqlalchemy import Column, String, Boolean, DateTime, Enum, Numeric, Integer, Text, JSON, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.sql import func
 import uuid
 import enum
@@ -26,6 +26,7 @@ class Customer(Base):
     whatsapp_number = Column(String, nullable=True, index=True)
     email = Column(String, nullable=True)
     address = Column(String, nullable=True)
+    addresses = Column(JSONB, nullable=False, default=list)
     city = Column(String, nullable=True)
     
     customer_type = Column(Enum(CustomerTypeEnum, name="customertypeenum", create_type=False), nullable=False, default=CustomerTypeEnum.RETAIL)

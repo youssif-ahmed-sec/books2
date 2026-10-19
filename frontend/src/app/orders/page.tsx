@@ -3,6 +3,8 @@ import React, { useState, useEffect, useRef } from "react";
 import Head from "next/head";
 import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
+import { ZeroHintNumberInput } from "@/components/ZeroHintNumberInput";
+import { LoadingTableRows } from "@/components/LoadingState";
 import { useSectionSearchSelection } from "@/lib/useSectionSearchSelection";
 import { fetchApi } from "@/lib/api";
 import { toast } from 'react-toastify';
@@ -11,6 +13,7 @@ import { printOrderInvoice } from "@/lib/localPrint";
 import { orderSourceLabels, orderStatusLabels } from "@/lib/orderLabels";
 import { getUserRole, type UserRole } from "@/utils/auth";
 import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
+import { emptyBarcodeScanCapture, englishBarcodeFromScan, recordBarcodeScanKey } from "@/lib/barcodeScanner";
 
 // ── Types ─────────────────────────────────────────────────────────────
 interface Product {
@@ -42,7 +45,7 @@ interface Customer {
   phone: string;
   price_level: string;
 }
-interface Preparer { id: string; email: string; role: string }
+interface Preparer { id: string; email: string | null; username?: string | null; full_name?: string | null; role: string }
 
 interface OrderItem {
   id: string;
@@ -60,6 +63,7 @@ interface OrderItem {
 
 interface Order {
   id: string;
+  public_number: number;
   customer_id: string | null;
   user_id: string | null;
   assigned_to_id: string | null;
@@ -97,6 +101,8 @@ const ORDER_SOURCES = [
 ];
 
 const STATUS_TABS = ["All", "New Lead", "Draft Order", "Waiting Quotation", "Approved", "Preparing", "Ready", "Delivered", "Closed", "Returned", "Cancelled"];
+const CASHIER_STATUS_TABS = ["All", "New Lead", "Draft Order", "Waiting Quotation", "Quotation Sent", "Waiting Customer Approval", "Approved", "Preparing", "Ready"];
+const ORDER_PAGE_SIZE = 50;
 
 const STATUS_MAP = orderStatusLabels;
 const SOURCE_MAP = orderSourceLabels;
@@ -104,6 +110,8 @@ const SOURCE_MAP = orderSourceLabels;
 export default function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>(() => readSectionSnapshot<Order[]>("orders-list") || []);
   const [loading, setLoading] = useState(() => !readSectionSnapshot("orders-list"));
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [activeTab, setActiveTab] = useState(() => readSectionSnapshot<{ tab: string }>("orders-tab")?.tab || "All");
   useSectionSearchSelection(() => setActiveTab("All"));
 
@@ -113,6 +121,7 @@ export default function OrdersPage() {
   const [searchResults, setSearchResults] = useState<Product[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const scanKeys = useRef(emptyBarcodeScanCapture());
 
   const [cart, setCart] = useState<CartItem[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -130,11 +139,15 @@ export default function OrdersPage() {
 
   useEffect(() => {
     const roleTimer = window.setTimeout(() => setUserRole(getUserRole()), 0);
-    fetchApi("/orders").then((data: Order[]) => {
+    fetchApi(`/orders?limit=${ORDER_PAGE_SIZE}&offset=0`).then(async (data: Order[]) => {
       setOrders(data);
+      setHasMore(data.length === ORDER_PAGE_SIZE);
       writeSectionSnapshot("orders-list", data);
       const requestedLead = new URLSearchParams(window.location.search).get("lead_id");
-      const lead = data.find(order => order.id === requestedLead && order.status === "New Lead");
+      const lead = requestedLead
+        ? data.find(order => order.id === requestedLead && order.status === "New Lead")
+          || await fetchApi(`/orders/${encodeURIComponent(requestedLead)}`).catch(() => null) as Order | null
+        : null;
       if (lead) {
         setLeadId(lead.id); setSelectedCustomerId(lead.customer_id || "");
         setSelectedSource(lead.source); setNotes(lead.notes || ""); setIsSlideOverOpen(true);
@@ -156,13 +169,30 @@ export default function OrdersPage() {
   const fetchOrders = async () => {
     try {
       if (!readSectionSnapshot("orders-list")) setLoading(true);
-      const data = await fetchApi("/orders");
+      const data = await fetchApi(`/orders?limit=${ORDER_PAGE_SIZE}&offset=0`) as Order[];
       setOrders(data);
+      setHasMore(data.length === ORDER_PAGE_SIZE);
       writeSectionSnapshot("orders-list", data);
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadMoreOrders = async () => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    try {
+      const page = await fetchApi(`/orders?limit=${ORDER_PAGE_SIZE}&offset=${orders.length}`) as Order[];
+      const combined = [...orders, ...page.filter(order => !orders.some(existing => existing.id === order.id))];
+      setOrders(combined);
+      setHasMore(page.length === ORDER_PAGE_SIZE);
+      writeSectionSnapshot("orders-list", combined);
+    } catch (error) {
+      toast.error(errorMessage(error, "تعذر تحميل المزيد من الطلبات"));
+    } finally {
+      setLoadingMore(false);
     }
   };
 
@@ -385,7 +415,9 @@ export default function OrdersPage() {
     } catch (error) { toast.error(errorMessage(error, "تعذر إسناد الطلب")); }
   };
 
-  const filteredOrders = activeTab === "All" ? orders : orders.filter(o => o.status === activeTab);
+  const visibleTabs = userRole === "ADMIN" ? STATUS_TABS : CASHIER_STATUS_TABS;
+  const visibleTab = visibleTabs.includes(activeTab) ? activeTab : "All";
+  const filteredOrders = visibleTab === "All" ? orders : orders.filter(o => o.status === visibleTab);
 
   const getSourceIcon = (source: string) => {
     switch (source) {
@@ -426,11 +458,8 @@ export default function OrdersPage() {
         <header className="glass rounded-2xl hi-fi-shadow border border-white/5 min-h-[80px] shrink-0 flex flex-wrap items-center justify-between gap-4 px-8 py-4">
           <div className="flex items-center gap-4">
             <h1 className="text-2xl font-bold text-white">
-              إدارة الطلبات
+              {userRole === "ADMIN" ? "إدارة الطلبات" : "الطلبات المعلقة"}
             </h1>
-            <span className="px-3 py-1 bg-white/5 rounded-full text-xs text-white/50 border border-white/5">
-              {filteredOrders.length} طلب
-            </span>
           </div>
           <button 
             onClick={() => setIsSlideOverOpen(true)}
@@ -444,11 +473,11 @@ export default function OrdersPage() {
         {/* Tabs */}
         <div className="glass rounded-2xl hi-fi-shadow border border-white/5 px-6 py-4 shrink-0">
           <div className="flex overflow-x-auto gap-2 custom-scrollbar pb-2">
-            {STATUS_TABS.map(tab => (
+            {visibleTabs.map(tab => (
               <button
                 key={tab}
                 onClick={() => { setActiveTab(tab); writeSectionSnapshot("orders-tab", { tab }); }}
-                className={`px-5 py-2.5 rounded-full text-sm font-semibold whitespace-nowrap transition-colors ${activeTab === tab ? 'bg-primary text-white' : 'hover:bg-white/10 text-[#e2bfb0]/60 bg-white/5 border border-white/5'}`}
+                className={`px-5 py-2.5 rounded-full text-sm font-semibold whitespace-nowrap transition-colors ${visibleTab === tab ? 'bg-primary text-white' : 'hover:bg-white/10 text-[#e2bfb0]/60 bg-white/5 border border-white/5'}`}
               >
                 {STATUS_MAP[tab] || tab}
               </button>
@@ -459,9 +488,7 @@ export default function OrdersPage() {
         {/* Data Table */}
         <div className="glass rounded-2xl hi-fi-shadow border border-white/5 flex-1 flex flex-col overflow-hidden">
           {loading ? (
-            <div className="flex items-center justify-center flex-1">
-              <div className="w-10 h-10 border-4 border-primary/20 border-t-primary rounded-full animate-spin"></div>
-            </div>
+            <div className="flex-1 overflow-x-auto"><table className="w-full min-w-[980px] text-right text-sm"><thead className="app-table-head"><tr>{["رقم الطلب", "العميل", "المصدر", "المبلغ الإجمالي", "الحالة", "التاريخ", "إجراءات"].map(label => <th key={label} className="px-6 py-4">{label}</th>)}</tr></thead><tbody><LoadingTableRows label="جاري تحميل الطلبات" columns={7} /></tbody></table></div>
           ) : filteredOrders.length === 0 ? (
             <div className="flex flex-col items-center justify-center flex-1 text-[#e2bfb0]/40 gap-4">
               <span className="material-symbols-outlined text-6xl">inbox</span>
@@ -469,7 +496,7 @@ export default function OrdersPage() {
             </div>
           ) : (
             <div className="flex-1 overflow-auto custom-scrollbar">
-              <table className="w-full text-right text-sm">
+              <table className="w-full min-w-[980px] text-right text-sm">
                 <thead className="bg-black/20 text-[#e2bfb0]/60 sticky top-0 backdrop-blur-md border-b border-white/5">
                   <tr>
                     <th className="px-6 py-4 font-medium">رقم الطلب</th>
@@ -485,7 +512,7 @@ export default function OrdersPage() {
                   {filteredOrders.map((order) => (
                     <tr key={order.id} data-search-id={order.id} className="hover:bg-white/5 transition-colors group">
                       <td className="px-6 py-4 font-mono text-xs text-[#e2bfb0]/80">
-                        {order.id.split('-')[0].toUpperCase()}
+                        {order.public_number}
                       </td>
                       <td className="px-6 py-4 text-white font-medium">
                         {customers.find(c => c.id === order.customer_id)?.name || 'عميل مجهول'}
@@ -506,7 +533,7 @@ export default function OrdersPage() {
                         {new Date(order.created_at).toLocaleDateString('ar-EG', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                       </td>
                       <td className="px-6 py-4 text-center relative">
-                        {order.status === "Approved" && <select className="bg-black border border-white/10 rounded-lg text-xs p-2" defaultValue="" onChange={event => assignOrder(order.id, event.target.value)}><option value="">إسناد التجهيز</option>{preparers.map(user => <option key={user.id} value={user.id}>{user.email || user.role}</option>)}</select>}
+                        {order.status === "Approved" && <select className="bg-black border border-white/10 rounded-lg text-xs p-2" defaultValue="" onChange={event => assignOrder(order.id, event.target.value)}><option value="">إسناد التجهيز</option>{preparers.map(user => <option key={user.id} value={user.id}>{user.full_name || user.username || user.email || user.role}</option>)}</select>}
                         {order.status === "Ready" && <select aria-label={`مخزن تسليم الطلب ${order.id}`} className="bg-black border border-white/10 rounded-lg text-xs p-2" value={deliveryWarehouse[order.id] || (warehouses.length === 1 ? warehouses[0].id : "")} onChange={event => setDeliveryWarehouse(previous => ({ ...previous, [order.id]: event.target.value }))}><option value="">مخزن التسليم</option>{warehouses.map(warehouse => <option key={warehouse.id} value={warehouse.id}>{warehouse.name}</option>)}</select>}
                         {["Delivered", "Closed", "Returned"].includes(order.status) && (
                           <button className="app-secondary-button mr-2 text-xs" onClick={async () => {
@@ -535,6 +562,12 @@ export default function OrdersPage() {
                 </tbody>
               </table>
             </div>
+          )}
+          {hasMore && !loading && (
+            <button type="button" onClick={loadMoreOrders} disabled={loadingMore}
+              className="app-secondary-button m-3 self-center disabled:opacity-50">
+              {loadingMore ? "جارٍ التحميل..." : "تحميل المزيد من الطلبات"}
+            </button>
           )}
         </div>
       </main>
@@ -599,6 +632,14 @@ export default function OrdersPage() {
                     setIsSearching(Boolean(query.trim()));
                     if (!query.trim()) setSearchResults([]);
                   }}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter") {
+                      if (!event.nativeEvent.isComposing) recordBarcodeScanKey(scanKeys.current, event);
+                      return;
+                    }
+                    const code = englishBarcodeFromScan(scanKeys.current, event.currentTarget.value.trim());
+                    if (code) { event.preventDefault(); setSearchQuery(code); setIsSearching(true); }
+                  }}
                 />
                 
                 {searchResults.length > 0 && (
@@ -624,7 +665,7 @@ export default function OrdersPage() {
 
               {/* Cart Items */}
               <div className="flex flex-col gap-3">
-                <h3 className="text-sm font-bold text-white/80 border-b border-white/5 pb-2">عناصر الطلب ({cart.length})</h3>
+                <h3 className="text-sm font-bold text-white/80 border-b border-white/5 pb-2">عناصر الطلب</h3>
                 {cart.length === 0 ? (
                   <div className="text-center text-white/30 py-8 text-sm">لا توجد منتجات مضافة</div>
                 ) : (
@@ -689,8 +730,7 @@ export default function OrdersPage() {
                 </div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-white/50">تكلفة الشحن</span>
-                  <input 
-                    type="number" 
+                  <ZeroHintNumberInput
                     value={shippingCost}
                     onChange={(e) => setShippingCost(Number(e.target.value) || 0)}
                     className="w-24 bg-black border border-white/10 rounded-lg px-2 py-1 text-center text-white focus:outline-none focus:border-primary"

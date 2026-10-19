@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, ForeignKey, Numeric, String, CheckConstraint
+from sqlalchemy import Column, DateTime, ForeignKey, Numeric, String, CheckConstraint, Index
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 import uuid
@@ -10,6 +10,9 @@ class SalesReturn(Base):
     __tablename__ = "sales_returns"
     __table_args__ = (
         CheckConstraint("refund_amount >= 0 AND charge_amount >= 0", name="ck_return_amounts_nonnegative"),
+        Index("ix_sales_returns_created_at", "created_at"),
+        Index("ix_sales_returns_order_id", "order_id"),
+        Index("ix_sales_returns_exchange_order_id", "exchange_order_id"),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

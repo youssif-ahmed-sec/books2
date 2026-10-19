@@ -4,7 +4,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import jwt
+import hashlib
 from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 import bcrypt
 
 SECRET_KEY = os.getenv("JWT_SECRET_KEY")
@@ -46,6 +48,7 @@ def create_access_token(subject: str, extra_claims: dict = None) -> str:
         "sub": subject,
         "exp": expire,
         "iat": datetime.now(timezone.utc),
+        "jti": str(uuid4()),
     }
     if extra_claims:
         payload.update(extra_claims)
@@ -57,4 +60,9 @@ def decode_access_token(token: str) -> dict:
     Decode and verify a JWT token.
     Raises jwt.ExpiredSignatureError or jwt.InvalidTokenError on failure.
     """
-    return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM], options={"require": ["exp", "sub"]})
+
+
+def access_token_hash(token: str) -> str:
+    """Persist only a one-way fingerprint, never the bearer credential itself."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()

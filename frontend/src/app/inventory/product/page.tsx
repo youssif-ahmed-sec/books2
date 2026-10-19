@@ -64,8 +64,9 @@ function ProductDetails() {
   }, [id]);
 
   const timeline = [
-    ...movements.map(item => ({ id: item.id, date: item.created_at, title: movementNames[item.transaction_type] || item.transaction_type,
-      detail: `${Number(item.quantity_changed) > 0 ? "+" : ""}${item.quantity_changed} ${product?.base_unit || ""}${item.reference_document ? ` · ${item.reference_document}` : ""}${item.notes ? ` · ${item.notes}` : ""}` })),
+    ...movements.map(item => ({ id: item.id, date: item.created_at,
+      title: item.transaction_type === "Adjustment" && item.notes === "Initial stock from product creation" ? "رصيد افتتاحي" : movementNames[item.transaction_type] || item.transaction_type,
+      detail: `${Number(item.quantity_changed) > 0 ? "+" : ""}${item.quantity_changed} ${product?.base_unit || ""}${item.reference_document ? ` · ${item.reference_document}` : ""}${item.notes && item.notes !== "Initial stock from product creation" ? ` · ${item.notes}` : ""}` })),
     ...history.filter(item => item.action !== "INVENTORY_MOVEMENT").map(item => ({ id: item.id, date: item.created_at,
       title: actionNames[item.action] || item.action, detail: "" })),
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -137,5 +138,5 @@ function ProductDetails() {
 }
 
 export default function ProductPage() {
-  return <Suspense fallback={<div className="app-panel m-8 p-8">جاري تحميل تفاصيل المنتج…</div>}><ProductDetails /></Suspense>;
+  return <Suspense fallback={<div className="app-panel m-8 space-y-5 rounded-2xl p-8" role="status" aria-label="جاري تحميل تفاصيل المنتج"><span className="app-skeleton h-7 w-48" /><span className="app-skeleton h-24 w-full rounded-xl" /><span className="app-skeleton h-24 w-full rounded-xl" /></div>}><ProductDetails /></Suspense>;
 }

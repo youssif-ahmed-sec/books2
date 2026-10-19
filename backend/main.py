@@ -2,11 +2,15 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+import asyncio
 import os
 from pathlib import Path
 from core.reference_cache import open_reference_cache, close_reference_cache
+from core.dashboard_events import dashboard_event_hub
+from services.notification_retention import run_notification_retention
 
 from api.v1.products import router as products_router
+from api.v1.product_approvals import router as product_approvals_router
 from api.v1.inventory import router as inventory_router
 from api.v1.auth import router as auth_router
 from api.v1.orders import router as orders_router
@@ -29,14 +33,19 @@ from api.v1.notifications import router as notifications_router
 from api.v1.offers import router as offers_router
 from api.v1.purchase_documents import router as purchase_documents_router
 from core.feature_flags import warehouse_only_mode
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await open_reference_cache(os.getenv("REDIS_URL"))
+    retention_task = asyncio.create_task(run_notification_retention())
     try:
         yield
     finally:
+        retention_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await retention_task
+        await dashboard_event_hub.close()
         await close_reference_cache()
 app = FastAPI(
     title="Souod El Shafie Bookstore API",
@@ -53,7 +62,7 @@ app = FastAPI(
 | Role | Access |
 |------|--------|
 | **ADMIN** | Users, financial records, inventory, sales, and reports |
-| **INVENTORY_CONTROLLER** | Products, categories, brands, suppliers, and stock |
+| **INVENTORY_CONTROLLER** | Products, categories, brands, offer creation, and stock |
 | **CASHIER_ORDERS** | Sales, orders, and order preparation |
 
 ### Public Endpoints (no token needed)
@@ -94,6 +103,7 @@ app.add_middleware(
 # ── Routers ───────────────────────────────────────────────────────────────────
 app.include_router(auth_router,      prefix="/api/v1")
 app.include_router(products_router,  prefix="/api/v1")
+app.include_router(product_approvals_router, prefix="/api/v1")
 app.include_router(inventory_router, prefix="/api/v1")
 app.include_router(global_units_router, prefix="/api/v1")
 app.include_router(upload_router,    prefix="/api/v1")
@@ -175,6 +185,16 @@ if static_dir is not None:
                     alt_txt_path = safe_static_file(alt_path)
                     if alt_txt_path:
                         return FileResponse(alt_txt_path, media_type="text/plain")
+
+                # Nested static-export segments are stored as directories even
+                # when the client requests their RSC name with dots.
+                parent, _, filename = path.rpartition("/")
+                segments = filename.removesuffix(".txt").split(".")
+                if segments[0] == "__next" and len(segments) >= 3:
+                    nested = "/".join((parent, ".".join(segments[:2]), *segments[2:])) + ".txt"
+                    nested_txt_path = safe_static_file(nested)
+                    if nested_txt_path:
+                        return FileResponse(nested_txt_path, media_type="text/plain")
             
             txt_path = safe_static_file(f"{path}.txt")
             if txt_path:

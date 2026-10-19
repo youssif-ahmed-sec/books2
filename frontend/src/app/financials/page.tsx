@@ -9,6 +9,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
+import { LoadingTableRows } from "@/components/LoadingState";
 import { useSectionSearchSelection } from "@/lib/useSectionSearchSelection";
 import AdminGate from "@/components/AdminGate";
 import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
@@ -32,6 +33,8 @@ export default function FinancialsPage() {
 function FinancialsContent() {
   const [expenses, setExpenses] = useState<Expense[]>(() => readSectionSnapshot<{ expenses: Expense[] }>("financials")?.expenses || []);
   const [incomes, setIncomes] = useState<Income[]>(() => readSectionSnapshot<{ incomes: Income[] }>("financials")?.incomes || []);
+  const [loading, setLoading] = useState(() => !readSectionSnapshot("financials"));
+  const [loadError, setLoadError] = useState(false);
   const [isSlideoverOpen, setIsSlideoverOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"expense" | "income">("expense");
   useSectionSearchSelection(id => setActiveTab(incomes.some(item => item.id === id) ? "income" : "expense"));
@@ -57,9 +60,11 @@ function FinancialsContent() {
       ]);
       setExpenses(expData);
       setIncomes(incData);
+      setLoadError(false);
       writeSectionSnapshot("financials", { expenses: expData, incomes: incData });
     } catch (err) {
       console.error("Failed to load financials:", err);
+      setLoadError(true);
     }
   };
 
@@ -68,9 +73,11 @@ function FinancialsContent() {
       .then(([expData, incData]) => {
         setExpenses(expData);
         setIncomes(incData);
+        setLoadError(false);
         writeSectionSnapshot("financials", { expenses: expData, incomes: incData });
       })
-      .catch(err => console.error("Failed to load financials:", err));
+      .catch(err => { console.error("Failed to load financials:", err); setLoadError(true); })
+      .finally(() => setLoading(false));
   }, []);
 
   const openAdd = (type: "expense" | "income") => {
@@ -121,7 +128,6 @@ function FinancialsContent() {
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
               <h1 className="app-heading">المالية</h1>
-              <p className="app-subtitle">المصروفات والإيرادات الأخرى</p>
             </div>
             <div className="flex gap-2">
               <button
@@ -158,6 +164,7 @@ function FinancialsContent() {
         </button>
       </div>
 
+      {loadError && <p role="alert" className="app-panel rounded-xl border-red-500/30 p-4 text-sm text-red-300">تعذر تحديث الحركات المالية. حاول تحديث الصفحة.</p>}
       <div className="app-panel overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-right text-sm">
@@ -170,7 +177,8 @@ function FinancialsContent() {
               </tr>
             </thead>
             <tbody className="text-[#e5e2e1]">
-              {activeTab === "expense" && expenses.map((e) => (
+              {loading && <LoadingTableRows label="جاري تحميل الحركات المالية" columns={4} />}
+              {!loading && activeTab === "expense" && expenses.map((e) => (
                 <tr key={e.id} data-search-id={e.id} className="app-table-row">
                   <td className="px-4 py-3" dir="ltr">{new Date(e.expense_date).toLocaleDateString()}</td>
                   <td className="px-4 py-3 font-medium text-white">{e.category}</td>
@@ -178,7 +186,7 @@ function FinancialsContent() {
                   <td className="px-4 py-3 text-[#ffb4ab] font-bold">{Number(e.amount).toLocaleString("ar-EG")} ج.م</td>
                 </tr>
               ))}
-              {activeTab === "income" && incomes.map((i) => (
+              {!loading && activeTab === "income" && incomes.map((i) => (
                 <tr key={i.id} data-search-id={i.id} className="app-table-row">
                   <td className="px-4 py-3" dir="ltr">{new Date(i.income_date).toLocaleDateString()}</td>
                   <td className="px-4 py-3 font-medium text-white">{i.source}</td>
@@ -187,12 +195,12 @@ function FinancialsContent() {
                 </tr>
               ))}
               
-              {activeTab === "expense" && expenses.length === 0 && (
+              {!loading && !loadError && activeTab === "expense" && expenses.length === 0 && (
                 <tr>
                   <td colSpan={4} className="app-muted px-4 py-8 text-center">لا توجد مصروفات</td>
                 </tr>
               )}
-              {activeTab === "income" && incomes.length === 0 && (
+              {!loading && !loadError && activeTab === "income" && incomes.length === 0 && (
                 <tr>
                   <td colSpan={4} className="app-muted px-4 py-8 text-center">لا توجد إيرادات</td>
                 </tr>

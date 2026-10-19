@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { emptyBarcodeScanCapture, englishBarcodeFromScan, recordBarcodeScanKey } from "@/lib/barcodeScanner";
 
 interface UnitBarcodeFieldProps {
   unitName: string;
@@ -12,6 +13,7 @@ interface UnitBarcodeFieldProps {
 export default function UnitBarcodeField({ unitName, value, onChange, readOnly = false }: UnitBarcodeFieldProps) {
   const [mode, setMode] = useState<"scan" | "auto">(value ? "scan" : "auto");
   const inputRef = useRef<HTMLInputElement>(null);
+  const scanKeys = useRef(emptyBarcodeScanCapture());
   const selectedMode = value ? "scan" : mode;
 
   return (
@@ -37,6 +39,14 @@ export default function UnitBarcodeField({ unitName, value, onChange, readOnly =
       <input ref={inputRef} type="text" dir="ltr" aria-label={`باركود ${unitName}`}
         value={selectedMode === "auto" ? "" : value}
         onChange={event => onChange(event.target.value)}
+        onKeyDown={event => {
+          if (event.key !== "Enter") {
+            if (!event.nativeEvent.isComposing) recordBarcodeScanKey(scanKeys.current, event);
+            return;
+          }
+          const code = englishBarcodeFromScan(scanKeys.current, event.currentTarget.value);
+          if (code) { event.preventDefault(); onChange(code); }
+        }}
         disabled={selectedMode === "auto"}
         placeholder={selectedMode === "auto" ? "يُنشأ عند الحفظ" : "ضع المؤشر وامسح الباركود"}
         className="w-full rounded-xl border border-white/10 bg-[#201f1f] px-3 py-2 text-sm disabled:opacity-60" />

@@ -4,12 +4,15 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { fetchApi } from "@/lib/api";
 import { sendLocalPrint } from "@/lib/localPrint";
 import { ProductSelect } from "@/components/ProductSelect";
+import { ZeroHintNumberInput } from "@/components/ZeroHintNumberInput";
+import { emptyBarcodeScanCapture, englishBarcodeFromScan, recordBarcodeScanKey } from "@/lib/barcodeScanner";
 
 type Choice = { id: string; name?: string };
 type Product = { id: string; name_ar: string; sku: string; barcode?: string; base_unit: string; is_bundle?: boolean; units?: Array<{ barcode?: string }> };
 type Line = { product: Product; quantity: string };
 type Receipt = {
   id: string; created_at: string; supplier_name: string; warehouse_name: string;
+  employee_name?: string;
   supplier_document?: string | null;
   lines: Array<{ product_id: string; product_name: string; unit_name: string; quantity: number }>;
 };
@@ -30,6 +33,8 @@ export default function ReceiveStockPanel({ onClose, onSaved }: { onClose: () =>
   const [printing, setPrinting] = useState(false);
   const receiptRequest = useRef<{ fingerprint: string; id: string } | null>(null);
   const searchInput = useRef<HTMLInputElement>(null);
+  const scanKeys = useRef(emptyBarcodeScanCapture());
+  const scannedSearch = useRef<string | null>(null);
 
   useEffect(() => {
     Promise.all([fetchApi("/suppliers?limit=100"), fetchApi("/inventory/warehouses")])
@@ -56,7 +61,8 @@ export default function ReceiveStockPanel({ onClose, onSaved }: { onClose: () =>
 
   async function findProduct(event: FormEvent) {
     event.preventDefault();
-    const term = search.trim();
+    const term = scannedSearch.current || search.trim();
+    scannedSearch.current = null;
     if (!term) return;
     try {
       const result = await fetchApi(`/products?is_bundle=false&search=${encodeURIComponent(term)}&limit=20`);
@@ -111,6 +117,7 @@ export default function ReceiveStockPanel({ onClose, onSaved }: { onClose: () =>
     try {
       await sendLocalPrint({
         id: receipt.id, created_at: receipt.created_at,
+        employee_name: receipt.employee_name, operation_type: "stock_receipt",
         supplier_name: receipt.supplier_name, warehouse_name: receipt.warehouse_name,
         supplier_document: receipt.supplier_document,
         cart: receipt.lines.map(line => ({ name: line.product_name, unit: line.unit_name, qty: Number(line.quantity) })),
@@ -145,13 +152,20 @@ export default function ReceiveStockPanel({ onClose, onSaved }: { onClose: () =>
               warehousesLoaded && <p role="alert" className="text-red-400">لا يوجد مخزن نشط.</p>}
           </div>
           <form onSubmit={findProduct} className="space-y-2"><label htmlFor="receiving-search" className="text-sm font-semibold">اسكن باركود الصنف أو اكتب اسمه ثم اضغط Enter</label>
-            <div className="flex gap-2"><input id="receiving-search" ref={searchInput} autoFocus value={search} onChange={event => { setSearch(event.target.value); setMatches([]); }} placeholder="باركود أو اسم الصنف" className="app-field app-search-focus min-w-0 flex-1" />
+            <div className="flex gap-2"><input id="receiving-search" ref={searchInput} autoFocus value={search} onChange={event => { setSearch(event.target.value); setMatches([]); }} onKeyDown={event => {
+              if (event.key !== "Enter") {
+                if (!event.nativeEvent.isComposing) recordBarcodeScanKey(scanKeys.current, event);
+                return;
+              }
+              const code = englishBarcodeFromScan(scanKeys.current, event.currentTarget.value.trim());
+              if (code) { scannedSearch.current = code; setSearch(code); }
+            }} placeholder="باركود أو اسم الصنف" className="app-field app-search-focus min-w-0 flex-1" />
               <button type="submit" className="app-secondary-button">إضافة</button></div></form>
           {matches.length > 0 && <div className="max-h-44 overflow-y-auto rounded-xl border border-white/10" role="listbox" aria-label="الأصناف المطابقة">{matches.map(product =>
             <button type="button" role="option" aria-selected="false" key={product.id} onClick={() => addProduct(product)} className="block w-full border-b border-white/10 px-3 py-2 text-right hover:bg-white/10">{product.name_ar} <span className="app-muted text-xs">{product.sku}</span></button>)}</div>}
           <div className="overflow-x-auto rounded-xl border border-white/10"><table className="w-full text-sm text-right"><thead className="bg-white/5"><tr><th className="p-3">الصنف</th><th className="p-3">الكمية بالوحدة الأساسية</th><th className="p-3">حذف</th></tr></thead><tbody>
             {lines.length === 0 ? <tr><td colSpan={3} className="p-5 text-center app-muted">لم تُضف أصناف بعد</td></tr> : lines.map(line => <tr key={line.product.id} className="border-t border-white/10"><td className="p-3">{line.product.name_ar} <span className="app-muted">({line.product.base_unit})</span></td>
-              <td className="p-3"><input aria-label={`كمية ${line.product.name_ar}`} type="number" min="0.01" max="99999999" step="0.01" value={line.quantity} onChange={event => setLines(previous => previous.map(item => item.product.id === line.product.id ? { ...item, quantity: event.target.value } : item))} className="app-field w-28 text-center" /></td>
+              <td className="p-3"><ZeroHintNumberInput aria-label={`كمية ${line.product.name_ar}`} min="0.01" max="99999999" step="0.01" value={line.quantity} onChange={event => setLines(previous => previous.map(item => item.product.id === line.product.id ? { ...item, quantity: event.target.value } : item))} className="app-field w-28 text-center" /></td>
               <td className="p-3"><button type="button" aria-label={`حذف ${line.product.name_ar}`} onClick={() => setLines(previous => previous.filter(item => item.product.id !== line.product.id))} className="text-red-300 hover:text-red-200">حذف</button></td></tr>)}</tbody></table></div>
           <label className="app-muted block text-sm">رقم مستند المورد · اختياري<input value={reference} onChange={event => setReference(event.target.value)} className="app-field mt-1" /></label>
           <button type="button" disabled={saving || warehouses.length === 0 || lines.length === 0} onClick={save} className="app-primary-button w-full">{saving ? "جارٍ الحفظ..." : "حفظ فاتورة الاستلام"}</button>

@@ -36,8 +36,10 @@ async def _receipt_document(db: AsyncSession, receipt_id: UUID):
     if not rows:
         raise HTTPException(status_code=404, detail="Stock receipt not found")
     first = rows[0][0]
+    employee = (await db.execute(select(User.full_name, User.username, User.email).where(User.id == first.user_id))).one_or_none()
     return {
         "id": str(receipt_id), "created_at": first.created_at,
+        "employee_name": next((name for name in employee if name), "") if employee else "",
         "supplier_id": str(first.supplier_id), "supplier_name": rows[0][3],
         "warehouse_id": str(first.warehouse_id), "warehouse_name": rows[0][4],
         "supplier_document": first.notes,

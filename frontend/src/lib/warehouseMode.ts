@@ -1,7 +1,7 @@
-export const warehouseOnlyMode = process.env.NEXT_PUBLIC_WAREHOUSE_ONLY !== "0";
+export const warehouseOnlyMode = process.env.NEXT_PUBLIC_WAREHOUSE_ONLY === "1";
 
 const warehousePaths = new Set([
-  "/", "/login", "/paused", "/inventory", "/inventory/product", "/stock-operations",
+  "/", "/login", "/paused", "/inventory", "/inventory/product", "/stock-operations", "/product-approvals", "/count-approvals",
   "/suppliers", "/purchases", "/purchases/legacy", "/integrations/whatsapp", "/categories", "/offers", "/settings", "/audit",
 ]);
 

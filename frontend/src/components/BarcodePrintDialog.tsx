@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { createPortal } from "react-dom";
 import Barcode from "react-barcode";
+import { sendLocalPrint } from "@/lib/localPrint";
+import { ZeroHintNumberInput } from "@/components/ZeroHintNumberInput";
 
 export interface BarcodePrintUnit {
   id: string;
@@ -41,21 +43,13 @@ export default function BarcodePrintDialog({ productName, units, onClose, quanti
         let remaining = choice.copies;
         while (remaining > 0) {
           const batch = Math.min(remaining, 20);
-          const response = await fetch("http://127.0.0.1:8199/api/print", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              receipt_type: "barcode",
-              order: {
-                name_ar: productName,
-                unit_name: choice.name,
-                barcode: choice.barcode,
-                sell_price: choice.price,
-                quantity: batch,
-              },
-            }),
-          });
-          if (!response.ok) throw new Error(`تعذر إرسال الملصقات للطابعة (${response.status}).`);
+          await sendLocalPrint({
+            name_ar: productName,
+            unit_name: choice.name,
+            barcode: choice.barcode,
+            sell_price: choice.price,
+            quantity: batch,
+          }, "barcode");
           remaining -= batch;
           update(choice.id, { copies: remaining, selected: remaining > 0 });
         }
@@ -83,7 +77,7 @@ export default function BarcodePrintDialog({ productName, units, onClose, quanti
               <button type="button" onClick={() => setPreviewId(choice.id)} className="min-w-28 text-right font-semibold hover:text-primary">{choice.name}</button>
               <span dir="ltr" className="min-w-0 flex-1 truncate text-xs text-[#e2bfb0]">{choice.barcode}</span>
               <label className="flex items-center gap-2 text-sm">العدد
-                <input type="number" min="0" step="1" value={choice.copies} aria-label={`عدد ملصقات ${choice.name}`}
+                <ZeroHintNumberInput min="0" step="1" value={choice.copies} aria-label={`عدد ملصقات ${choice.name}`}
                   onChange={event => update(choice.id, { copies: Math.max(0, Math.trunc(Number(event.target.value) || 0)) })}
                   className="w-20 rounded-lg border border-white/15 bg-[#292625] px-2 py-1 text-center" />
               </label>

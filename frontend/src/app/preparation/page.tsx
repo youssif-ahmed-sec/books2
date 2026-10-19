@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
+import { LoadingCards } from "@/components/LoadingState";
 import { fetchApi } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
 import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
@@ -11,12 +12,13 @@ type Order = { id: string; items: Item[]; notes: string | null; created_at: stri
 
 export default function PreparationPage() {
   const [orders, setOrders] = useState<Order[]>(() => readSectionSnapshot<Order[]>("preparation-orders") || []);
+  const [loading, setLoading] = useState(() => !readSectionSnapshot("preparation-orders"));
   const [picked, setPicked] = useState<Record<string, number>>({});
   const [packed, setPacked] = useState<Record<string, boolean>>({});
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const load = () => fetchApi("/orders/assigned").then((rows: Order[]) => { setOrders(rows); writeSectionSnapshot("preparation-orders", rows); }).catch(error => setMessage(errorMessage(error, "تعذر تحميل الطلبات")));
-  useEffect(() => { load(); }, []);
+  useEffect(() => { void load().finally(() => setLoading(false)); }, []);
 
   const complete = async (order: Order) => {
     setBusy(true); setMessage("");
@@ -33,8 +35,8 @@ export default function PreparationPage() {
   return <div className="min-h-screen bg-[#131313] text-white flex" dir="rtl"><SideNav /><TopNav title="تجهيز الطلبات" />
     <main className="mx-4 mt-28 mb-8 flex-1 min-w-0 lg:mr-[364px] lg:mt-36 space-y-5"><h1 className="text-2xl font-bold">الطلبات المسندة للتجهيز</h1>
       {message && <p role="status" className="rounded-xl bg-primary/10 p-4">{message}</p>}
-      {orders.length === 0 && <p className="glass rounded-xl p-5">لا توجد طلبات قيد التجهيز.</p>}
-      {orders.map(order => <section key={order.id} data-search-id={order.id} className="glass rounded-2xl p-6 space-y-4"><h2 className="font-bold">طلب #{order.id.slice(0, 8)}</h2><p className="text-sm text-white/60">{order.notes}</p>
+      {loading ? <LoadingCards label="جاري تحميل طلبات التجهيز" /> : !message && orders.length === 0 && <p className="glass rounded-xl p-5">لا توجد طلبات قيد التجهيز.</p>}
+      {!loading && orders.map(order => <section key={order.id} data-search-id={order.id} className="glass rounded-2xl p-6 space-y-4"><h2 className="font-bold">طلب #{order.id.slice(0, 8)}</h2><p className="text-sm text-white/60">{order.notes}</p>
         {order.items.map(item => <label key={item.id} className="flex flex-wrap items-center gap-3 border-b border-white/10 pb-3"><span>{item.product_name || item.product_id.slice(0, 8)}</span><span>المطلوب: {item.quantity_requested}</span><input aria-label={`الكمية المجهزة للبند ${item.id}`} type="number" min="0" max={item.quantity_requested} step="0.01" value={picked[item.id] || ""} onChange={event => setPicked(previous => ({ ...previous, [item.id]: Number(event.target.value) || 0 }))} className="w-28 rounded-lg bg-black p-2" /></label>)}
         <label className="flex gap-2"><input type="checkbox" checked={Boolean(packed[order.id])} onChange={event => setPacked(previous => ({ ...previous, [order.id]: event.target.checked }))} /> راجعت الكميات وتم التغليف</label>
         <button disabled={busy || !packed[order.id] || order.items.some(item => picked[item.id] !== item.quantity_requested)} onClick={() => complete(order)} className="app-primary-button disabled:opacity-40">تحديد الطلب جاهزًا</button>

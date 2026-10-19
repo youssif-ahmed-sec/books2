@@ -20,7 +20,7 @@ async def list_offers(db: AsyncSession = Depends(get_db), _user: User = Depends(
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-async def create_offer(payload: OfferInput, db: AsyncSession = Depends(get_db), user: User = Depends(require_admin)):
+async def create_offer(payload: OfferInput, db: AsyncSession = Depends(get_db), user: User = Depends(require_inventory_access)):
     try:
         offer_id = await OfferService.save(db, payload, user.id)
         return await OfferService.get_offer(db, offer_id)

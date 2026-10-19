@@ -16,10 +16,12 @@ interface InventoryTransaction {
   quantity_changed: number;
   created_at: string;
   reference_document?: string | null;
+  notes?: string | null;
 }
 
 interface StockReceipt {
   id: string; created_at: string; supplier_name: string; warehouse_name: string;
+  employee_name?: string;
   supplier_document?: string | null;
   lines: Array<{ product_id: string; product_name: string; unit_name: string; quantity: number }>;
 }
@@ -61,7 +63,7 @@ export default function InventoryMovementsModal({ onClose }: InventoryMovementsM
           style = "bg-red-500/10 text-red-400 border-red-500/20";
           qtyPrefix = tx.quantity_changed > 0 ? "+" : "";
         } else if (tx.transaction_type === "Adjustment") {
-          typeLabel = "تسوية";
+          typeLabel = tx.notes === "Initial stock from product creation" ? "رصيد افتتاحي" : "تسوية";
           style = "bg-[#ffb4ab]/10 text-[#ffb4ab] border-[#ffb4ab]/20";
           qtyPrefix = tx.quantity_changed > 0 ? "+" : "";
         }
@@ -101,6 +103,7 @@ export default function InventoryMovementsModal({ onClose }: InventoryMovementsM
     try {
       await sendLocalPrint({
         id: receipt.id, created_at: receipt.created_at,
+        employee_name: receipt.employee_name, operation_type: "stock_receipt",
         supplier_name: receipt.supplier_name, warehouse_name: receipt.warehouse_name,
         supplier_document: receipt.supplier_document,
         cart: receipt.lines.map(line => ({ name: line.product_name, unit: line.unit_name, qty: Number(line.quantity) })),
@@ -125,9 +128,6 @@ export default function InventoryMovementsModal({ onClose }: InventoryMovementsM
             </div>
             <div>
               <h2 className="text-2xl font-bold text-white">سجل حركات المخزون</h2>
-              <p className="text-[#e2bfb0]/60 text-sm mt-1">
-                سجل كامل لجميع عمليات الوارد والصادر بالمخزن
-              </p>
             </div>
           </div>
           <button
@@ -161,11 +161,7 @@ export default function InventoryMovementsModal({ onClose }: InventoryMovementsM
                 </thead>
                 <tbody className="divide-y divide-white/5">
                   {loading ? (
-                    <tr>
-                      <td colSpan={4} className="text-center py-10 text-[#e2bfb0]/60 text-sm">
-                        جاري تحميل السجل...
-                      </td>
-                    </tr>
+                    [0, 1, 2].map(index => <tr key={index} aria-hidden={index !== 0}><td className="px-8 py-4"><span className="app-skeleton h-4 w-32" />{index === 0 && <span className="sr-only">جاري تحميل سجل الحركات</span>}</td><td className="px-8 py-4"><span className="app-skeleton h-4 w-24" /></td><td className="px-8 py-4"><span className="app-skeleton h-4 w-16" /></td><td className="px-8 py-4"><span className="app-skeleton h-4 w-28" /></td></tr>)
                   ) : movements.length === 0 ? (
                     <tr>
                       <td colSpan={4} className="text-center py-10 text-[#e2bfb0]/60 text-sm">

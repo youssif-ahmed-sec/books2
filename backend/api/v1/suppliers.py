@@ -1,13 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func, or_
+from sqlalchemy import case, func, or_
 from sqlalchemy.exc import IntegrityError
 from uuid import UUID
 from typing import Optional
 from decimal import Decimal
 
-from models.product import Supplier, SupplierPayment, SupplierDebtEntry, PaymentMethodEnum
+from models.product import Supplier, SupplierPayment, SupplierDebtEntry, SupplierPaymentAllocation, PaymentMethodEnum
 from models.financial import CashAdjustment
 from services.cash_register_service import expected_cash, open_shift
 from models.inventory import InventoryTransaction, TransactionTypeEnum
@@ -23,6 +23,63 @@ from models.user import User, RoleEnum, AuditLog
 from database import get_db
 
 router = APIRouter(prefix="/suppliers", tags=["Suppliers"], dependencies=[Depends(require_inventory_access)])
+
+
+async def _supplier_balance_summary(db: AsyncSession, supplier: Supplier) -> dict:
+    supplier_id = supplier.id
+    receipts = await db.execute(select(
+        func.coalesce(func.sum(InventoryTransaction.quantity_changed * InventoryTransaction.unit_cost), 0),
+        func.count(InventoryTransaction.id).filter(InventoryTransaction.unit_cost.is_(None)),
+    ).where(
+        InventoryTransaction.supplier_id == supplier_id,
+        InventoryTransaction.transaction_type == TransactionTypeEnum.RECEIVING,
+        InventoryTransaction.supplier_finance_included.is_(True),
+    ))
+    total_purchases, unpriced_receipts = receipts.one()
+    unattributed_receipts = (await db.execute(select(func.count(InventoryTransaction.id)).where(
+        InventoryTransaction.supplier_id.is_(None),
+        InventoryTransaction.transaction_type == TransactionTypeEnum.RECEIVING,
+        InventoryTransaction.supplier_finance_included.is_(True),
+        or_(InventoryTransaction.notes.is_(None), InventoryTransaction.notes != "Initial stock from product creation"),
+    ))).scalar_one()
+    total_payments = (await db.execute(select(func.coalesce(func.sum(SupplierPayment.amount), 0)).where(
+        SupplierPayment.supplier_id == supplier_id,
+    ))).scalar_one()
+    total_manual_debt = (await db.execute(select(func.coalesce(func.sum(case(
+        (SupplierDebtEntry.entry_type == "DEBT", SupplierDebtEntry.amount),
+        else_=-SupplierDebtEntry.amount,
+    )), 0)).where(SupplierDebtEntry.supplier_id == supplier_id))).scalar_one()
+    statement_incomplete = bool(unpriced_receipts or unattributed_receipts)
+    balance = None if statement_incomplete else (
+        Decimal(str(supplier.opening_balance or 0)) + Decimal(str(total_purchases))
+        + Decimal(str(total_manual_debt)) - Decimal(str(total_payments))
+    )
+    return {
+        "total_purchases": total_purchases, "unpriced_receipts": unpriced_receipts,
+        "unattributed_receipts": unattributed_receipts, "total_payments": total_payments,
+        "total_manual_debt": total_manual_debt, "statement_incomplete": statement_incomplete,
+        "balance": balance,
+    }
+
+
+async def _payment_with_allocations(db: AsyncSession, payment: SupplierPayment) -> dict:
+    rows = (await db.execute(select(SupplierPaymentAllocation).where(
+        SupplierPaymentAllocation.payment_id == payment.id,
+    ))).scalars().all()
+    return {**payment.__dict__, "allocations": rows}
+
+
+async def _same_payment_request(db: AsyncSession, prior: SupplierPayment, supplier_id: UUID, payload: SupplierPaymentCreate) -> bool:
+    if (prior.supplier_id != supplier_id or Decimal(str(prior.amount)) != payload.amount
+            or prior.payment_method != payload.payment_method or prior.cash_source != payload.cash_source
+            or prior.reference_number != payload.reference_number or prior.notes != payload.notes):
+        return False
+    rows = (await db.execute(select(SupplierPaymentAllocation).where(
+        SupplierPaymentAllocation.payment_id == prior.id,
+    ))).scalars().all()
+    return {row.debt_entry_id: Decimal(str(row.amount)) for row in rows} == {
+        item.debt_entry_id: item.amount for item in payload.allocations
+    }
 
 
 @router.get("", response_model=PaginatedSupplierResponse)
@@ -67,33 +124,7 @@ async def get_supplier_detail(
     if current_user.role != RoleEnum.ADMIN:
         return visible_supplier_detail(supplier.__dict__, current_user.role)
 
-    # Only priced receipts can contribute to the statement. Old receipts lack
-    # both the historical supplier and price, so they cannot be reconstructed.
-    receipts = await db.execute(select(
-        func.coalesce(func.sum(InventoryTransaction.quantity_changed * InventoryTransaction.unit_cost), 0),
-        func.count(InventoryTransaction.id).filter(InventoryTransaction.unit_cost.is_(None)),
-    ).where(
-        InventoryTransaction.supplier_id == supplier_id,
-        InventoryTransaction.transaction_type == TransactionTypeEnum.RECEIVING,
-        InventoryTransaction.supplier_finance_included.is_(True),
-    ))
-    total_purchases, unpriced_receipts = receipts.one()
-    unattributed_receipts = (await db.execute(select(func.count(InventoryTransaction.id)).where(
-        InventoryTransaction.supplier_id.is_(None),
-        InventoryTransaction.transaction_type == TransactionTypeEnum.RECEIVING,
-        InventoryTransaction.supplier_finance_included.is_(True),
-        or_(InventoryTransaction.notes.is_(None), InventoryTransaction.notes != "Initial stock from product creation"),
-    ))).scalar_one()
-    statement_incomplete = bool(unpriced_receipts or unattributed_receipts)
-
-    # Calculate total payments
-    payments_query = select(func.sum(SupplierPayment.amount)).where(
-        SupplierPayment.supplier_id == supplier_id
-    )
-    payments_result = await db.execute(payments_query)
-    total_payments = payments_result.scalar() or Decimal("0")
-
-    # Get payment history
+    summary = await _supplier_balance_summary(db, supplier)
     payments_list_query = select(SupplierPayment).where(
         SupplierPayment.supplier_id == supplier_id
     ).order_by(SupplierPayment.payment_date.desc())
@@ -103,23 +134,20 @@ async def get_supplier_detail(
     debt_entries = (await db.execute(select(SupplierDebtEntry).where(
         SupplierDebtEntry.supplier_id == supplier_id,
     ).order_by(SupplierDebtEntry.created_at.desc(), SupplierDebtEntry.id.desc()))).scalars().all()
-    total_manual_debt = sum((Decimal(str(entry.amount)) * (1 if entry.entry_type == "DEBT" else -1)
-                             for entry in debt_entries), Decimal("0"))
-
-    opening_balance = supplier.opening_balance or Decimal("0")
-    balance = None if statement_incomplete else opening_balance + Decimal(str(total_purchases)) + total_manual_debt - Decimal(str(total_payments))
 
     supplier_data = supplier.__dict__.copy()
     supplier_data.pop("_sa_instance_state", None)
-    supplier_data["total_purchases"] = total_purchases
-    supplier_data["total_manual_debt"] = total_manual_debt
-    supplier_data["total_payments"] = total_payments
-    supplier_data["balance"] = balance
-    supplier_data["statement_incomplete"] = statement_incomplete
-    supplier_data["unpriced_receipts"] = unpriced_receipts
-    supplier_data["unattributed_receipts"] = unattributed_receipts
-    supplier_data["payments"] = payments
-    supplier_data["debt_entries"] = debt_entries
+    supplier_data.update(summary)
+    allocations = (await db.execute(select(SupplierPaymentAllocation).join(
+        SupplierDebtEntry, SupplierDebtEntry.id == SupplierPaymentAllocation.debt_entry_id,
+    ).where(SupplierDebtEntry.supplier_id == supplier_id))).scalars().all()
+    by_payment: dict[UUID, list] = {}
+    by_debt: dict[UUID, Decimal] = {}
+    for allocation in allocations:
+        by_payment.setdefault(allocation.payment_id, []).append(allocation)
+        by_debt[allocation.debt_entry_id] = by_debt.get(allocation.debt_entry_id, Decimal("0")) + Decimal(str(allocation.amount))
+    supplier_data["payments"] = [{**payment.__dict__, "allocations": by_payment.get(payment.id, [])} for payment in payments]
+    supplier_data["debt_entries"] = [{**entry.__dict__, "allocated_amount": by_debt.get(entry.id, Decimal("0"))} for entry in debt_entries]
 
     return visible_supplier_detail(supplier_data, current_user.role)
 
@@ -128,11 +156,9 @@ async def get_supplier_detail(
 async def create_supplier(
     supplier_in: SupplierCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_inventory_access),
+    current_user: User = Depends(require_admin),
 ):
     """Create a new supplier."""
-    if current_user.role != RoleEnum.ADMIN and {"opening_balance", "credit_limit"} & supplier_in.model_fields_set:
-        raise HTTPException(status_code=403, detail="Admin access required for supplier financial fields")
     new_supplier = Supplier(**supplier_in.model_dump())
     db.add(new_supplier)
     await db.flush()
@@ -147,11 +173,11 @@ async def update_supplier(
     supplier_id: UUID,
     supplier_in: SupplierUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_inventory_access),
+    current_user: User = Depends(require_admin),
 ):
     """Update an existing supplier."""
     result = await db.execute(
-        select(Supplier).where(Supplier.id == supplier_id, Supplier.is_deleted == False)
+        select(Supplier).where(Supplier.id == supplier_id, Supplier.is_deleted == False).with_for_update()
     )
     supplier = result.scalar_one_or_none()
     if not supplier:
@@ -160,8 +186,12 @@ async def update_supplier(
     update_data = supplier_in.model_dump(exclude_unset=True)
     if "opening_balance" in update_data:
         raise HTTPException(status_code=422, detail="Opening balance is fixed after supplier creation; record a debt entry instead")
-    if current_user.role != RoleEnum.ADMIN and {"opening_balance", "credit_limit"} & update_data.keys():
-        raise HTTPException(status_code=403, detail="Admin access required for supplier financial fields")
+    if update_data.get("credit_limit") is not None and update_data["credit_limit"] != supplier.credit_limit:
+        balance = (await _supplier_balance_summary(db, supplier))["balance"]
+        if balance is None:
+            raise HTTPException(status_code=409, detail="Supplier balance is unknown; reconcile old receipts before setting a credit limit")
+        if balance > update_data["credit_limit"]:
+            raise HTTPException(status_code=422, detail="Credit limit cannot be lower than the current supplier balance")
     for key, value in update_data.items():
         setattr(supplier, key, value)
 
@@ -176,7 +206,7 @@ async def update_supplier(
 async def delete_supplier(
     supplier_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_inventory_access),
+    current_user: User = Depends(require_admin),
 ):
     """Soft delete a supplier."""
     result = await db.execute(
@@ -206,31 +236,55 @@ async def add_supplier_debt(
     if prior is not None:
         if (prior.supplier_id != supplier_id or prior.entry_type != "DEBT"
                 or Decimal(str(prior.amount)) != payload.amount or prior.note != note
-                or prior.reference_number != payload.reference_number):
+                or prior.reference_number != payload.reference_number or prior.due_date != payload.due_date):
             raise HTTPException(status_code=409, detail="Debt request ID was already used differently")
         return prior
     supplier = (await db.execute(select(Supplier).where(
         Supplier.id == supplier_id, Supplier.is_deleted == False,
-    ))).scalar_one_or_none()
+    ).with_for_update())).scalar_one_or_none()
     if supplier is None:
         raise HTTPException(status_code=404, detail="Supplier not found")
+    # A concurrent retry may have committed while this request waited for the supplier lock.
+    prior = (await db.execute(select(SupplierDebtEntry).where(SupplierDebtEntry.id == payload.request_id))).scalar_one_or_none()
+    if prior is not None:
+        if (prior.supplier_id != supplier_id or prior.entry_type != "DEBT"
+                or Decimal(str(prior.amount)) != payload.amount or prior.note != note
+                or prior.reference_number != payload.reference_number or prior.due_date != payload.due_date):
+            raise HTTPException(status_code=409, detail="Debt request ID was already used differently")
+        return prior
+    credit_limit_before = supplier.credit_limit
+    credit_limit_after = credit_limit_before
+    if credit_limit_before is not None:
+        balance = (await _supplier_balance_summary(db, supplier))["balance"]
+        if balance is None:
+            raise HTTPException(status_code=409, detail="Supplier balance is unknown; reconcile old receipts before adding debt against a credit limit")
+        projected_balance = balance + payload.amount
+        if projected_balance > Decimal(str(credit_limit_before)):
+            if payload.approved_credit_limit is None or payload.approved_credit_limit < projected_balance:
+                raise HTTPException(status_code=409, detail="Credit limit approval is required for the current projected supplier balance; refresh and confirm again")
+            supplier.credit_limit = projected_balance
+            credit_limit_after = projected_balance
     entry = SupplierDebtEntry(
         id=payload.request_id, supplier_id=supplier_id, entry_type="DEBT",
-        amount=payload.amount, note=note, reference_number=payload.reference_number,
+        amount=payload.amount, note=note, reference_number=payload.reference_number, due_date=payload.due_date,
         created_by=current_user.id,
     )
     db.add(entry)
     try:
         await db.flush()
         db.add(AuditLog(user_id=current_user.id, action="SUPPLIER_DEBT_ADDED", entity_type="Supplier",
-                        entity_id=str(supplier_id), new_value={"entry_id": str(entry.id), "amount": str(entry.amount)}))
+                        entity_id=str(supplier_id), new_value={
+                            "entry_id": str(entry.id), "amount": str(entry.amount), "due_date": entry.due_date.isoformat(),
+                            "credit_limit_before": str(credit_limit_before) if credit_limit_before is not None else None,
+                            "credit_limit_after": str(credit_limit_after) if credit_limit_after is not None else None,
+                        }))
         await db.commit()
     except IntegrityError:
         await db.rollback()
         prior = (await db.execute(select(SupplierDebtEntry).where(SupplierDebtEntry.id == payload.request_id))).scalar_one_or_none()
         if (prior is None or prior.supplier_id != supplier_id or prior.entry_type != "DEBT"
                 or Decimal(str(prior.amount)) != payload.amount or prior.note != note
-                or prior.reference_number != payload.reference_number):
+                or prior.reference_number != payload.reference_number or prior.due_date != payload.due_date):
             raise HTTPException(status_code=409, detail="Debt request ID was already used differently")
         return prior
     await db.refresh(entry)
@@ -255,6 +309,11 @@ async def reverse_supplier_debt(
                 or prior.reverses_entry_id != entry_id or prior.note != reason):
             raise HTTPException(status_code=409, detail="Reversal request ID was already used differently")
         return prior
+    supplier = (await db.execute(select(Supplier).where(
+        Supplier.id == supplier_id, Supplier.is_deleted == False,
+    ).with_for_update())).scalar_one_or_none()
+    if supplier is None:
+        raise HTTPException(status_code=404, detail="Supplier not found")
     original = (await db.execute(select(SupplierDebtEntry).where(
         SupplierDebtEntry.id == entry_id, SupplierDebtEntry.supplier_id == supplier_id,
         SupplierDebtEntry.entry_type == "DEBT",
@@ -266,6 +325,11 @@ async def reverse_supplier_debt(
     ))).scalar_one_or_none()
     if existing is not None:
         raise HTTPException(status_code=409, detail="Debt entry is already reversed")
+    allocated = (await db.execute(select(func.coalesce(func.sum(SupplierPaymentAllocation.amount), 0)).where(
+        SupplierPaymentAllocation.debt_entry_id == entry_id,
+    ))).scalar_one()
+    if allocated:
+        raise HTTPException(status_code=409, detail="Cannot reverse a debt with allocated payments")
     entry = SupplierDebtEntry(
         id=payload.request_id, supplier_id=supplier_id, entry_type="REVERSAL",
         amount=original.amount, note=reason, reverses_entry_id=entry_id,
@@ -302,15 +366,45 @@ async def add_payment(
         raise HTTPException(status_code=422, detail="Cash source applies only to cash payments")
     prior = (await db.execute(select(SupplierPayment).where(SupplierPayment.id == payment_in.request_id))).scalar_one_or_none()
     if prior is not None:
-        if prior.supplier_id != supplier_id or Decimal(str(prior.amount)) != payment_in.amount or prior.payment_method != payment_in.payment_method or prior.cash_source != payment_in.cash_source or prior.reference_number != payment_in.reference_number or prior.notes != payment_in.notes:
+        if not await _same_payment_request(db, prior, supplier_id, payment_in):
             raise HTTPException(status_code=409, detail="Payment request ID was already used differently")
-        return prior
-    result = await db.execute(
-        select(Supplier).where(Supplier.id == supplier_id, Supplier.is_deleted == False)
-    )
+        return await _payment_with_allocations(db, prior)
+    if payment_in.payment_method not in (PaymentMethodEnum.CASH, PaymentMethodEnum.INSTAPAY, PaymentMethodEnum.WALLET):
+        raise HTTPException(status_code=422, detail="Supplier payments accept cash, Instapay, or wallet only")
+    result = await db.execute(select(Supplier).where(
+        Supplier.id == supplier_id, Supplier.is_deleted == False,
+    ).with_for_update())
     supplier = result.scalar_one_or_none()
     if not supplier:
         raise HTTPException(status_code=404, detail="Supplier not found")
+    prior = (await db.execute(select(SupplierPayment).where(SupplierPayment.id == payment_in.request_id))).scalar_one_or_none()
+    if prior is not None:
+        if not await _same_payment_request(db, prior, supplier_id, payment_in):
+            raise HTTPException(status_code=409, detail="Payment request ID was already used differently")
+        return await _payment_with_allocations(db, prior)
+    if len({item.debt_entry_id for item in payment_in.allocations}) != len(payment_in.allocations):
+        raise HTTPException(status_code=422, detail="A debt can appear only once in a payment")
+    allocated_total = sum((item.amount for item in payment_in.allocations), Decimal("0"))
+    if allocated_total > payment_in.amount or (allocated_total < payment_in.amount and not payment_in.allow_unallocated):
+        raise HTTPException(status_code=422, detail="Allocate the full payment or explicitly allow an unallocated remainder")
+    for item in payment_in.allocations:
+        debt = (await db.execute(select(SupplierDebtEntry).where(
+            SupplierDebtEntry.id == item.debt_entry_id,
+            SupplierDebtEntry.supplier_id == supplier_id,
+            SupplierDebtEntry.entry_type == "DEBT",
+        ))).scalar_one_or_none()
+        if debt is None:
+            raise HTTPException(status_code=422, detail="Selected supplier debt is invalid")
+        reversed_row = (await db.execute(select(SupplierDebtEntry.id).where(
+            SupplierDebtEntry.reverses_entry_id == debt.id,
+        ))).scalar_one_or_none()
+        if reversed_row is not None:
+            raise HTTPException(status_code=409, detail="Selected supplier debt was reversed")
+        paid = (await db.execute(select(func.coalesce(func.sum(SupplierPaymentAllocation.amount), 0)).where(
+            SupplierPaymentAllocation.debt_entry_id == debt.id,
+        ))).scalar_one()
+        if item.amount > Decimal(str(debt.amount)) - Decimal(str(paid)):
+            raise HTTPException(status_code=409, detail="Allocation exceeds the debt's remaining amount; refresh supplier account")
 
     cash_shift = None
     if payment_in.payment_method == PaymentMethodEnum.CASH and payment_in.cash_source == "SHIFT":
@@ -324,9 +418,11 @@ async def add_payment(
     payment = SupplierPayment(
         id=payment_in.request_id,
         supplier_id=supplier_id,
-        **payment_in.model_dump(exclude={"request_id"})
+        **payment_in.model_dump(exclude={"request_id", "allocations", "allow_unallocated"})
     )
     db.add(payment)
+    for item in payment_in.allocations:
+        db.add(SupplierPaymentAllocation(payment_id=payment.id, debt_entry_id=item.debt_entry_id, amount=item.amount))
     if cash_shift is not None:
         db.add(CashAdjustment(
             id=payment_in.request_id,
@@ -337,18 +433,13 @@ async def add_payment(
         ))
     try:
         await db.flush()
-        db.add(AuditLog(user_id=current_user.id, action="SUPPLIER_PAYMENT", entity_type="Supplier", entity_id=str(supplier_id), new_value={"payment_id": str(payment.id), "amount": str(payment.amount), "cash_source": payment.cash_source}))
+        db.add(AuditLog(user_id=current_user.id, action="SUPPLIER_PAYMENT", entity_type="Supplier", entity_id=str(supplier_id), new_value={"payment_id": str(payment.id), "amount": str(payment.amount), "payment_method": payment.payment_method.value, "cash_source": payment.cash_source, "allocations": [{"debt_entry_id": str(item.debt_entry_id), "amount": str(item.amount)} for item in payment_in.allocations], "unallocated_amount": str(payment_in.amount - allocated_total)}))
         await db.commit()
     except IntegrityError:
         await db.rollback()
         prior = (await db.execute(select(SupplierPayment).where(SupplierPayment.id == payment_in.request_id))).scalar_one_or_none()
-        if (prior is None or prior.supplier_id != supplier_id
-                or Decimal(str(prior.amount)) != payment_in.amount
-                or prior.payment_method != payment_in.payment_method
-                or prior.cash_source != payment_in.cash_source
-                or prior.reference_number != payment_in.reference_number
-                or prior.notes != payment_in.notes):
+        if prior is None or not await _same_payment_request(db, prior, supplier_id, payment_in):
             raise HTTPException(status_code=409, detail="Payment request ID was already used differently")
-        return prior
+        return await _payment_with_allocations(db, prior)
     await db.refresh(payment)
-    return payment
+    return await _payment_with_allocations(db, payment)

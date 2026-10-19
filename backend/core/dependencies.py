@@ -5,9 +5,9 @@ from sqlalchemy.future import select
 from uuid import UUID
 import jwt
 
-from core.security import decode_access_token
+from core.security import access_token_hash, decode_access_token
 from database import get_db
-from models.user import User, RoleEnum
+from models.user import RevokedAccessToken, User, RoleEnum
 
 # This tells Swagger where to send login requests to get a token
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
@@ -44,6 +44,12 @@ async def get_current_user(
     try:
         parsed_user_id = UUID(user_id)
     except (ValueError, TypeError, AttributeError):
+        raise credentials_exception
+
+    revoked = (await db.execute(select(RevokedAccessToken.token_hash).where(
+        RevokedAccessToken.token_hash == access_token_hash(token),
+    ))).scalar_one_or_none()
+    if revoked is not None:
         raise credentials_exception
 
     query = select(User).where(

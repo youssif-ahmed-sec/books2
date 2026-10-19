@@ -1,4 +1,5 @@
-:HL["/_next/static/chunks/10zbumzm95oxv.css","style"]
+:HL["/_next/static/css/f3147c1eb1408f13.css","style"]
+:HL["/_next/static/css/fbc268206ba8ccbc.css","style"]
 :HL["https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Noto+Sans+Arabic:wght@400;600;700&display=swap","style"]
 :HL["https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=block","style"]
-0:{"tree":{"name":"","param":null,"prefetchHints":16,"slots":{"children":{"name":"stock-operations","param":null,"prefetchHints":0,"slots":{"children":{"name":"__PAGE__","param":null,"prefetchHints":0,"slots":null}}}}},"staleTime":300,"buildId":"PMTo3TQg14q02TNLetXU0"}
+0:{"tree":{"name":"","param":null,"prefetchHints":16,"slots":{"children":{"name":"stock-operations","param":null,"prefetchHints":0,"slots":{"children":{"name":"__PAGE__","param":null,"prefetchHints":0,"slots":null}}}}},"staleTime":300,"buildId":"t59vbQI4idazqewGdP1ia"}

@@ -1,4 +1,4 @@
-"""Temporary feature gates for the warehouse handoff."""
+"""Optional warehouse handoff gate."""
 
 import os
 
@@ -6,7 +6,7 @@ from fastapi import HTTPException
 
 
 def warehouse_only_mode() -> bool:
-    return os.getenv("BOOKS2_WAREHOUSE_ONLY", "1") != "0"
+    return os.getenv("BOOKS2_WAREHOUSE_ONLY", "0") == "1"
 
 
 def require_full_mode() -> None:

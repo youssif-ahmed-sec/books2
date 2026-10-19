@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Enum, Numeric, UniqueConstraint, CheckConstraint, Index
+from sqlalchemy import Column, String, Boolean, Date, DateTime, ForeignKey, Enum, Numeric, UniqueConstraint, CheckConstraint, Index
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
@@ -50,6 +50,8 @@ class Supplier(Base):
 
 class PaymentMethodEnum(str, enum.Enum):
     CASH = "Cash"
+    INSTAPAY = "Instapay"
+    WALLET = "Wallet"
     BANK_TRANSFER = "Bank Transfer"
     CHECK = "Check"
     OTHER = "Other"
@@ -68,6 +70,7 @@ class SupplierPayment(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     supplier = relationship("Supplier", back_populates="payments")
+    allocations = relationship("SupplierPaymentAllocation", back_populates="payment")
 
 
 class SupplierDebtEntry(Base):
@@ -77,6 +80,7 @@ class SupplierDebtEntry(Base):
         CheckConstraint("entry_type IN ('DEBT', 'REVERSAL')", name="ck_supplier_debt_entries_type"),
         UniqueConstraint("reverses_entry_id", name="uq_supplier_debt_entries_reversal"),
         Index("ix_supplier_debt_entries_supplier_created", "supplier_id", "created_at"),
+        Index("ix_supplier_debt_entries_due_date", "supplier_id", "due_date"),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True)
@@ -85,9 +89,25 @@ class SupplierDebtEntry(Base):
     amount = Column(Numeric(18, 2), nullable=False)
     note = Column(String(500), nullable=False)
     reference_number = Column(String(100), nullable=True)
+    due_date = Column(Date, nullable=True)
     reverses_entry_id = Column(UUID(as_uuid=True), ForeignKey("supplier_debt_entries.id"), nullable=True)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class SupplierPaymentAllocation(Base):
+    __tablename__ = "supplier_payment_allocations"
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="ck_supplier_payment_allocations_positive"),
+        UniqueConstraint("payment_id", "debt_entry_id", name="uq_supplier_payment_debt_allocation"),
+        Index("ix_supplier_payment_allocations_debt", "debt_entry_id"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    payment_id = Column(UUID(as_uuid=True), ForeignKey("supplier_payments.id"), nullable=False)
+    debt_entry_id = Column(UUID(as_uuid=True), ForeignKey("supplier_debt_entries.id"), nullable=False)
+    amount = Column(Numeric(18, 2), nullable=False)
+    payment = relationship("SupplierPayment", back_populates="allocations")
 
 
 class Product(Base):

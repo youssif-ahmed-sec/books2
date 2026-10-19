@@ -13,6 +13,7 @@ from schemas.product import ProductCreate, ProductUpdate
 from models.inventory import Warehouse, InventoryBalance, TransactionTypeEnum
 from models.purchase import PurchaseOrder
 from services.inventory_service import InventoryService
+from services.notification_service import notify_stock_alert_after_product_edit
 
 
 class ProductService:
@@ -161,26 +162,21 @@ class ProductService:
             db.add(audit)
             
             if product_in.initial_stock > 0:
-                first_warehouse_query = select(Warehouse).limit(1)
-                first_warehouse_result = await db.execute(first_warehouse_query)
-                first_warehouse = first_warehouse_result.scalar_one_or_none()
-                
-                if not first_warehouse:
-                    first_warehouse = Warehouse(name="المخزن الرئيسي", location="الفرع الرئيسي")
-                    db.add(first_warehouse)
-                    await db.flush()
-                    
-                if first_warehouse:
-                    balance = InventoryBalance(
-                        product_id=new_product.id,
-                        warehouse_id=first_warehouse.id,
-                        current_stock=Decimal("0")
-                    )
-                    db.add(balance)
-                    InventoryService.record_movement(
-                        db, balance, product_in.initial_stock, user_id, TransactionTypeEnum.ADJUSTMENT,
-                        notes="Initial stock from product creation"
-                    )
+                active_warehouses = (await db.execute(
+                    select(Warehouse).where(Warehouse.is_active == True).limit(2)
+                )).scalars().all()
+                if len(active_warehouses) != 1:
+                    raise ValueError("لتسجيل رصيد افتتاحي، يجب وجود مخزن نشط واحد فقط.")
+                balance = InventoryBalance(
+                    product_id=new_product.id,
+                    warehouse_id=active_warehouses[0].id,
+                    current_stock=Decimal("0")
+                )
+                db.add(balance)
+                InventoryService.record_movement(
+                    db, balance, product_in.initial_stock, user_id, TransactionTypeEnum.ADJUSTMENT,
+                    notes="Initial stock from product creation"
+                )
 
             await db.commit()
         except IntegrityError as e:
@@ -204,6 +200,8 @@ class ProductService:
         
         if not product:
             return None
+        previous_minimum = Decimal(str(product.min_stock_level or 0))
+        previous_active = bool(product.is_active)
         await ProductService.validate_catalog_links(
             db,
             product_in.category_id if "category_id" in product_in.model_fields_set else product.category_id,
@@ -234,6 +232,17 @@ class ProductService:
         
         for key, value in update_data.items():
             setattr(product, key, value)
+
+        if (previous_minimum != Decimal(str(product.min_stock_level or 0))
+                or previous_active != bool(product.is_active)):
+            balances = (await db.execute(select(InventoryBalance.current_stock).where(
+                InventoryBalance.product_id == product_id,
+            ).with_for_update())).scalars().all()
+            current_stock = sum((Decimal(str(value)) for value in balances), Decimal("0"))
+            await notify_stock_alert_after_product_edit(
+                db, product, previous_minimum=previous_minimum,
+                previous_active=previous_active, current_stock=current_stock,
+            )
             
         if product_in.units is not None:
             existing_query = select(ProductUnit).where(

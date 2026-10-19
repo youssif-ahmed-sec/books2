@@ -71,6 +71,27 @@ def test_cashier_cannot_read_inventory_transaction_history():
         app.dependency_overrides.pop(get_current_user, None)
 
 
+@pytest.mark.parametrize("limit", [0, 101, 1000000])
+def test_pos_search_rejects_unbounded_result_limit(limit):
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(role=RoleEnum.CASHIER_ORDERS)
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/v1/pos/search", params={"q": "كتاب", "limit": limit})
+        assert response.status_code == 422
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+def test_pos_search_rejects_oversized_query():
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(role=RoleEnum.CASHIER_ORDERS)
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/v1/pos/search", params={"q": "x" * 121})
+        assert response.status_code == 422
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+
 @pytest.mark.parametrize(
     "role,path",
     [

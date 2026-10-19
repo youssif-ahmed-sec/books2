@@ -24,6 +24,29 @@ def notify_user(db: AsyncSession, user_id, *, kind: str, title: str, message: st
     db.add(Notification(user_id=user_id, kind=kind, title=title, message=message, href=href))
 
 
+def stock_alert_severity(stock: Decimal, minimum: Decimal) -> str | None:
+    """Match the inventory report's out/low stock classification."""
+    if stock <= 0:
+        return "out"
+    if (minimum > 0 and stock <= minimum) or (minimum == 0 and stock < 5):
+        return "low"
+    return None
+
+
+async def notify_stock_alert_after_product_edit(
+    db: AsyncSession, product, *, previous_minimum: Decimal,
+    previous_active: bool, current_stock: Decimal,
+) -> None:
+    previous = stock_alert_severity(current_stock, previous_minimum) if previous_active else None
+    current = stock_alert_severity(current_stock, Decimal(str(product.min_stock_level or 0))) if product.is_active else None
+    if previous is not None or current is None:
+        return
+    kind, title = ("out_of_stock", "نفاد مخزون") if current == "out" else ("low_stock", "مخزون منخفض")
+    await notify_roles(db, (RoleEnum.ADMIN, RoleEnum.INVENTORY_CONTROLLER),
+                       kind=kind, title=title,
+                       message=f"{product.name_ar} · الرصيد {current_stock} {product.base_unit}", href="/inventory")
+
+
 async def notify_low_stock_crossing(db: AsyncSession, product, before: Decimal, after: Decimal) -> None:
     minimum = Decimal(str(product.min_stock_level or 0))
     if after == 0 and before > 0:

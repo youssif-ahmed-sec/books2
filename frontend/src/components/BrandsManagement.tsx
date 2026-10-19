@@ -5,10 +5,12 @@ import { notifyError } from "@/lib/notifications";
 import React, { useState, useEffect } from "react";
 import { fetchApi } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
+import { useConfirmAction } from "@/components/ConfirmationProvider";
 
 interface Brand { id: string; name_ar: string; name_en: string }
 
 export default function BrandsManagement() {
+  const confirmAction = useConfirmAction();
   const [brands, setBrands] = useState<Brand[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -87,7 +89,7 @@ export default function BrandsManagement() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("هل أنت متأكد من حذف هذه العلامة التجارية؟")) return;
+    if (!await confirmAction({ title: "حذف العلامة التجارية؟", message: "سيُزال اسم العلامة من القائمة إذا لم تكن مرتبطة بمنتجات.", confirmLabel: "حذف العلامة", tone: "danger" })) return;
     try {
       await fetchApi(`/products/brands/${id}`, {
         method: "DELETE",
@@ -135,11 +137,7 @@ export default function BrandsManagement() {
             </thead>
             <tbody className="divide-y divide-white/5">
               {loading ? (
-                <tr>
-                  <td colSpan={3} className="text-center py-10 text-[#e2bfb0]/60 text-sm">
-                    جاري التحميل...
-                  </td>
-                </tr>
+                [0, 1, 2].map(index => <tr key={index} aria-hidden={index !== 0}><td className="px-8 py-5"><span className="app-skeleton h-4 w-32" />{index === 0 && <span className="sr-only">جاري تحميل العلامات التجارية</span>}</td><td className="px-8 py-5"><span className="app-skeleton h-4 w-28" /></td><td className="px-8 py-5"><span className="app-skeleton mx-auto h-8 w-16" /></td></tr>)
               ) : brands.length === 0 ? (
                 <tr>
                   <td colSpan={3} className="text-center py-10 text-[#e2bfb0]/60 text-sm">

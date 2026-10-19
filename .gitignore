@@ -26,3 +26,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Local Next.js environment overrides
+.env*.local

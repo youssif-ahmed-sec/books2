@@ -3,6 +3,7 @@ from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.ext.compiler import compiles
@@ -22,7 +23,7 @@ def compile_jsonb_for_test(_element, _compiler, **_kwargs):
 
 
 @pytest.mark.asyncio
-async def test_supplier_statement_uses_each_receipt_cost_and_supplier_snapshot():
+async def test_new_receipts_do_not_create_debt_and_legacy_cost_snapshots_remain_in_statement():
     engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
@@ -38,19 +39,42 @@ async def test_supplier_statement_uses_each_receipt_cost_and_supplier_snapshot()
         db.add_all([user, first, second, product, warehouse])
         await db.commit()
 
-        async def receive(supplier_id, cost):
+        async def receive(supplier_id):
             return await create_inventory_transaction(InventoryTransactionCreate(
                 request_id=uuid4(),
                 product_id=product.id, warehouse_id=warehouse.id,
                 transaction_type="Receiving", quantity_changed=Decimal("2"),
-                supplier_id=supplier_id, unit_cost=cost,
+                supplier_id=supplier_id,
             ), db=db, current_user=user)
 
-        await receive(first.id, Decimal("7"))
+        await receive(first.id)
         product.cost = Decimal("100")
         product.supplier_id = second.id
         await db.commit()
-        await receive(second.id, Decimal("9"))
+        await receive(second.id)
+
+        new_receipts = (await db.execute(select(InventoryTransaction).where(
+            InventoryTransaction.request_id.is_not(None)
+        ))).scalars().all()
+        assert len(new_receipts) == 2
+        assert {row.supplier_id for row in new_receipts} == {first.id, second.id}
+        assert all(row.unit_cost is None and row.supplier_finance_included is False for row in new_receipts)
+
+        first_statement = await get_supplier_detail(first.id, db=db, current_user=user)
+        second_statement = await get_supplier_detail(second.id, db=db, current_user=user)
+        assert first_statement.total_purchases == second_statement.total_purchases == Decimal("0")
+        assert first_statement.balance == second_statement.balance == Decimal("0")
+
+        # Historical financially included receipts keep their original supplier and cost.
+        db.add_all([
+            InventoryTransaction(product_id=product.id, warehouse_id=warehouse.id, user_id=user.id,
+                                 transaction_type=TransactionTypeEnum.RECEIVING, quantity_changed=2,
+                                 supplier_id=first.id, unit_cost=7, supplier_finance_included=True),
+            InventoryTransaction(product_id=product.id, warehouse_id=warehouse.id, user_id=user.id,
+                                 transaction_type=TransactionTypeEnum.RECEIVING, quantity_changed=2,
+                                 supplier_id=second.id, unit_cost=9, supplier_finance_included=True),
+        ])
+        await db.commit()
 
         first_statement = await get_supplier_detail(first.id, db=db, current_user=user)
         second_statement = await get_supplier_detail(second.id, db=db, current_user=user)
@@ -84,7 +108,7 @@ async def test_supplier_statement_uses_each_receipt_cost_and_supplier_snapshot()
 
 
 @pytest.mark.asyncio
-async def test_receipt_requires_actual_cost_and_supplier_before_stock_changes():
+async def test_receipt_requires_supplier_and_rejects_cost_before_stock_changes():
     class NoDatabaseCalls:
         commits = 0
 
@@ -100,4 +124,9 @@ async def test_receipt_requires_actual_cost_and_supplier_before_stock_changes():
     with pytest.raises(HTTPException) as error:
         await create_inventory_transaction(transaction, db=session, current_user=User(id=uuid4(), role=RoleEnum.ADMIN))
     assert error.value.status_code == 422
+    with pytest.raises(HTTPException) as cost_error:
+        await create_inventory_transaction(transaction.model_copy(update={
+            "supplier_id": uuid4(), "unit_cost": Decimal("7"),
+        }), db=session, current_user=User(id=uuid4(), role=RoleEnum.ADMIN))
+    assert cost_error.value.status_code == 422
     assert session.commits == 0

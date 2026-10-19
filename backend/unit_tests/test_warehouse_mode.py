@@ -13,7 +13,7 @@ from schemas.product import ProductCreate
 from schemas.purchase import PurchaseReceive, PurchaseRequestCreate
 
 
-def test_only_warehouse_routes_are_exposed_by_default():
+def test_only_warehouse_routes_are_exposed_when_handoff_is_enabled():
     paths = set(app.openapi()["paths"])
     for path in (
         "/api/v1/products", "/api/v1/inventory/transactions",

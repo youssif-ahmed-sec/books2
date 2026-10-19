@@ -4,7 +4,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 
 from core.dependencies import require_pos_orders_access, get_current_user
 from core.idempotency import IdempotencyConflict
@@ -12,8 +12,9 @@ from database import get_db
 from models.user import User, RoleEnum
 from schemas.order import OrderCreate, OrderDraftCreate, OrderResponse, OrderStatusUpdate, QuotationResponse, OrderAssignmentUpdate, OrderPreparation, LeadCreate
 from models.customer import Customer
-from models.order import Order
-from models.product import Product
+from models.financial import Payment
+from models.order import Order, OrderStatusEnum
+from models.product import Product, ProductUnit
 from services.order_service import OrderService
 
 router = APIRouter(prefix="/orders", tags=["Orders"])
@@ -52,8 +53,10 @@ async def assigned_orders(
 ):
     if current_user.role not in (RoleEnum.ADMIN, RoleEnum.CASHIER_ORDERS):
         raise HTTPException(status_code=403, detail="Preparation access required")
-    orders = await OrderService.get_orders(db, status="Preparing")
-    visible = orders if current_user.role == RoleEnum.ADMIN else [order for order in orders if order["assigned_to_id"] == current_user.id]
+    visible = await OrderService.get_orders(
+        db, status="Preparing",
+        assigned_to_id=current_user.id if current_user.role != RoleEnum.ADMIN else None,
+    )
     product_ids = {item["product_id"] for order in visible for item in order["items"]}
     names = dict((await db.execute(select(Product.id, Product.name_ar).where(Product.id.in_(product_ids)))).all()) if product_ids else {}
     for order in visible:
@@ -71,7 +74,7 @@ async def list_preparers(
         User.role == RoleEnum.CASHIER_ORDERS,
         User.is_active == True, User.is_deleted == False,
     ))).scalars().all()
-    return [{"id": user.id, "email": user.email, "role": user.role.value} for user in rows]
+    return [{"id": user.id, "full_name": user.full_name, "username": user.username, "email": user.email, "role": user.role.value} for user in rows]
 
 
 @router.patch("/{order_id}/assign", response_model=OrderResponse)
@@ -112,6 +115,21 @@ async def finish_order_preparation(
 # ─────────────────────────────────────────────────────────────────────────────
 # POST /orders — POS Checkout (Instant Deduction)
 # ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/checkout-attempt/{request_id}")
+async def get_checkout_attempt(
+    request_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_pos_orders_access),
+):
+    """Read the result of this cashier's checkout without creating another sale."""
+    order = (await db.execute(select(Order).where(
+        Order.request_id == request_id,
+        Order.user_id == current_user.id,
+    ))).scalar_one_or_none()
+    if order is None:
+        return {"found": False, "order": None}
+    return {"found": True, "order": await OrderService.get_order(db, order.id)}
 
 @router.post(
     "",
@@ -182,22 +200,44 @@ async def update_order_status(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# GET /orders — List all orders (staff/admin only)
+# GET /orders — Cashiers see only orders requiring action.
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.get(
     "",
     response_model=List[OrderResponse],
-    summary="📋 List all orders",
+    summary="📋 List visible orders",
 )
 async def get_orders(
     status: Optional[str] = Query(None),
     source: Optional[str] = Query(None),
     customer_id: Optional[UUID] = Query(None),
+    group: Optional[str] = Query(None, pattern="^(inbox|returnable)$"),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_pos_orders_access),
 ):
-    return await OrderService.get_orders(db, status, source, customer_id)
+    actionable = (
+        OrderStatusEnum.NEW_LEAD.value, OrderStatusEnum.DRAFT.value,
+        OrderStatusEnum.WAITING_QUOTATION.value, OrderStatusEnum.QUOTATION_SENT.value,
+        OrderStatusEnum.WAITING_APPROVAL.value, OrderStatusEnum.APPROVED.value,
+        OrderStatusEnum.PREPARING.value, OrderStatusEnum.READY.value,
+    )
+    groups = {
+        "inbox": (
+            OrderStatusEnum.NEW_LEAD.value, OrderStatusEnum.DRAFT.value,
+            OrderStatusEnum.WAITING_QUOTATION.value, OrderStatusEnum.QUOTATION_SENT.value,
+            OrderStatusEnum.WAITING_APPROVAL.value,
+        ),
+        "returnable": (
+            OrderStatusEnum.DELIVERED.value, OrderStatusEnum.CLOSED.value, OrderStatusEnum.RETURNED.value,
+        ),
+    }
+    if group == "returnable" and current_user.role != RoleEnum.ADMIN:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    allowed_statuses = groups[group] if group else (actionable if current_user.role == RoleEnum.CASHIER_ORDERS else None)
+    return await OrderService.get_orders(db, status, source, customer_id, allowed_statuses, limit=limit, offset=offset)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # GET /orders/{order_id}/quotation — Generate Quotation Data
@@ -217,11 +257,23 @@ async def get_order_quotation(
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     if order["customer_id"]:
-        order["customer_name"] = (await db.execute(select(Customer.name).where(
+        customer = (await db.execute(select(Customer.name, Customer.phone, Customer.address).where(
             Customer.id == order["customer_id"],
-        ))).scalar_one_or_none()
+        ))).one_or_none()
+        if customer:
+            order["customer_name"], order["customer_phone"], customer_address = customer
+            order["customer_address"] = order["customer_address"] if order.get("customer_address") is not None else customer_address
+    if order["user_id"]:
+        employee = (await db.execute(select(User.full_name, User.username, User.email).where(User.id == order["user_id"]))).one_or_none()
+        order["employee_name"] = next((name for name in employee if name), "") if employee else ""
+    order["amount_received"] = (await db.execute(select(func.coalesce(func.sum(Payment.amount), 0)).where(
+        Payment.order_id == order_id, Payment.kind == "SALE",
+    ))).scalar_one()
     product_ids = {item["product_id"] for item in order["items"]}
     names = dict((await db.execute(select(Product.id, Product.name_ar).where(Product.id.in_(product_ids)))).all()) if product_ids else {}
+    unit_ids = {item["unit_id"] for item in order["items"]}
+    units = dict((await db.execute(select(ProductUnit.id, ProductUnit.unit_name).where(ProductUnit.id.in_(unit_ids)))).all()) if unit_ids else {}
     for item in order["items"]:
         item["product_name"] = names.get(item["product_id"], "منتج غير متاح")
+        item["unit_name"] = units.get(item["unit_id"], "")
     return order

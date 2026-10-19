@@ -9,7 +9,9 @@ import { pricesFromMargins, type PriceMargins, type TierPrices } from "@/lib/pri
 import { z } from "zod";
 import { ProductSelect } from "@/components/ProductSelect";
 import UnitBarcodeField from "@/components/UnitBarcodeField";
+import { ZeroHintNumberInput } from "@/components/ZeroHintNumberInput";
 import BarcodePrintDialog, { type BarcodePrintUnit } from "@/components/BarcodePrintDialog";
+import { productFormErrors, productSaveError } from "@/lib/productFormErrors";
 
 const unitSchema = z.object({
   id: z.string(),
@@ -275,15 +277,10 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
       });
 
       if (!validationResult.success) {
-        const fieldErrors = validationResult.error.issues.map((err) => {
-           if (err.path[0] === 'units') {
-             return `${String(err.path[err.path.length - 1])}_${units[err.path[1] as number]?.id}`;
-           }
-           return err.path[0].toString();
-        });
-        setErrors(fieldErrors);
+        const validation = productFormErrors(validationResult.error.issues, units);
+        setErrors(validation.fields);
         console.error("Validation Failed:", validationResult.error.issues);
-        notifyError(`يرجى مراجعة الحقول التالية: ${fieldErrors.join(", ")}`);
+        notifyError(validation.message);
         return;
       }
       setErrors([]);
@@ -343,7 +340,7 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
       } else onClose();
     } catch (err) {
       console.error("Failed to save product:", err);
-      notifyError(err instanceof Error ? err.message : "تعذر حفظ المنتج");
+      notifyError(productSaveError(err));
     } finally {
       setIsSaving(false);
     }
@@ -351,7 +348,8 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
 
   return (
     <>
-      {printProduct && <BarcodePrintDialog productName={printProduct.name} units={printProduct.units} onClose={onClose} />}
+      {printProduct && <BarcodePrintDialog productName={printProduct.name} units={printProduct.units} onClose={onClose}
+        quantityHint="تم حفظ المنتج. إذا تعذرت الطباعة، أعد المحاولة هنا دون حفظه مرة أخرى." />}
       {/* Backdrop */}
       <div
         className="motion-overlay fixed inset-0 bg-black/70 backdrop-blur-sm z-[60]"
@@ -361,16 +359,9 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
       {/* Slide-over Panel */}
       <aside className="add-product-panel product-editor-panel fixed top-0 bottom-0 left-0 w-full max-w-[850px] bg-[#0e0e0e] z-[70] shadow-[0_0_80px_rgba(0,0,0,0.8)] flex flex-col animate-slide-in-left border-r border-white/10">
         {/* Header */}
-        <header className="px-5 py-7 sm:px-8 xl:px-12 xl:py-9 flex justify-between items-center border-b border-white/5 bg-[#0e0e0e]/50 backdrop-blur-md sticky top-0 z-10">
+        <header className="px-5 py-5 sm:px-8 xl:px-12 xl:py-6 flex justify-between items-center border-b border-white/5 bg-[#0e0e0e]/50 backdrop-blur-md sticky top-0 z-10">
           <div>
-            <div className="flex items-center gap-2 text-primary mb-2">
-              <span className="material-symbols-outlined text-xl">add_box</span>
-              <span className="text-xs font-bold">نظام إدارة المخزون المركزي</span>
-            </div>
             <h2 className="text-2xl font-bold text-[#e5e2e1] leading-tight">إضافة منتج</h2>
-            <p className="text-[#e2bfb0] text-sm mt-1">
-              أدخل تفاصيل المنتج بدقة لضمان دقة التقارير والتسعير التلقائي
-            </p>
           </div>
           <button
             onClick={onClose}
@@ -600,8 +591,8 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
               <div className="space-y-5">
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">الحد الأدنى للكمية</label>
                 <div className="relative">
-                  <input
-                    type="number"
+                  <ZeroHintNumberInput
+
                     value={form.minStockLevel}
                     onChange={(e) => setForm({ ...form, minStockLevel: e.target.value })}
                     className="w-full bg-[#201f1f] border border-white/5 rounded-full p-4 text-[#e5e2e1] focus:ring-2 focus:ring-primary/30 transition-all"
@@ -612,8 +603,8 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
               <div className="space-y-5">
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">الحد الأقصى للكمية</label>
                 <div className="relative">
-                  <input
-                    type="number"
+                  <ZeroHintNumberInput
+
                     value={form.maxStockLevel}
                     onChange={(e) => setForm({ ...form, maxStockLevel: e.target.value })}
                     className="w-full bg-[#201f1f] border border-white/5 rounded-full p-4 text-[#e5e2e1] focus:ring-2 focus:ring-primary/30 transition-all"
@@ -673,8 +664,8 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
                         {unit.isBase ? (
                           <span className="text-[#e2bfb0] font-mono">{Number(unit.conversionFactor || 0).toFixed(1)}</span>
                         ) : (
-                          <input
-                            type="number"
+                          <ZeroHintNumberInput
+
                             value={unit.conversionFactor || ""}
                             onChange={(e) => updateUnit(unit.id, "conversionFactor", parseFloat(e.target.value) || 0)}
                             className="product-unit-number"
@@ -687,8 +678,8 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center justify-center gap-3">
-                          <input
-                            type="number"
+                          <ZeroHintNumberInput
+
                             value={unit.stock === 0 ? "" : unit.stock}
                             onChange={(e) => updateUnit(unit.id, "stock", parseFloat(e.target.value) || 0)}
                             placeholder="0"
@@ -733,8 +724,8 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
               <div className="space-y-5" style={{ flexBasis: `${Math.max(18, form.costPrice.length + 12)}ch` }}>
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">تكلفة شراء القطعة الواحدة</label>
                 <div className="relative">
-                  <input
-                    type="number"
+                  <ZeroHintNumberInput
+
                     value={form.costPrice}
                     onChange={(e) => {
                       const newCost = e.target.value;
@@ -753,8 +744,8 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
               <div className="space-y-5" style={{ flexBasis: `${Math.max(18, form.vatRate.length + 12)}ch` }}>
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">نسبة ضريبة القيمة المضافة</label>
                 <div className="relative">
-                  <input
-                    type="number"
+                  <ZeroHintNumberInput
+
                     value={form.vatRate}
                     onChange={(e) => {
                       const newVat = e.target.value;
@@ -773,8 +764,8 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
               <div className="space-y-5" style={{ flexBasis: `${Math.max(18, form.profitMargin.length + 12)}ch` }}>
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">هامش الربح (المستهلك)</label>
                 <div className="relative">
-                  <input
-                    type="number"
+                  <ZeroHintNumberInput
+
                     value={form.profitMargin}
                     onChange={(e) => {
                       const newMargin = e.target.value;
@@ -795,8 +786,8 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
                 <div className="space-y-5" key={key} style={{ flexBasis: `${Math.max(18, form[key].length + 12)}ch` }}>
                   <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">{label}</label>
                   <div className="relative">
-                    <input
-                      type="number"
+                    <ZeroHintNumberInput
+
                       step="0.01"
                       value={form[key]}
                       onChange={(event) => {
@@ -859,8 +850,8 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
                             {tier.label}
                           </span>
                           <div className="relative">
-                            <input
-                              type="number"
+                            <ZeroHintNumberInput
+
                               value={unit[tier.key]}
                               onChange={(e) => {
                                 updateUnit(unit.id, tier.key, e.target.value);
@@ -908,7 +899,7 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
             className="app-secondary-button flex-1 disabled:opacity-50"
           >
             <span className="material-symbols-outlined">barcode_scanner</span>
-            حفظ وطباعة باركود واحد
+            حفظ وطباعة باركود
           </button>
           <button
             onClick={onClose}
@@ -937,8 +928,8 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
               </div>
               <div>
                 <label className="block text-sm font-bold text-[#e2bfb0] mb-2">معامل التحويل (كم قطعة في هذه الوحدة؟)</label>
-                <input
-                  type="number"
+                <ZeroHintNumberInput
+
                   value={newGlobalUnit.conversion_factor || ""}
                   onChange={(e) => setNewGlobalUnit({ ...newGlobalUnit, conversion_factor: parseFloat(e.target.value) || 1 })}
                   placeholder="عدد القطع"

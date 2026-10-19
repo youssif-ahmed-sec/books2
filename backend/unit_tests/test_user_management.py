@@ -1,14 +1,16 @@
-"""Authorization and identifier regression checks without touching a database."""
+"""Authorization and identifier checks using mocks or isolated in-memory SQLite."""
 
 from types import SimpleNamespace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 from pydantic import ValidationError
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.ext.compiler import compiles
@@ -17,8 +19,9 @@ from sqlalchemy.pool import StaticPool
 from api.v1.auth import SimpleLoginForm, delete_user, login, register_user, set_user_status, update_user
 from core.security import hash_password, create_access_token
 from core.dependencies import get_current_user
+from database import get_db
 from main import app
-from models.user import AuditLog, RoleEnum, User
+from models.user import AuditLog, Base, RevokedAccessToken, RoleEnum, User
 from schemas.auth import UserRegisterRequest, UserStatusRequest, UserUpdateRequest
 
 
@@ -87,7 +90,7 @@ async def test_old_sales_role_cannot_log_in_or_use_existing_token():
         await login(SimpleLoginForm(username="STAFF1", password="password12345"), session(result(user)))
     assert error.value.status_code == 403
     with pytest.raises(HTTPException) as error:
-        await get_current_user(create_access_token(subject=str(user.id)), session(result(user)))
+        await get_current_user(create_access_token(subject=str(user.id)), session(result(), result(user)))
     assert error.value.status_code == 401
     with pytest.raises(ValidationError):
         UserRegisterRequest(email="new@example.com", password="password12345", role=RoleEnum.SALES_ASSISTANT)
@@ -98,10 +101,47 @@ async def test_old_sales_role_cannot_log_in_or_use_existing_token():
 @pytest.mark.asyncio
 async def test_revoked_user_token_is_rejected():
     user = staff()
-    db = session(result())
+    db = session(result(), result())
     with pytest.raises(HTTPException) as error:
         await get_current_user(create_access_token(subject=str(user.id)), db)
     assert error.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_logout_revokes_only_the_presented_token():
+    engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    user = staff()
+    async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+        db.add(user)
+        db.add(RevokedAccessToken(
+            token_hash="0" * 64, user_id=user.id,
+            expires_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+        ))
+        await db.commit()
+
+    async def isolated_db():
+        async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+            yield db
+
+    first = create_access_token(subject=str(user.id))
+    second = create_access_token(subject=str(user.id))
+    assert first != second
+    app.dependency_overrides[get_db] = isolated_db
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            assert (await client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {first}"})).status_code == 200
+            assert (await client.post("/api/v1/auth/logout", headers={"Authorization": f"Bearer {first}"})).status_code == 204
+            assert (await client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {first}"})).status_code == 401
+            assert (await client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {second}"})).status_code == 200
+        async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+            rows = (await db.execute(select(RevokedAccessToken))).scalars().all()
+            assert len(rows) == 1 and rows[0].user_id == user.id
+            assert first not in rows[0].token_hash
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        await engine.dispose()
 
 
 @pytest.mark.asyncio

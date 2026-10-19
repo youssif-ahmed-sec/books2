@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Numeric, ForeignKey, CheckConstraint
+from sqlalchemy import Column, String, DateTime, Numeric, ForeignKey, CheckConstraint, Index
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 import uuid
@@ -27,6 +27,7 @@ class Income(Base):
 
 class Payment(Base):
     __tablename__ = "payments"
+    __table_args__ = (Index("ix_payments_created_at", "created_at"), Index("ix_payments_shift_id", "shift_id"))
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     order_id = Column(UUID(as_uuid=True), ForeignKey("orders.id"), nullable=True, index=True)
@@ -55,6 +56,7 @@ class CashShift(Base):
 
 class CashAdjustment(Base):
     __tablename__ = "cash_adjustments"
+    __table_args__ = (Index("ix_cash_adjustments_shift_id", "shift_id"),)
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     shift_id = Column(UUID(as_uuid=True), ForeignKey("cash_shifts.id"), nullable=False)

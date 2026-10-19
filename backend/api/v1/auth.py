@@ -1,18 +1,21 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Form
+from fastapi.security import OAuth2PasswordBearer
 from typing import List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func, or_
+from sqlalchemy import delete, func, or_
 from sqlalchemy.exc import IntegrityError
 from uuid import UUID
+from datetime import datetime, timezone
 
-from models.user import User, RoleEnum, AuditLog
+from models.user import User, RoleEnum, AuditLog, RevokedAccessToken
 from schemas.auth import UserProfileResponse, UserSyncRequest, UserRegisterRequest, UserUpdateRequest, UserStatusRequest, TokenResponse
-from core.security import hash_password, verify_password, create_access_token
+from core.security import access_token_hash, decode_access_token, hash_password, verify_password, create_access_token
 from core.dependencies import get_current_user, require_admin
 from database import get_db
 
 router = APIRouter(prefix="/auth", tags=["Authentication & RBAC"])
+logout_token = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 
 class SimpleLoginForm:
@@ -84,7 +87,11 @@ async def login(
 async def logout(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    token: str = Depends(logout_token),
 ):
+    expires_at = datetime.fromtimestamp(decode_access_token(token)["exp"], timezone.utc)
+    await db.execute(delete(RevokedAccessToken).where(RevokedAccessToken.expires_at <= datetime.now(timezone.utc)))
+    db.add(RevokedAccessToken(token_hash=access_token_hash(token), user_id=current_user.id, expires_at=expires_at))
     db.add(AuditLog(user_id=current_user.id, action="LOGOUT", entity_type="User", entity_id=str(current_user.id)))
     await db.commit()
 
@@ -106,20 +113,18 @@ async def register_user(
     Create a new local user. Admin authorization is enforced by dependency.
     """
     # Deleted accounts keep their identifiers reserved for audit integrity.
-    existing = await db.execute(select(User).where(func.lower(User.email) == str(user_data.email).lower()))
-    if existing.scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="A user with this email already exists",
-        )
-    if user_data.username:
-        existing = await db.execute(select(User).where(User.username == user_data.username))
+    if user_data.email:
+        existing = await db.execute(select(User.id).where(func.lower(User.email) == str(user_data.email).lower()))
         if existing.scalar_one_or_none():
-            raise HTTPException(status_code=409, detail="A user with this username already exists")
+            raise HTTPException(status_code=409, detail="A user with this email already exists")
+    existing = await db.execute(select(User.id).where(User.username == user_data.username))
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="A user with this username already exists")
 
     new_user = User(
-        email=str(user_data.email).lower(),
+        email=str(user_data.email).lower() if user_data.email else None,
         username=user_data.username,
+        full_name=user_data.full_name,
         hashed_password=hash_password(user_data.password),
         role=user_data.role,
     )
@@ -202,28 +207,34 @@ async def update_user(
     supplied = changes.model_fields_set
     if "role" in supplied and changes.role is None:
         raise HTTPException(status_code=422, detail="Role cannot be empty")
-    if "email" in supplied and changes.email is None:
-        raise HTTPException(status_code=422, detail="Email cannot be empty")
+    if "username" in supplied and changes.username is None:
+        raise HTTPException(status_code=422, detail="Username cannot be empty")
+    if "full_name" in supplied and changes.full_name is None:
+        raise HTTPException(status_code=422, detail="Arabic name cannot be empty")
+    if not user.full_name and not changes.full_name:
+        raise HTTPException(status_code=422, detail="Arabic name is required for this account")
     if user.id == admin.id and changes.role is not None and changes.role != RoleEnum.ADMIN:
         raise HTTPException(status_code=409, detail="You cannot remove your own admin access")
     if changes.role is not None and changes.role != RoleEnum.ADMIN:
         await _protect_admin_access(db, user)
-    if "email" in supplied:
+    if "email" in supplied and changes.email is not None:
         existing_email = (await db.execute(select(User.id).where(
             func.lower(User.email) == str(changes.email).lower(), User.id != user_id,
         ))).scalar_one_or_none()
         if existing_email:
             raise HTTPException(status_code=409, detail="A user with this email already exists")
-    old_value = {key: getattr(user, key).value if key == "role" else getattr(user, key) for key in ("email", "username", "role")}
+    old_value = {key: getattr(user, key).value if key == "role" else getattr(user, key) for key in ("email", "username", "full_name", "role")}
     if "email" in supplied:
-        user.email = str(changes.email).lower()
+        user.email = str(changes.email).lower() if changes.email else None
     if "username" in supplied:
         user.username = changes.username
+    if "full_name" in supplied:
+        user.full_name = changes.full_name
     if "role" in supplied:
         user.role = changes.role
     if changes.password is not None:
         user.hashed_password = hash_password(changes.password)
-    db.add(AuditLog(user_id=admin.id, action="USER_UPDATE", entity_type="User", entity_id=str(user.id), old_value=old_value, new_value={"email": user.email, "username": user.username, "role": user.role.value, "password_changed": changes.password is not None}))
+    db.add(AuditLog(user_id=admin.id, action="USER_UPDATE", entity_type="User", entity_id=str(user.id), old_value=old_value, new_value={"email": user.email, "username": user.username, "full_name": user.full_name, "role": user.role.value, "password_changed": changes.password is not None}))
     try:
         await db.commit()
     except IntegrityError:
@@ -243,6 +254,8 @@ async def set_user_status(
     user = await _managed_user(db, user_id)
     if user.id == admin.id and not changes.is_active:
         raise HTTPException(status_code=409, detail="You cannot deactivate your own account")
+    if changes.is_active and not user.full_name:
+        raise HTTPException(status_code=422, detail="Add the Arabic name before activating this account")
     if not changes.is_active:
         await _protect_admin_access(db, user)
     previous = user.is_active
@@ -293,6 +306,7 @@ async def sync_user_profile(
         user = User(
             id=user_data.id,
             email=user_data.email,
+            full_name=user_data.full_name,
             role=user_data.role,
         )
         db.add(user)

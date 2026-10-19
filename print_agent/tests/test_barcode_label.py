@@ -3,7 +3,7 @@ import pytest
 
 from print_agent.config import config
 from print_agent.printer import PrinterManager
-from print_agent.service import PrintJob, print_order
+from print_agent.service import PrintJob, print_order, thermal_printer
 
 
 SAMPLE = {
@@ -41,7 +41,8 @@ def test_barcode_print_quantity_is_bounded(quantity):
 
 
 def test_barcode_api_returns_validation_error_before_queue(monkeypatch):
-    monkeypatch.setattr(config, "_data", {**config._data, "printer_names": ["test printer"]})
+    monkeypatch.setattr(config, "_data", {**config._data, "barcode_printer_names": ["test printer"]})
+    monkeypatch.setattr(thermal_printer, "get_printers", lambda: ["test printer"])
     with pytest.raises(HTTPException) as error:
         print_order(PrintJob(order={**SAMPLE, "barcode": "اسم عربي"}, receipt_type="barcode"))
     assert error.value.status_code == 422

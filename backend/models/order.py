@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Text, Numeric, JSON, UniqueConstraint
+from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Text, Numeric, JSON, UniqueConstraint, Index, BigInteger, Sequence
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from .user import Base
@@ -29,13 +29,23 @@ class OrderSourceEnum(str, enum.Enum):
     WALK_IN = "Walk-In Customer"
     MANUAL = "Manual Entry"
 
+order_public_number_seq = Sequence("orders_public_number_seq", start=100001)
+
 
 class Order(Base):
     __tablename__ = "orders"
-    __table_args__ = (UniqueConstraint("request_id", name="uq_orders_request_id"),)
+    __table_args__ = (
+        UniqueConstraint("request_id", name="uq_orders_request_id"),
+        UniqueConstraint("public_number", name="uq_orders_public_number"),
+        Index("ix_orders_status_created", "status", "created_at"),
+        Index("ix_orders_created_id", "created_at", "id"),
+        Index("ix_orders_customer_status", "customer_id", "status"),
+    )
 
     id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    public_number   = Column(BigInteger, order_public_number_seq, server_default=order_public_number_seq.next_value(), nullable=False)
     customer_id     = Column(UUID(as_uuid=True), nullable=True)  # Nullable for walk-in POS
+    customer_address = Column(String(300), nullable=True)  # Address selected when the sale was recorded
     user_id         = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     assigned_to_id  = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
 

@@ -321,7 +321,7 @@ from models.product import Product, ProductUnit, ProductPrice, Category, Subcate
 async def create_product(
     product_in: ProductCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_inventory_access),
 ):
     """
     Create a new product with multiple units, prices, and optionally bundle components.

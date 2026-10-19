@@ -572,6 +572,26 @@
    'D:\\Projects\\Free lance\\lib '
    'system\\implementation\\books2\\.venv\\Lib\\site-packages\\anyio\\to_thread.py',
    'PYMODULE'),
+  ('arabic_reshaper',
+   'D:\\Projects\\Free lance\\lib '
+   'system\\implementation\\books2\\.venv\\Lib\\site-packages\\arabic_reshaper\\__init__.py',
+   'PYMODULE'),
+  ('arabic_reshaper.arabic_reshaper',
+   'D:\\Projects\\Free lance\\lib '
+   'system\\implementation\\books2\\.venv\\Lib\\site-packages\\arabic_reshaper\\arabic_reshaper.py',
+   'PYMODULE'),
+  ('arabic_reshaper.letters',
+   'D:\\Projects\\Free lance\\lib '
+   'system\\implementation\\books2\\.venv\\Lib\\site-packages\\arabic_reshaper\\letters.py',
+   'PYMODULE'),
+  ('arabic_reshaper.ligatures',
+   'D:\\Projects\\Free lance\\lib '
+   'system\\implementation\\books2\\.venv\\Lib\\site-packages\\arabic_reshaper\\ligatures.py',
+   'PYMODULE'),
+  ('arabic_reshaper.reshaper_config',
+   'D:\\Projects\\Free lance\\lib '
+   'system\\implementation\\books2\\.venv\\Lib\\site-packages\\arabic_reshaper\\reshaper_config.py',
+   'PYMODULE'),
   ('argparse',
    'C:\\Users\\Abdulltife '
    'Mahmoud\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\argparse.py',
@@ -863,6 +883,22 @@
   ('base64',
    'C:\\Users\\Abdulltife '
    'Mahmoud\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\base64.py',
+   'PYMODULE'),
+  ('bidi',
+   'D:\\Projects\\Free lance\\lib '
+   'system\\implementation\\books2\\.venv\\Lib\\site-packages\\bidi\\__init__.py',
+   'PYMODULE'),
+  ('bidi.algorithm',
+   'D:\\Projects\\Free lance\\lib '
+   'system\\implementation\\books2\\.venv\\Lib\\site-packages\\bidi\\algorithm.py',
+   'PYMODULE'),
+  ('bidi.mirror',
+   'D:\\Projects\\Free lance\\lib '
+   'system\\implementation\\books2\\.venv\\Lib\\site-packages\\bidi\\mirror.py',
+   'PYMODULE'),
+  ('bidi.wrapper',
+   'D:\\Projects\\Free lance\\lib '
+   'system\\implementation\\books2\\.venv\\Lib\\site-packages\\bidi\\wrapper.py',
    'PYMODULE'),
   ('bisect',
    'C:\\Users\\Abdulltife '

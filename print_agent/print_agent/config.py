@@ -19,7 +19,8 @@ LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
 DEFAULTS = {
     "local_port": 8199,
-    "printer_names": [],
+    "receipt_printer_names": [],
+    "barcode_printer_names": [],
     "printer_width_mm": 80,
 }
 
@@ -35,6 +36,8 @@ class PrintAgentConfig:
             try:
                 value = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
                 self._data = value if isinstance(value, dict) else {}
+                if "receipt_printer_names" not in self._data and isinstance(self._data.get("printer_names"), list):
+                    self._data["receipt_printer_names"] = list(self._data["printer_names"])
             except (OSError, json.JSONDecodeError):
                 self._data = {}
 
@@ -67,13 +70,18 @@ class PrintAgentConfig:
         return int(self.get("local_port"))
 
     @property
-    def printer_names(self) -> list[str]:
-        names = self.get("printer_names", [])
+    def receipt_printer_names(self) -> list[str]:
+        # Existing installations stored one shared list. Keep it for receipts only.
+        names = self._data.get("receipt_printer_names", self._data.get("printer_names", []))
         return [str(name) for name in names] if isinstance(names, list) else []
 
     @property
-    def printer_name(self) -> str:
-        return self.printer_names[0] if self.printer_names else ""
+    def barcode_printer_names(self) -> list[str]:
+        names = self.get("barcode_printer_names", [])
+        return [str(name) for name in names] if isinstance(names, list) else []
+
+    def printers_for(self, receipt_type: str) -> list[str]:
+        return self.barcode_printer_names if receipt_type == "barcode" else self.receipt_printer_names
 
     @property
     def printer_width_mm(self) -> int:

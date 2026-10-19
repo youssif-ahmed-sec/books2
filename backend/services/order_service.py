@@ -6,6 +6,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import func, exists
 
 from core.idempotency import IdempotencyConflict, request_fingerprint
 from models.inventory import InventoryBalance, InventoryTransaction, TransactionTypeEnum, Warehouse
@@ -18,6 +19,7 @@ from models.financial import Payment
 from models.returns import SalesReturn
 from schemas.order import OrderCreate, OrderDraftCreate, OrderStatusUpdate, OrderPreparation, LeadCreate
 from services.inventory_service import InventoryService
+from services.notification_service import notify_low_stock_crossing
 from services.order_workflow import allowed_next_statuses
 from services.cash_register_service import open_shift
 
@@ -97,22 +99,29 @@ class OrderService:
             raise ValueError("Customer not found.")
         await db.flush()
         completed = (OrderStatusEnum.DELIVERED.value, OrderStatusEnum.CLOSED.value, OrderStatusEnum.RETURNED.value)
-        sales = (await db.execute(select(Order).where(Order.customer_id == customer_id, Order.status.in_(completed)))).scalars().all()
-        returns = (await db.execute(select(SalesReturn).join(Order, Order.id == SalesReturn.order_id).where(
-            Order.customer_id == customer_id,
-        ))).scalars().all()
-        exchange_ids = {record.exchange_order_id for record in returns if record.exchange_order_id}
-        net = sum((Decimal(str(order.total_amount)) for order in sales), Decimal("0")) - sum(
-            (Decimal(str(record.returned_value)) for record in returns), Decimal("0")
-        )
-        original_sales = [order for order in sales if order.id not in exchange_ids]
-        customer.purchase_count = len(original_sales)
+        sale_total, purchase_count, last_purchase = (await db.execute(
+            select(
+                func.coalesce(func.sum(Order.total_amount), 0),
+                func.count(Order.id).filter(~exists().where(SalesReturn.exchange_order_id == Order.id)),
+                func.max(Order.created_at).filter(~exists().where(SalesReturn.exchange_order_id == Order.id)),
+            ).where(Order.customer_id == customer_id, Order.status.in_(completed))
+        )).one()
+        returned_total = (await db.execute(
+            select(func.coalesce(func.sum(SalesReturn.returned_value), 0))
+            .join(Order, Order.id == SalesReturn.order_id)
+            .where(Order.customer_id == customer_id)
+        )).scalar_one()
+        net = Decimal(str(sale_total)) - Decimal(str(returned_total))
+        customer.purchase_count = purchase_count
         customer.total_purchases = net
-        customer.average_purchase = net / len(original_sales) if original_sales else Decimal("0")
-        customer.last_purchase_date = max((order.created_at for order in original_sales if order.created_at is not None), default=None)
+        customer.average_purchase = net / purchase_count if purchase_count else Decimal("0")
+        customer.last_purchase_date = last_purchase
 
     @staticmethod
-    async def _settle_sale(db: AsyncSession, order: Order, user_id: UUID) -> None:
+    async def _settle_sale(
+        db: AsyncSession, order: Order, user_id: UUID,
+        amount_received: Decimal | None = None, received_method: str | None = None,
+    ) -> None:
         amount = Decimal(str(order.total_amount))
         if order.payment_method == "Deferred Payment":
             if order.customer_id is None:
@@ -124,10 +133,21 @@ class OrderService:
             ).with_for_update())).scalar_one_or_none()
             if customer is None:
                 raise ValueError("Active customer not found.")
-            next_balance = Decimal(str(customer.balance or 0)) + amount
+            collected = amount_received if amount_received is not None else Decimal("0")
+            if collected < 0 or collected > amount:
+                raise ValueError("Received amount must be between zero and the sale total.")
+            next_balance = Decimal(str(customer.balance or 0)) + amount - collected
             if next_balance > Decimal(str(customer.credit_limit or 0)):
                 raise ValueError("Customer credit limit would be exceeded.")
             customer.balance = next_balance
+            if collected > 0:
+                if received_method is None:
+                    raise ValueError("Choose how the received amount was paid.")
+                shift_id = (await open_shift(db, user_id)).id if received_method == "Cash" else None
+                db.add(Payment(
+                    order_id=order.id, customer_id=order.customer_id, user_id=user_id,
+                    shift_id=shift_id, amount=collected, method=received_method, kind="SALE",
+                ))
         elif amount > 0:
             shift_id = (await open_shift(db, user_id)).id if order.payment_method == "Cash" else None
             db.add(Payment(
@@ -139,7 +159,9 @@ class OrderService:
     def _build_order_dict(order, items):
         return {
             "id":              order.id,
+            "public_number":   order.public_number,
             "customer_id":     order.customer_id,
+            "customer_address": order.customer_address,
             "user_id":         order.user_id,
             "assigned_to_id":  order.assigned_to_id,
             "status":          order.status.value if hasattr(order.status, "value") else order.status,
@@ -198,11 +220,19 @@ class OrderService:
     @staticmethod
     async def _create_order_once(db: AsyncSession, order_in: OrderCreate, current_user_id: UUID, fingerprint: str) -> dict:
         await OrderService._check_pricing_policy(db, order_in.customer_id, order_in.items, order_in.discount_amount, current_user_id)
+        selected_address = order_in.customer_address.strip() if order_in.customer_address is not None else None
+        if selected_address:
+            if order_in.customer_id is None:
+                raise ValueError("A sale address requires a registered customer.")
+            customer = (await db.execute(select(Customer).where(Customer.id == order_in.customer_id, Customer.is_deleted == False))).scalar_one_or_none()
+            if customer is None or selected_address not in [customer.address, *(customer.addresses or [])]:
+                raise ValueError("Choose a saved address for this customer.")
         warehouse = (await db.execute(select(Warehouse).where(Warehouse.id == order_in.warehouse_id, Warehouse.is_active == True).with_for_update())).scalar_one_or_none()
         if warehouse is None:
             raise ValueError("Choose an active warehouse for the sale.")
         order = Order(
             customer_id=order_in.customer_id,
+            customer_address=selected_address,
             user_id=current_user_id,
             status=order_in.status.value,
             source=order_in.source if hasattr(order_in, "source") and order_in.source else OrderSourceEnum.WALK_IN.value,
@@ -297,11 +327,16 @@ class OrderService:
                     await db.rollback()
                     raise ValueError(f"Insufficient stock for product/component {c_prod_id}.")
 
+                stock_before = Decimal(str(balance.current_stock))
                 InventoryService.record_movement(
                     db, balance, -c_qty, current_user_id, TransactionTypeEnum.ISSUING,
                     reference_document=str(order.id),
                     notes=f"POS Order #{order.id}",
                 )
+                component_product = product if not product.is_bundle else (await db.execute(
+                    select(Product).where(Product.id == c_prod_id)
+                )).scalar_one()
+                await notify_low_stock_crossing(db, component_product, stock_before, balance.current_stock)
 
             order_item = OrderItem(
                 order_id=order.id,
@@ -330,8 +365,11 @@ class OrderService:
             await db.rollback()
             raise ValueError("Discount cannot exceed the order subtotal.")
         order.total_amount = grand_total - Decimal(str(order_in.discount_amount))
+        if order_in.expected_total is not None and order.total_amount != order_in.expected_total:
+            await db.rollback()
+            raise ValueError("Prices changed. Refresh the cart before checkout.")
         order.tax_amount = OrderService._included_tax(items_out, Decimal(str(order_in.discount_amount)))
-        await OrderService._settle_sale(db, order, current_user_id)
+        await OrderService._settle_sale(db, order, current_user_id, order_in.amount_received, order_in.received_method)
         await OrderService._record_customer_sale(db, order.customer_id, order.total_amount)
         db.add(AuditLog(user_id=current_user_id, action="CREATE_POS_INVOICE", entity_type="Order", entity_id=str(order.id), new_value={"total": str(order.total_amount), "payment_method": order.payment_method}))
         await db.commit()
@@ -582,10 +620,12 @@ class OrderService:
                 })
 
             item_cost = Decimal("0")
+            component_products = {}
             for component in components_to_deduct:
                 component_product = (await db.execute(select(Product).where(Product.id == component["product_id"]))).scalar_one_or_none()
                 if component_product is None or component_product.is_deleted:
                     raise ValueError("Order component is no longer available for delivery.")
+                component_products[component["product_id"]] = component_product
                 item_cost += Decimal(str(component_product.cost or 0)) * component["qty"]
             item.cost_at_sale = item_cost
 
@@ -606,24 +646,30 @@ class OrderService:
                     await db.rollback()
                     raise ValueError(f"Insufficient stock for delivery of component {c_prod_id}.")
 
+                stock_before = Decimal(str(balance.current_stock))
                 InventoryService.record_movement(
                     db, balance, -c_qty, current_user_id, TransactionTypeEnum.ISSUING,
                     reference_document=str(order.id),
                     notes=f"Order {order.id} Delivered",
                 )
+                await notify_low_stock_crossing(db, component_products[c_prod_id], stock_before, balance.current_stock)
 
 
     @staticmethod
-    async def get_orders(db: AsyncSession, status: Optional[str] = None, source: Optional[str] = None, customer_id: Optional[UUID] = None) -> List[dict]:
-        query = select(Order).order_by(Order.created_at.desc())
+    async def get_orders(db: AsyncSession, status: Optional[str] = None, source: Optional[str] = None, customer_id: Optional[UUID] = None, allowed_statuses: Optional[tuple[str, ...]] = None, assigned_to_id: Optional[UUID] = None, limit: int = 100, offset: int = 0) -> List[dict]:
+        query = select(Order).order_by(Order.created_at.desc(), Order.id.desc())
+        if allowed_statuses is not None:
+            query = query.where(Order.status.in_(allowed_statuses))
         if status:
             query = query.where(Order.status == status)
         if source:
             query = query.where(Order.source == source)
         if customer_id:
             query = query.where(Order.customer_id == customer_id)
+        if assigned_to_id:
+            query = query.where(Order.assigned_to_id == assigned_to_id)
 
-        orders_q = await db.execute(query)
+        orders_q = await db.execute(query.limit(limit).offset(offset))
         orders = orders_q.scalars().all()
         if not orders:
             return []

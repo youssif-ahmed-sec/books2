@@ -2,6 +2,7 @@
 
 import type { OfferComponentDraft, OfferPriceLevel, OfferProduct } from "@/lib/bundles";
 import { ProductSelect } from "@/components/ProductSelect";
+import { ZeroHintNumberInput } from "@/components/ZeroHintNumberInput";
 
 const levels: Array<{ value: OfferPriceLevel; label: string }> = [
   { value: "Retail", label: "قطاعي" },
@@ -33,7 +34,7 @@ export default function BundleEditor({ enabled, onEnabledChange, components, onC
 
   return <section className="space-y-4 border-t border-white/10 pt-6" aria-label="قسم العروض">
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <div><h3 className="text-xl font-bold">العروض</h3><p className="mt-1 text-xs text-[#e2bfb0]/75">اجمع أصنافًا مختلفة، وحدد وحدة وفئة سعر لكل صنف. الدستة العادية تُضاف كوحدة للمنتج نفسه.</p></div>
+      <div><h3 className="text-xl font-bold">العروض</h3><p className="mt-1 text-xs text-[#e2bfb0]/75">الدستة تُضاف كوحدة للمنتج، والعرض يجمع منتجات مختلفة.</p></div>
       {!locked && <label className="flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={enabled} onChange={event => onEnabledChange(event.target.checked)} />إنشاء عرض من أصناف</label>}
     </div>
     {enabled && <>
@@ -58,7 +59,7 @@ export default function BundleEditor({ enabled, onEnabledChange, components, onC
                 options={levels} compact />
             </label>
             <label className="text-xs">عدد الوحدات المختارة
-              <input type="number" min="1" step="1" value={component.quantity} onChange={event => update(component.id, { quantity: Number(event.target.value) })} className="app-field mt-1" />
+              <ZeroHintNumberInput min="1" step="1" value={component.quantity} placeholder="1" onChange={event => update(component.id, { quantity: Number(event.target.value) })} className="app-field mt-1" />
             </label>
             <button type="button" onClick={() => onComponentsChange(components.filter(item => item.id !== component.id))} className="justify-self-start text-xs text-red-400">حذف المكون</button>
           </div>;

@@ -63,7 +63,7 @@ export async function fetchApi(endpoint: string, options: FetchOptions = {}) {
     } catch {
       // Ignore JSON parse error for error response
     }
-    throw new Error(errorMessage);
+    throw Object.assign(new Error(errorMessage), { status: response.status });
   }
 
   if (invalidateSnapshots && (rest.method || "GET").toUpperCase() !== "GET") clearSectionSnapshots();

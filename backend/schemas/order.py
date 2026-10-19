@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from typing import List, Optional
 from typing import Literal
 from uuid import UUID
@@ -26,11 +26,15 @@ class OrderItemCreate(BaseModel):
 class OrderCreate(BaseModel):
     """ Used by POS. Instantly deducts inventory. """
     customer_id:     Optional[UUID] = None
+    customer_address: Optional[str] = Field(default=None, max_length=300)
     warehouse_id:    UUID                       # required — determines which stock to deduct
     status:          OrderStatusEnum = OrderStatusEnum.CLOSED
     source:          Optional[str] = "Walk-In Customer"
     discount_amount: Decimal = Field(default=Decimal("0"), ge=0, allow_inf_nan=False)
+    expected_total: Optional[Decimal] = Field(default=None, ge=0, allow_inf_nan=False)
     payment_method:  PaymentMethod = "Cash"
+    amount_received: Optional[Decimal] = Field(default=None, ge=0, allow_inf_nan=False, max_digits=12, decimal_places=2)
+    received_method: Optional[Literal["Cash", "Instapay", "Wallet"]] = None
     notes:           Optional[str] = None
     items:           List[OrderItemCreate]
     request_id:      UUID
@@ -48,6 +52,19 @@ class OrderCreate(BaseModel):
         if value not in (OrderStatusEnum.DELIVERED, OrderStatusEnum.CLOSED):
             raise ValueError("POS orders must be delivered or closed because stock is deducted immediately")
         return value
+
+    @model_validator(mode="after")
+    def validate_deferred_collection(self):
+        if self.payment_method == "Deferred Payment":
+            if self.customer_id is None:
+                raise ValueError("Deferred payment requires a registered customer")
+            if self.amount_received is None:
+                raise ValueError("Enter the amount received, including zero for full credit")
+            if self.amount_received > 0 and self.received_method is None:
+                raise ValueError("Choose how the received amount was paid")
+        elif self.amount_received is not None or self.received_method is not None:
+            raise ValueError("Partial collection applies only to deferred payment")
+        return self
 
 class OrderDraftCreate(BaseModel):
     """ Used by OMS. Creates an order without instant deduction. """
@@ -123,7 +140,9 @@ class OrderItemResponse(BaseModel):
 
 class OrderResponse(BaseModel):
     id:              UUID
+    public_number:   int
     customer_id:     Optional[UUID] = None
+    customer_address: Optional[str] = None
     user_id:         Optional[UUID] = None
     assigned_to_id:  Optional[UUID] = None
     status:          str
@@ -145,8 +164,13 @@ class OrderResponse(BaseModel):
 
 class QuotationItemResponse(OrderItemResponse):
     product_name: str
+    unit_name: str = ""
 
 
 class QuotationResponse(OrderResponse):
     customer_name: Optional[str] = None
+    customer_phone: Optional[str] = None
+    customer_address: Optional[str] = None
+    employee_name: Optional[str] = None
+    amount_received: float = 0
     items: List[QuotationItemResponse]

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Enum, Numeric, UniqueConstraint, CheckConstraint
+from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Enum, Numeric, UniqueConstraint, CheckConstraint, Index
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 import enum
@@ -36,7 +36,10 @@ class TransactionTypeEnum(str, enum.Enum):
 
 class InventoryTransaction(Base):
     __tablename__ = "inventory_transactions"
-    __table_args__ = (UniqueConstraint("request_id", name="uq_inventory_transactions_request_id"),)
+    __table_args__ = (
+        UniqueConstraint("request_id", name="uq_inventory_transactions_request_id"),
+        Index("ix_inventory_transactions_created_id", "created_at", "id"),
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     product_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
@@ -57,7 +60,12 @@ class InventoryTransaction(Base):
 
 class InventoryCount(Base):
     __tablename__ = "inventory_counts"
-    __table_args__ = (CheckConstraint("observed_quantity >= 0", name="ck_inventory_count_nonnegative"),)
+    __table_args__ = (
+        CheckConstraint("observed_quantity >= 0", name="ck_inventory_count_nonnegative"),
+        CheckConstraint("status IN ('PENDING', 'APPROVED', 'REJECTED')", name="ck_inventory_count_status"),
+        Index("ix_inventory_counts_status_created", "status", "created_at"),
+        Index("ix_inventory_counts_product_created", "product_id", "created_at"),
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True)
     product_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
@@ -66,4 +74,22 @@ class InventoryCount(Base):
     expected_quantity = Column(Numeric(18, 2), nullable=False)
     observed_quantity = Column(Numeric(18, 2), nullable=False)
     difference = Column(Numeric(18, 2), nullable=False)
+    session_id = Column(UUID(as_uuid=True), ForeignKey("inventory_count_sessions.id"), nullable=True, index=True)
+    reason = Column(String(500), nullable=True)
+    status = Column(String(16), nullable=False, default="APPROVED", server_default="APPROVED")
+    request_fingerprint = Column(String(64), nullable=True)
+    unit_cost = Column(Numeric(18, 2), nullable=True)
+    reviewed_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    rejection_reason = Column(String(500), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class InventoryCountSession(Base):
+    __tablename__ = "inventory_count_sessions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True)
+    warehouse_id = Column(UUID(as_uuid=True), ForeignKey("warehouses.id"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    request_fingerprint = Column(String(64), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

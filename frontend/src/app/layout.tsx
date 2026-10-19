@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import WarehouseModeGate from "@/components/WarehouseModeGate";
 import NotificationCenter from "@/components/NotificationCenter";
+import { ConfirmationProvider } from "@/components/ConfirmationProvider";
 
 export const metadata: Metadata = {
   title: "مكتبة سعود الشافعي | إدارة المكتبة",
@@ -37,7 +38,7 @@ export default function RootLayout({
         />
       </head>
       <body className="overflow-x-hidden antialiased">
-        <WarehouseModeGate>{children}</WarehouseModeGate>
+        <ConfirmationProvider><WarehouseModeGate>{children}</WarehouseModeGate></ConfirmationProvider>
         <NotificationCenter />
       </body>
     </html>

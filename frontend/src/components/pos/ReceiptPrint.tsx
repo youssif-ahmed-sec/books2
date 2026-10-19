@@ -1,13 +1,20 @@
 import React, { forwardRef } from 'react';
 import Image from 'next/image';
+import Barcode from 'react-barcode';
 
 interface ReceiptPrintProps {
   order: {
     id?: string;
+    publicNumber?: number;
+    createdAt?: string;
+    employeeName?: string;
+    paymentMethod?: string;
     customerName?: string;
     subtotal?: number;
     discount?: number;
     totalAmount?: number;
+    amountReceived?: number;
+    remainingAmount?: number;
   } | null;
   items: Array<{
     nameAr: string;
@@ -34,17 +41,17 @@ export const ReceiptPrint = forwardRef<HTMLDivElement, ReceiptPrintProps>(({ ord
           lineHeight: '1.4'
         }}
       >
-        <div style={{ textAlign: 'center', marginBottom: '15px' }}>
-          <div style={{ width: 100, height: 42, overflow: 'hidden', margin: '0 auto 5px', position: 'relative' }}>
-            <Image src="/brand/saud-logo.jpg" alt="" width={140} height={140} unoptimized
-              style={{ position: 'absolute', width: 140, height: 140, maxWidth: 'none', top: -42, left: -20 }} />
-          </div>
-          <h2 style={{ fontSize: '18px', fontWeight: 'bold', margin: '0 0 5px 0' }}>مكتبة سعود الشافعي</h2>
-          <p style={{ margin: '0' }}>رقم الطلب: {order?.id?.split('-')[0]}</p>
-          <p style={{ margin: '0' }}>التاريخ: {new Date().toLocaleDateString('ar-EG')} {new Date().toLocaleTimeString('ar-EG')}</p>
-          {order?.customerName && (
-            <p style={{ margin: '0' }}>العميل: {order.customerName}</p>
-          )}
+        <div style={{ textAlign: 'center', marginBottom: '12px' }}>
+          <Image src="/icon.svg" alt="شعار الكتاب" width={58} height={58} unoptimized style={{ margin: '0 auto 5px' }} />
+          <h2 style={{ fontSize: '18px', fontWeight: 'bold', margin: '0 0 3px 0' }}>مكتبة سعود الشافعي</h2>
+          <strong>فاتورة بيع</strong>
+        </div>
+        <div style={{ borderBlock: '1px dashed #555', paddingBlock: 8, marginBottom: 10 }}>
+          <div>رقم المستند: {order?.publicNumber}</div>
+          <div>التاريخ: {order?.createdAt ? new Date(order.createdAt).toLocaleString('ar-EG') : '—'}</div>
+          <div>الموظف: {order?.employeeName || 'غير مسجل'}</div>
+          <div>العميل: {order?.customerName || 'عميل نقدي'}</div>
+          <div>طريقة الدفع: {order?.paymentMethod || '—'}</div>
         </div>
 
         <table style={{ width: '100%', borderBottom: '1px dashed #000', marginBottom: '10px', paddingBottom: '10px' }}>
@@ -85,9 +92,12 @@ export const ReceiptPrint = forwardRef<HTMLDivElement, ReceiptPrintProps>(({ ord
           <span>الصافي:</span>
           <span>{order?.totalAmount?.toFixed(2)} ج.م</span>
         </div>
+        {order?.amountReceived != null && <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '5px' }}><span>المستلم:</span><span>{order.amountReceived.toFixed(2)} ج.م</span></div>}
+        {order?.remainingAmount != null && <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '5px', fontWeight: 'bold' }}><span>المتبقي:</span><span>{order.remainingAmount.toFixed(2)} ج.م</span></div>}
 
         <div style={{ textAlign: 'center', marginTop: '20px', fontSize: '12px' }}>
           <p style={{ margin: '0' }}>شكراً لزيارتكم</p>
+          {order?.publicNumber && <Barcode value={String(order.publicNumber)} format="CODE128" height={44} width={1.2} fontSize={11} margin={5} displayValue />}
         </div>
       </div>
     </div>

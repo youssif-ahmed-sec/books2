@@ -29,7 +29,7 @@ export function sectionSearchLabel(pathname: string): string | null {
   if (pathname === "/categories") return "تصنيف أو تصنيف فرعي";
   if (pathname === "/offers") return "عرض";
   if (pathname === "/customers") return "عميل بالاسم أو الهاتف";
-  if (["/orders", "/inbox", "/preparation", "/returns"].includes(pathname)) return "طلب برقم الطلب أو العميل";
+  if (["/orders", "/inbox", "/preparation"].includes(pathname)) return "طلب برقم الطلب أو العميل";
   if (pathname === "/purchases") return "أمر شراء برقم الأمر أو المورد أو الصنف";
   if (pathname === "/purchases/legacy") return "أمر شراء قديم برقم الأمر";
   if (pathname === "/audit") return "عملية في سجل التدقيق";
@@ -64,13 +64,19 @@ export async function searchSection(pathname: string, query: string, signal?: Ab
   if (pathname === "/customers") {
     return (await list("customers-list", "/customers")).filter(item => matches(q, item.name, item.phone, item.email)).map(item => ({ id: text(item.id), label: text(item.name), detail: text(item.phone), href: target(pathname, text(item.id)) }));
   }
-  if (["/orders", "/inbox", "/preparation", "/returns"].includes(pathname)) {
+  if (["/orders", "/inbox", "/preparation"].includes(pathname)) {
+    let completedInvoice: SectionSearchResult[] = [];
+    if (pathname === "/orders" && (/^[0-9a-f]{12}$/i.test(q) || /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(q))) {
+      const invoice = await fetchApi(`/returns/lookup/${encodeURIComponent(q)}`, { signal, silentErrors: true })
+        .catch(() => null) as { id: string } | null;
+      if (invoice) completedInvoice = [{ id: invoice.id, label: `فاتورة ${invoice.id.slice(-12)}`, detail: "فتح الاسترجاع أو الاستبدال", href: target("/returns", invoice.id) }];
+    }
     const endpoint = pathname === "/preparation" ? "/orders/assigned" : "/orders";
-    const section = pathname === "/preparation" ? "preparation-orders" : pathname === "/inbox" ? "inbox-orders" : pathname === "/returns" ? "returnable-orders" : "orders-list";
+    const section = pathname === "/preparation" ? "preparation-orders" : pathname === "/inbox" ? "inbox-orders" : "orders-list";
     const data = await list(section, endpoint);
-    const allowed = pathname === "/inbox" ? ["New Lead", "Draft Order", "Waiting Quotation", "Quotation Sent", "Waiting Customer Approval"] : pathname === "/returns" ? ["Delivered", "Closed"] : null;
-    return data.filter(item => (!allowed || allowed.includes(text(item.status))) && matches(q, item.id, item.customer_name, item.notes, ...rows(item.items).map(line => line.product_name)))
-      .map(item => ({ id: text(item.id), label: item.customer_name ? `${text(item.customer_name)} · ${text(item.id).slice(0, 8)}` : `طلب ${text(item.id).slice(0, 8)}`, detail: text(item.status), href: target(pathname, text(item.id)) }));
+    const allowed = pathname === "/inbox" ? ["New Lead", "Draft Order", "Waiting Quotation", "Quotation Sent", "Waiting Customer Approval"] : null;
+    return [...completedInvoice, ...data.filter(item => (!allowed || allowed.includes(text(item.status))) && matches(q, item.id, item.customer_name, item.notes, ...rows(item.items).map(line => line.product_name)))
+      .map(item => ({ id: text(item.id), label: item.customer_name ? `${text(item.customer_name)} · ${text(item.id).slice(0, 8)}` : `طلب ${text(item.id).slice(0, 8)}`, detail: text(item.status), href: target(pathname, text(item.id)) }))];
   }
   if (pathname === "/purchases" || pathname === "/purchases/legacy") {
     const endpoint = pathname === "/purchases" ? "/purchase-documents" : "/purchases";
@@ -83,8 +89,8 @@ export async function searchSection(pathname: string, query: string, signal?: Ab
       .map(item => ({ id: text(item.id), label: text(item.action), detail: `${text(item.entity_type)} ${text(item.entity_id).slice(0, 8)}`, href: target(pathname, text(item.id)) }));
   }
   if (pathname === "/settings") {
-    return (await list("settings-users", "/auth/users")).filter(item => matches(q, item.email, item.username, item.role))
-      .map(item => ({ id: text(item.id), label: text(item.username || item.email), detail: text(item.role), href: target(pathname, text(item.id)) }));
+    return (await list("settings-users", "/auth/users")).filter(item => matches(q, item.full_name, item.email, item.username, item.role))
+      .map(item => ({ id: text(item.id), label: text(item.full_name || item.username || item.email), detail: text(item.role), href: target(pathname, text(item.id)) }));
   }
   if (pathname === "/financials") {
     const snapshot = readSectionSnapshot<{ expenses: Row[]; incomes: Row[] }>("financials");

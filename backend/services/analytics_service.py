@@ -1,10 +1,11 @@
 """Period accounting from completed sales, immutable returns, and payment entries."""
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from collections import defaultdict
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
-from sqlalchemy import select, func
+from sqlalchemy import and_, or_, select, func, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.customer import Customer
@@ -29,75 +30,162 @@ def _period(query, column, start: datetime | None, end: datetime | None):
 
 
 async def financial_summary(db: AsyncSession, start: datetime | None = None, end: datetime | None = None) -> dict:
-    sales = (await db.execute(_period(select(Order).where(Order.status.in_(COMPLETED)), Order.created_at, start, end))).scalars().all()
-    order_ids = [order.id for order in sales]
-    sale_total = sum((Decimal(str(order.total_amount)) for order in sales), Decimal("0"))
-    sale_items = (await db.execute(select(OrderItem).where(OrderItem.order_id.in_(order_ids)))).scalars().all() if order_ids else []
-    sale_cost_known = all(item.cost_at_sale is not None for item in sale_items)
-    sale_cost = sum((Decimal(str(item.cost_at_sale or 0)) for item in sale_items), Decimal("0"))
+    sale_total, completed_orders = (await db.execute(_period(
+        select(func.coalesce(func.sum(Order.total_amount), 0), func.count(Order.id))
+        .where(Order.status.in_(COMPLETED)), Order.created_at, start, end,
+    ))).one()
+    sale_cost, missing_sale_cost = (await db.execute(_period(
+        select(
+            func.coalesce(func.sum(OrderItem.cost_at_sale), 0),
+            func.coalesce(func.sum(case((OrderItem.cost_at_sale.is_(None), 1), else_=0)), 0),
+        ).select_from(OrderItem).join(Order, Order.id == OrderItem.order_id)
+        .where(Order.status.in_(COMPLETED)), Order.created_at, start, end,
+    ))).one()
 
-    returns = (await db.execute(_period(select(SalesReturn), SalesReturn.created_at, start, end))).scalars().all()
-    return_ids = [record.id for record in returns]
-    refunded_sales = sum((Decimal(str(record.returned_value)) for record in returns), Decimal("0"))
-    return_rows = (await db.execute(select(SalesReturnLine, OrderItem).join(
-        OrderItem, OrderItem.id == SalesReturnLine.order_item_id,
-    ).where(SalesReturnLine.return_id.in_(return_ids)))).all() if return_ids else []
-    return_cost_known = all(item.cost_at_sale is not None for _, item in return_rows)
-    returned_cost = sum((
-        Decimal(str(item.cost_at_sale or 0)) * Decimal(str(line.quantity)) / Decimal(str(item.quantity_requested))
-        for line, item in return_rows
-    ), Decimal("0"))
+    refunded_sales = (await db.execute(_period(
+        select(func.coalesce(func.sum(SalesReturn.returned_value), 0)),
+        SalesReturn.created_at, start, end,
+    ))).scalar_one()
+    returned_cost, missing_return_cost = (await db.execute(_period(
+        select(
+            func.coalesce(func.sum(
+                OrderItem.cost_at_sale * SalesReturnLine.quantity / OrderItem.quantity_requested,
+            ), 0),
+            func.coalesce(func.sum(case((OrderItem.cost_at_sale.is_(None), 1), else_=0)), 0),
+        ).select_from(SalesReturnLine)
+        .join(OrderItem, OrderItem.id == SalesReturnLine.order_item_id)
+        .join(SalesReturn, SalesReturn.id == SalesReturnLine.return_id),
+        SalesReturn.created_at, start, end,
+    ))).one()
 
     expenses = (await db.execute(_period(select(func.coalesce(func.sum(Expense.amount), 0)), Expense.expense_date, start, end))).scalar_one()
     other_income = (await db.execute(_period(select(func.coalesce(func.sum(Income.amount), 0)), Income.income_date, start, end))).scalar_one()
-    payments = (await db.execute(_period(select(Payment), Payment.created_at, start, end))).scalars().all()
-    cash_received = sum((Decimal(str(payment.amount)) for payment in payments if payment.method == "Cash" and payment.kind in ("SALE", "COLLECTION")), Decimal("0"))
-    cash_refunded = sum((Decimal(str(payment.amount)) for payment in payments if payment.method == "Cash" and payment.kind == "REFUND"), Decimal("0"))
-    adjustments = (await db.execute(_period(select(CashAdjustment.amount), CashAdjustment.created_at, start, end))).scalars().all()
-    cash_adjustments = sum((Decimal(str(amount)) for amount in adjustments), Decimal("0"))
+    cash_received, cash_refunded = (await db.execute(_period(select(
+        func.coalesce(func.sum(case((
+            (Payment.method == "Cash") & Payment.kind.in_(("SALE", "COLLECTION")), Payment.amount,
+        ), else_=0)), 0),
+        func.coalesce(func.sum(case((
+            (Payment.method == "Cash") & (Payment.kind == "REFUND"), Payment.amount,
+        ), else_=0)), 0),
+    ), Payment.created_at, start, end))).one()
+    cash_adjustments = (await db.execute(_period(
+        select(func.coalesce(func.sum(CashAdjustment.amount), 0)),
+        CashAdjustment.created_at, start, end,
+    ))).scalar_one()
     customer_debt = (await db.execute(select(func.coalesce(func.sum(Customer.balance), 0)).where(Customer.is_deleted == False))).scalar_one()
+    sale_total = Decimal(str(sale_total))
+    refunded_sales = Decimal(str(refunded_sales))
+    cash_received = Decimal(str(cash_received))
+    cash_refunded = Decimal(str(cash_refunded))
+    cash_adjustments = Decimal(str(cash_adjustments))
     net_sales = sale_total - refunded_sales
-    gross_profit = net_sales - sale_cost + returned_cost if sale_cost_known and return_cost_known else None
+    gross_profit = net_sales - Decimal(str(sale_cost)) + Decimal(str(returned_cost)) if not missing_sale_cost and not missing_return_cost else None
     net_profit = gross_profit + Decimal(str(other_income)) - Decimal(str(expenses)) if gross_profit is not None else None
     return {
         "sales": float(sale_total), "returns": float(refunded_sales), "net_sales": float(net_sales),
-        "completed_orders": len(sales), "gross_profit": float(gross_profit) if gross_profit is not None else None,
+        "completed_orders": completed_orders, "gross_profit": float(gross_profit) if gross_profit is not None else None,
         "net_profit": float(net_profit) if net_profit is not None else None,
         "expenses": float(expenses), "other_income": float(other_income),
         "cash_receipts": float(cash_received), "cash_refunds": float(cash_refunded),
         "cash_adjustments": float(cash_adjustments),
         "cash_movement": float(cash_received - cash_refunded + cash_adjustments), "customer_debt": float(customer_debt),
-        "profit_incomplete": not (sale_cost_known and return_cost_known),
+        "profit_incomplete": bool(missing_sale_cost or missing_return_cost),
     }
 
 
+async def daily_sales_trend(db: AsyncSession, days: int = 14, end_day: date | None = None) -> list[dict]:
+    """Return a bounded Cairo-day series; aggregate in SQL and fill empty days in Python."""
+    if days < 1 or days > 90:
+        raise ValueError("days must be between 1 and 90")
+    cairo = ZoneInfo("Africa/Cairo")
+    last_day = end_day or datetime.now(cairo).date()
+    first_day = last_day - timedelta(days=days - 1)
+    start = datetime.combine(first_day, time.min, tzinfo=cairo)
+    end = datetime.combine(last_day + timedelta(days=1), time.min, tzinfo=cairo)
+    postgres = db.get_bind().dialect.name == "postgresql"
+
+    def bucket(column):
+        return func.date(func.timezone("Africa/Cairo", column)) if postgres else func.date(column)
+
+    order_day = bucket(Order.created_at)
+    return_day = bucket(SalesReturn.created_at)
+    sales_rows = (await db.execute(
+        select(order_day, func.sum(Order.total_amount))
+        .where(Order.status.in_(COMPLETED), Order.created_at >= start, Order.created_at < end)
+        .group_by(order_day)
+    )).all()
+    return_rows = (await db.execute(
+        select(return_day, func.sum(SalesReturn.returned_value))
+        .where(SalesReturn.created_at >= start, SalesReturn.created_at < end)
+        .group_by(return_day)
+    )).all()
+    sales = {str(day)[:10]: Decimal(str(amount)) for day, amount in sales_rows}
+    refunds = {str(day)[:10]: Decimal(str(amount)) for day, amount in return_rows}
+    return [{
+        "date": (day := first_day + timedelta(days=index)).isoformat(),
+        "sales": float(sales.get(day.isoformat(), 0)),
+        "returns": float(refunds.get(day.isoformat(), 0)),
+        "net": float(sales.get(day.isoformat(), 0) - refunds.get(day.isoformat(), 0)),
+    } for index in range(days)]
+
+
+async def daily_inventory_activity(db: AsyncSession, days: int = 30, end_day: date | None = None) -> list[dict]:
+    """Count stock movements rather than summing quantities of unlike products."""
+    if days < 1 or days > 90:
+        raise ValueError("days must be between 1 and 90")
+    cairo = ZoneInfo("Africa/Cairo")
+    last_day = end_day or datetime.now(cairo).date()
+    first_day = last_day - timedelta(days=days - 1)
+    start = datetime.combine(first_day, time.min, tzinfo=cairo)
+    end = datetime.combine(last_day + timedelta(days=1), time.min, tzinfo=cairo)
+    column = InventoryTransaction.created_at
+    bucket = func.date(func.timezone("Africa/Cairo", column)) if db.get_bind().dialect.name == "postgresql" else func.date(column)
+    rows = (await db.execute(select(
+        bucket,
+        func.sum(case((InventoryTransaction.quantity_changed > 0, 1), else_=0)),
+        func.sum(case((InventoryTransaction.quantity_changed < 0, 1), else_=0)),
+    ).where(column >= start, column < end).group_by(bucket))).all()
+    counts = {str(day)[:10]: (int(incoming or 0), int(outgoing or 0)) for day, incoming, outgoing in rows}
+    return [{"date": (day := first_day + timedelta(days=index)).isoformat(),
+             "incoming": counts.get(day.isoformat(), (0, 0))[0],
+             "outgoing": counts.get(day.isoformat(), (0, 0))[1]} for index in range(days)]
+
+
 async def stock_alerts(db: AsyncSession) -> list[dict]:
-    products = (await db.execute(select(Product).where(Product.is_deleted == False, Product.is_active == True))).scalars().all()
-    totals = dict((await db.execute(select(InventoryBalance.product_id, func.sum(InventoryBalance.current_stock)).group_by(
+    totals = select(
         InventoryBalance.product_id,
-    ))).all())
-    alerts = []
-    for product in products:
-        stock = Decimal(str(totals.get(product.id, 0)))
-        minimum = Decimal(str(product.min_stock_level or 0))
-        if stock <= 0 or (minimum > 0 and stock <= minimum) or (minimum == 0 and stock < 5):
-            alerts.append({"product_id": product.id, "name": product.name_ar, "stock": float(stock),
-                           "minimum": float(minimum), "severity": "out" if stock <= 0 else "low",
-                           "base_unit": product.base_unit, "image_url": product.image_url})
-    alerts.sort(key=lambda alert: (alert["severity"] != "out", alert["stock"], alert["name"]))
-    return alerts
+        func.sum(InventoryBalance.current_stock).label("stock"),
+    ).group_by(InventoryBalance.product_id).subquery()
+    stock = func.coalesce(totals.c.stock, 0)
+    minimum = func.coalesce(Product.min_stock_level, 0)
+    rows = (await db.execute(select(
+        Product.id, Product.name_ar, stock, minimum, Product.base_unit, Product.image_url,
+    ).outerjoin(totals, totals.c.product_id == Product.id).where(
+        Product.is_deleted == False,
+        Product.is_active == True,
+        or_(stock <= 0, and_(minimum > 0, stock <= minimum), and_(minimum == 0, stock < 5)),
+    ).order_by(case((stock <= 0, 0), else_=1), stock, Product.name_ar))).all()
+    return [{"product_id": product_id, "name": name, "stock": float(quantity),
+             "minimum": float(threshold), "severity": "out" if quantity <= 0 else "low",
+             "base_unit": unit, "image_url": image_url}
+            for product_id, name, quantity, threshold, unit, image_url in rows]
 
 
 async def management_details(db: AsyncSession, now: datetime) -> dict:
-    orders = (await db.execute(select(Order).where(Order.status.in_(COMPLETED)))).scalars().all()
+    since = now - timedelta(days=30)
+    orders = (await db.execute(select(Order).where(
+        Order.status.in_(COMPLETED), Order.created_at >= since,
+    ))).scalars().all()
     order_ids = [order.id for order in orders]
     by_order = {order.id: order for order in orders}
     items = (await db.execute(select(OrderItem, Product).join(Product, Product.id == OrderItem.product_id).where(
         OrderItem.order_id.in_(order_ids),
     ))).all() if order_ids else []
-    returned = dict((await db.execute(select(SalesReturnLine.order_item_id, func.sum(SalesReturnLine.amount)).group_by(
-        SalesReturnLine.order_item_id,
-    ))).all())
+    returned = dict((await db.execute(select(
+        SalesReturnLine.order_item_id, func.sum(SalesReturnLine.amount),
+    ).join(SalesReturn, SalesReturn.id == SalesReturnLine.return_id).where(
+        SalesReturn.created_at >= since,
+    ).group_by(SalesReturnLine.order_item_id))).all())
     subtotals: dict = defaultdict(Decimal)
     for item, _ in items:
         subtotals[item.order_id] += Decimal(str(item.total_price))
@@ -117,37 +205,60 @@ async def management_details(db: AsyncSession, now: datetime) -> dict:
         sources[order.source] += net
     category_ids = [key for key in category_totals if key is not None]
     category_names = dict((await db.execute(select(Category.id, Category.name_ar).where(Category.id.in_(category_ids)))).all()) if category_ids else {}
-    customers = (await db.execute(select(Customer).where(Customer.is_deleted == False))).scalars().all()
-    customer_names = {customer.id: customer.name for customer in customers}
-    delayed = (await db.execute(select(Order.id, Order.assigned_to_id, Order.preparing_started_at).where(
+    top_customer_ids = [customer_id for customer_id, _ in sorted(customer_totals.items(), key=lambda row: row[1], reverse=True)[:5]]
+    customer_names = dict((await db.execute(select(Customer.id, Customer.name).where(
+        Customer.id.in_(top_customer_ids), Customer.is_deleted == False,
+    ))).all()) if top_customer_ids else {}
+    new_customers = (await db.execute(select(func.count(Customer.id)).where(
+        Customer.is_deleted == False, func.date(Customer.created_at) == now.date(),
+    ))).scalar_one()
+    returning_customers = (await db.execute(select(func.count(Customer.id)).where(
+        Customer.is_deleted == False, Customer.purchase_count > 1,
+    ))).scalar_one()
+    delayed_filter = (
         Order.status == OrderStatusEnum.PREPARING.value,
         Order.preparing_started_at < now - timedelta(hours=2),
-    ))).all()
+    )
+    delayed_count = (await db.execute(select(func.count(Order.id)).where(*delayed_filter))).scalar_one()
+    delayed = (await db.execute(select(Order.id, Order.assigned_to_id, Order.preparing_started_at)
+        .where(*delayed_filter).order_by(Order.preparing_started_at).limit(10))).all()
 
     supplier_rows = (await db.execute(select(Supplier).where(Supplier.is_deleted == False))).scalars().all()
-    receipt_rows = (await db.execute(select(InventoryTransaction.supplier_id, InventoryTransaction.quantity_changed,
-        InventoryTransaction.unit_cost, InventoryTransaction.notes).where(
-            InventoryTransaction.transaction_type == TransactionTypeEnum.RECEIVING,
-            InventoryTransaction.supplier_finance_included.is_(True),
-        ))).all()
-    payments = (await db.execute(select(SupplierPayment.supplier_id, SupplierPayment.amount))).all()
-    debt_rows = (await db.execute(select(SupplierDebtEntry.supplier_id, SupplierDebtEntry.entry_type,
-        SupplierDebtEntry.amount))).all()
-    purchase_orders = (await db.execute(select(PurchaseOrder.supplier_id, PurchaseOrder.status))).all()
+    receipt_filter = (
+        InventoryTransaction.transaction_type == TransactionTypeEnum.RECEIVING,
+        InventoryTransaction.supplier_finance_included.is_(True),
+    )
+    unattributed = (await db.execute(select(func.count()).select_from(InventoryTransaction).where(
+        *receipt_filter, InventoryTransaction.supplier_id.is_(None),
+        or_(InventoryTransaction.notes.is_(None), InventoryTransaction.notes != "Initial stock from product creation"),
+    ))).scalar_one() > 0
+    receipts = {supplier_id: (value, bool(missing)) for supplier_id, value, missing in
+        (await db.execute(select(
+            InventoryTransaction.supplier_id,
+            func.coalesce(func.sum(InventoryTransaction.quantity_changed * func.coalesce(InventoryTransaction.unit_cost, 0)), 0),
+            func.max(case((InventoryTransaction.unit_cost.is_(None), 1), else_=0)),
+        ).where(*receipt_filter).group_by(InventoryTransaction.supplier_id))).all()}
+    payments = dict((await db.execute(select(
+        SupplierPayment.supplier_id, func.sum(SupplierPayment.amount),
+    ).group_by(SupplierPayment.supplier_id))).all())
+    debts = dict((await db.execute(select(
+        SupplierDebtEntry.supplier_id,
+        func.sum(case((SupplierDebtEntry.entry_type == "DEBT", SupplierDebtEntry.amount), else_=-SupplierDebtEntry.amount)),
+    ).group_by(SupplierDebtEntry.supplier_id))).all())
+    purchase_counts = {supplier_id: (count, received) for supplier_id, count, received in
+        (await db.execute(select(
+            PurchaseOrder.supplier_id, func.count(PurchaseOrder.id),
+            func.sum(case((PurchaseOrder.status == "RECEIVED", 1), else_=0)),
+        ).group_by(PurchaseOrder.supplier_id))).all()}
     suppliers = []
-    unattributed = any(row.supplier_id is None and row.notes != "Initial stock from product creation" for row in receipt_rows)
     for supplier in supplier_rows:
-        rows = [row for row in receipt_rows if row.supplier_id == supplier.id]
-        incomplete = unattributed or any(row.unit_cost is None for row in rows)
-        received_value = sum((Decimal(str(row.quantity_changed)) * Decimal(str(row.unit_cost or 0)) for row in rows), Decimal("0"))
-        paid = sum((Decimal(str(amount)) for supplier_id, amount in payments if supplier_id == supplier.id), Decimal("0"))
-        manual_debt = sum((Decimal(str(amount)) * (1 if entry_type == "DEBT" else -1)
-                           for supplier_id, entry_type, amount in debt_rows if supplier_id == supplier.id), Decimal("0"))
-        statuses = [status for supplier_id, status in purchase_orders if supplier_id == supplier.id]
+        received_value, missing_cost = receipts.get(supplier.id, (0, False))
+        incomplete = unattributed or missing_cost
+        orders_count, received_count = purchase_counts.get(supplier.id, (0, 0))
         suppliers.append({"id": supplier.id, "name": supplier.name,
-                          "balance": None if incomplete else float(Decimal(str(supplier.opening_balance or 0)) + received_value + manual_debt - paid),
-                          "statement_incomplete": incomplete, "orders": len(statuses),
-                          "received_orders": statuses.count("RECEIVED")})
+                          "balance": None if incomplete else float(Decimal(str(supplier.opening_balance or 0)) + Decimal(str(received_value)) + Decimal(str(debts.get(supplier.id, 0))) - Decimal(str(payments.get(supplier.id, 0)))),
+                          "statement_incomplete": incomplete, "orders": orders_count,
+                          "received_orders": received_count})
 
     def top(values, name):
         return [{"id": str(key), "name": name(key), "net_sales": float(value)}
@@ -158,8 +269,9 @@ async def management_details(db: AsyncSession, now: datetime) -> dict:
         "top_categories": top(category_totals, lambda key: category_names.get(key, "غير مصنف")),
         "top_customers": top(customer_totals, lambda key: customer_names.get(key, "عميل غير متاح")),
         "sales_by_source": {source: float(total) for source, total in sources.items()},
-        "new_customers": sum(1 for customer in customers if customer.created_at and customer.created_at.date() == now.date()),
-        "returning_customers": sum(1 for customer in customers if (customer.purchase_count or 0) > 1),
+        "new_customers": new_customers,
+        "returning_customers": returning_customers,
+        "delayed_orders_count": delayed_count,
         "delayed_orders": [{"id": str(order_id), "assigned_to_id": str(assignee) if assignee else None,
                             "hours": round((now - started).total_seconds() / 3600, 1)} for order_id, assignee, started in delayed],
         "suppliers": suppliers,

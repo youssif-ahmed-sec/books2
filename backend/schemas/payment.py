@@ -6,7 +6,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 
-PaymentMethod = Literal["Cash", "Vodafone Cash", "Bank Transfer", "Instapay", "Credit Card", "Deferred Payment"]
+PaymentMethod = Literal["Cash", "Wallet", "Vodafone Cash", "Bank Transfer", "Instapay", "Credit Card", "Deferred Payment"]
 CollectedPaymentMethod = Literal["Cash", "Vodafone Cash", "Bank Transfer", "Instapay", "Credit Card"]
 
 

@@ -1,67 +1,143 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
 import { fetchApi } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
 import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
+import { getUserRole } from "@/utils/auth";
+import { useConfirmAction } from "@/components/ConfirmationProvider";
+import { ZeroHintNumberInput } from "@/components/ZeroHintNumberInput";
 
-type Shift = { id: string; status: string; opening_cash: number; expected_cash: number; closing_cash: number | null; difference: number | null; opened_at: string; closed_at: string | null };
+type Shift = { id: string; status: string; opening_cash: number | null; expected_cash: number | null; closing_cash: number | null; difference: number | null; opened_at: string; closed_at: string | null; email_report_status?: string };
+type Snapshot = { current: Shift | null; history: Shift[] };
+
+const money = (value: number) => Number(value).toFixed(2);
+const validMoney = (value: string) => {
+  const trimmed = value.trim();
+  return /^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(trimmed) && Number.isFinite(Number(trimmed));
+};
 
 export default function CashRegisterPage() {
-  const [current, setCurrent] = useState<Shift | null>(() => readSectionSnapshot<{ current: Shift | null }>("cash-register")?.current || null);
-  const [history, setHistory] = useState<Shift[]>(() => readSectionSnapshot<{ history: Shift[] }>("cash-register")?.history || []);
-  const [opening, setOpening] = useState(0);
-  const [counted, setCounted] = useState(0);
-  const [adjustment, setAdjustment] = useState(0);
+  const confirmAction = useConfirmAction();
+  const snapshot = readSectionSnapshot<Snapshot>("cash-register");
+  const [current, setCurrent] = useState<Shift | null>(snapshot?.current || null);
+  const [history, setHistory] = useState<Shift[]>(snapshot?.history || []);
+  const [opening, setOpening] = useState("0");
+  const [counted, setCounted] = useState("");
+  const [adjustment, setAdjustment] = useState("");
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(!snapshot);
   const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
   const pendingAdjustment = useRef<{ fingerprint: string; id: string } | null>(null);
 
   const reload = async () => {
-    const [shift, shifts] = await Promise.all([fetchApi("/cash-register/current"), fetchApi("/cash-register/history")]);
+    const [shift, shifts] = await Promise.all([
+      fetchApi("/cash-register/current") as Promise<Shift | null>,
+      fetchApi("/cash-register/history") as Promise<Shift[]>,
+    ]);
     setCurrent(shift); setHistory(shifts);
     writeSectionSnapshot("cash-register", { current: shift, history: shifts });
   };
-  useEffect(() => { const timer = window.setTimeout(() => { void reload().catch(error => setMessage(errorMessage(error, "تعذر تحميل بيانات الصندوق"))); }, 0); return () => window.clearTimeout(timer); }, []);
 
-  async function act(path: string, payload: object) {
-    setBusy(true); setMessage("");
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void reload().catch(cause => setError(errorMessage(cause, "تعذر تحميل بيانات الصندوق")))
+        .finally(() => setLoading(false));
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  async function act(path: "open" | "close" | "adjustments", payload: object) {
+    if (busy) return;
+    setBusy(true); setMessage(""); setError("");
     try {
       let body = payload;
       if (path === "adjustments") {
         const fingerprint = JSON.stringify(payload);
-        if (pendingAdjustment.current?.fingerprint !== fingerprint) pendingAdjustment.current = { fingerprint, id: crypto.randomUUID() };
+        if (pendingAdjustment.current?.fingerprint !== fingerprint) {
+          pendingAdjustment.current = { fingerprint, id: crypto.randomUUID() };
+        }
         body = { ...payload, request_id: pendingAdjustment.current.id };
       }
-      await fetchApi(`/cash-register/${path}`, { method: "POST", body: JSON.stringify(body) });
+      const saved = await fetchApi(`/cash-register/${path}`, { method: "POST", body: JSON.stringify(body) }) as Shift;
       if (path === "adjustments") pendingAdjustment.current = null;
-      await reload(); setReason(""); setAdjustment(0); setCounted(0);
-      setMessage("تم تسجيل حركة الصندوق");
-    } catch (error) { setMessage(errorMessage(error, "تعذر تسجيل الحركة")); }
-    finally { setBusy(false); }
+      setCurrent(saved.status === "OPEN" ? saved : null);
+      setHistory(previous => [saved, ...previous.filter(shift => shift.id !== saved.id)]);
+      if (path === "close") setCounted("");
+      if (path === "adjustments") { setReason(""); setAdjustment(""); }
+      setMessage(path === "open" ? "تم فتح الوردية." : path === "close" ? "تم إغلاق الوردية وتسجيل المبلغ المعدود." : "تم تسجيل السحب النقدي.");
+      if (path === "close" && isAdmin && saved.email_report_status === "SENT") setMessage("تم إغلاق الوردية وقبل Gmail إرسال ملخصها.");
+      if (path === "close" && isAdmin && ["FAILED", "UNKNOWN"].includes(saved.email_report_status || "")) setError("أُغلقت الوردية، لكن تعذر إرسال ملخص البريد. راجع حالة الإرسال في الإعدادات.");
+      if (path === "close" && isAdmin && saved.email_report_status === "NOT_CONFIGURED") setError("أُغلقت الوردية دون بريد؛ حدد البريد المستلم من الإعدادات لإرسال الملخصات القادمة.");
+      try { await reload(); }
+      catch (cause) { setError(errorMessage(cause, "تم التسجيل لكن تعذر تحديث بيانات الصندوق. حدّث الصفحة.")); }
+    } catch (cause) {
+      setError(errorMessage(cause, "تعذر تسجيل حركة الصندوق"));
+    } finally { setBusy(false); }
   }
 
-  return <div className="min-h-screen bg-[#131313] text-white flex" dir="rtl">
+  const isAdmin = getUserRole() === "ADMIN";
+  const countedValid = validMoney(counted);
+  const difference = isAdmin && current?.expected_cash != null && countedValid
+    ? Number((Number(counted) - Number(current.expected_cash)).toFixed(2)) : null;
+  const adjustmentValid = validMoney(adjustment) && Number(adjustment) > 0 && reason.trim().length >= 3;
+  const previousShifts = history.filter(shift => shift.status !== "OPEN");
+
+  async function closeShift() {
+    if (!current || !countedValid || busy) return;
+    const text = isAdmin && current.expected_cash != null
+      ? `الرصيد المتوقع ${money(current.expected_cash)} ج.م، والمعدود ${money(Number(counted))} ج.م. ` +
+        (difference ? `فرق العدّ ${money(difference)} ج.م. ` : "لا يوجد فرق. ") + "تأكيد إغلاق الوردية؟"
+      : `المبلغ المعدود ${money(Number(counted))} ج.م. تأكيد إغلاق الوردية؟`;
+    if (await confirmAction({ title: "إغلاق الوردية؟", message: text, confirmLabel: "إغلاق الوردية" })) void act("close", { closing_cash: Number(counted) });
+  }
+
+  return <div className="min-h-screen" dir="rtl">
     <SideNav /><TopNav title="الصندوق النقدي" />
-    <main className="mx-4 mt-28 mb-8 flex-1 min-w-0 lg:mr-[364px] lg:mt-36 space-y-5">
-      <h1 className="text-2xl font-bold">إدارة وردية الصندوق</h1>
-      {message && <p role="status" className="rounded-xl bg-primary/10 p-4">{message}</p>}
-      {!current ? <section className="glass rounded-2xl p-6 space-y-4">
-        <p>افتح وردية قبل تسجيل مبيعات أو تحصيلات نقدية.</p>
-        <label className="block">رصيد البداية</label>
-        <input aria-label="رصيد البداية" className="app-field" type="number" min="0" step="0.01" value={opening} onChange={event => setOpening(Number(event.target.value) || 0)} />
-        <button disabled={busy} className="app-primary-button" onClick={() => act("open", { opening_cash: opening })}>فتح وردية</button>
-      </section> : <section className="glass rounded-2xl p-6 space-y-6">
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4"><p>رصيد البداية<br /><strong>{current.opening_cash.toFixed(2)} ج.م</strong></p><p>الرصيد المتوقع<br /><strong>{current.expected_cash.toFixed(2)} ج.م</strong></p><p>بدأت في<br /><strong>{new Date(current.opened_at).toLocaleString("ar-EG")}</strong></p></div>
-        <div className="border-t border-white/10 pt-4 space-y-3"><h2 className="font-bold">حركة نقدية يدوية</h2><p className="text-sm text-white/60">أدخل مبلغًا موجبًا للإيداع وسالبًا للسحب، مع السبب.</p>
-          <div className="flex flex-wrap gap-3"><input aria-label="مبلغ الحركة" className="app-field" type="number" step="0.01" value={adjustment || ""} onChange={event => setAdjustment(Number(event.target.value) || 0)} /><input aria-label="سبب الحركة" className="app-field" value={reason} onChange={event => setReason(event.target.value)} placeholder="السبب" /><button disabled={busy || !adjustment || reason.trim().length < 3} onClick={() => act("adjustments", { amount: adjustment, reason })} className="app-secondary-button disabled:opacity-40">تسجيل الحركة</button></div>
+    <main className="app-main space-y-5">
+      <header><h1 className="app-heading">وردية الصندوق</h1></header>
+      {error && <p role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm">{error}</p>}
+      {message && <p role="status" className="rounded-xl border border-green-500/30 bg-green-500/10 p-3 text-sm">{message}</p>}
+      <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1.45fr)_minmax(300px,.9fr)] xl:items-start">
+      {loading ? <section className="app-panel space-y-4 rounded-3xl p-5 md:p-6" role="status" aria-label="جارٍ تحميل بيانات الصندوق"><span className="sr-only">جارٍ تحميل بيانات الصندوق</span><span aria-hidden="true" className="app-skeleton h-6 w-36" /><span aria-hidden="true" className="app-skeleton h-4 w-64 max-w-full" /><span aria-hidden="true" className="app-skeleton h-12 w-48 max-w-full rounded-xl" /></section> : !current ? <section className="app-panel min-w-0 space-y-5 rounded-3xl p-5 md:p-6">
+        <div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary"><span className="material-symbols-outlined" aria-hidden="true">lock_open</span></span><h2 className="text-lg font-bold">فتح وردية</h2></div>
+        <label className="block max-w-xs text-sm">رصيد البداية
+          <ZeroHintNumberInput aria-label="رصيد البداية" className="app-field mt-1" inputMode="decimal" min="0" step="0.01" value={opening} disabled={busy} onChange={event => setOpening(event.target.value)} />
+        </label>
+        <button type="button" disabled={busy || !validMoney(opening)} className="app-primary-button disabled:opacity-50" onClick={() => void act("open", { opening_cash: Number(opening) })}>{busy ? "جارٍ الفتح..." : "فتح وردية"}</button>
+      </section> : <section className="app-panel min-w-0 space-y-6 rounded-3xl p-5 md:p-6" aria-label="الوردية الحالية">
+        <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-lg font-bold">الوردية الحالية</h2><p className="app-muted mt-1 text-xs">بدأت {new Date(current.opened_at).toLocaleString("ar-EG")}</p></div><span className="rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-bold text-green-500">مفتوحة الآن</span></div>
+        {isAdmin && <div className="grid gap-4 border-y border-current/10 py-4 sm:grid-cols-2">
+          {current.opening_cash !== null && <div><p className="app-muted text-xs">رصيد البداية</p><strong className="mt-1 block text-xl">{money(current.opening_cash)} ج.م</strong></div>}
+          {current.expected_cash !== null && <div className="sm:border-r sm:border-current/10 sm:pr-4"><p className="app-muted text-xs">المتوقع في الدرج الآن</p><strong className="mt-1 block text-xl text-primary">{money(current.expected_cash)} ج.م</strong></div>}
+        </div>}
+        <div className="space-y-3"><h3 className="font-bold">سحب نقدي</h3>
+          <div className="grid gap-3 sm:grid-cols-[minmax(0,160px)_minmax(0,1fr)]">
+            <label className="text-sm">مبلغ السحب<input aria-label="مبلغ السحب" className="app-field mt-1" type="number" inputMode="decimal" min="0.01" step="0.01" value={adjustment} disabled={busy} onChange={event => setAdjustment(event.target.value)} placeholder="0.00" /></label>
+            <label className="text-sm">السبب<input aria-label="سبب السحب" className="app-field mt-1" value={reason} disabled={busy} onChange={event => setReason(event.target.value)} placeholder="مثلًا: مصروف توصيل" /></label>
+          </div>
+          <button type="button" disabled={busy || !adjustmentValid} onClick={() => void act("adjustments", { amount: -Number(adjustment), reason: reason.trim() })} className="app-secondary-button">{busy ? "جارٍ التسجيل…" : "تسجيل السحب"}</button>
         </div>
-        <div className="border-t border-white/10 pt-4 space-y-3"><h2 className="font-bold">إغلاق الوردية</h2><p className="text-sm text-white/60">عدّ النقدية الفعلية وسجلها؛ سيظهر الفرق عن المتوقع في السجل.</p><div className="flex flex-wrap gap-3"><input aria-label="النقدية المعدودة" className="app-field" type="number" min="0" step="0.01" value={counted || ""} onChange={event => setCounted(Number(event.target.value) || 0)} /><button disabled={busy} onClick={() => { if (window.confirm("تأكيد إغلاق الوردية؟")) act("close", { closing_cash: counted }); }} className="app-primary-button">إغلاق الوردية</button></div></div>
+        <div className="space-y-3 border-t border-current/10 pt-5"><h3 className="font-bold">إغلاق الوردية</h3><p className="app-muted text-xs">{isAdmin ? "عدّ النقدية في الدرج أولًا. سيُحفظ الفرق بين المبلغ المعدود والمتوقع." : "عدّ النقدية في الدرج وأدخل المبلغ الفعلي قبل الإغلاق."}</p>
+          <label className="block max-w-xs text-sm">النقدية المعدودة
+            <input aria-label="النقدية المعدودة" className="app-field mt-1" type="number" inputMode="decimal" min="0" step="0.01" value={counted} disabled={busy} onChange={event => setCounted(event.target.value)} placeholder="أدخل المبلغ بعد العدّ" />
+          </label>
+          {difference !== null && <p className="text-sm">الفرق المتوقع عند الإغلاق: <strong className={difference === 0 ? "text-green-600" : "text-amber-600"}>{money(difference)} ج.م</strong></p>}
+          <button type="button" disabled={busy || !countedValid} onClick={closeShift} className="app-primary-button disabled:opacity-50">{busy ? "جارٍ الإغلاق..." : "مراجعة وإغلاق الوردية"}</button>
+        </div>
       </section>}
-      <section className="glass rounded-2xl p-6 space-y-3"><h2 className="font-bold">الورديات السابقة</h2>{history.map(shift => <p key={shift.id} data-search-id={shift.id} className="border-b border-white/10 pb-2 text-sm">{new Date(shift.opened_at).toLocaleString("ar-EG")} — {shift.status === "OPEN" ? "مفتوحة" : "مغلقة"} — متوقع {shift.expected_cash.toFixed(2)} ج.م{shift.closing_cash !== null ? ` — معدود ${shift.closing_cash.toFixed(2)} — فرق ${shift.difference?.toFixed(2)}` : ""}</p>)}</section>
+      <section className="app-panel min-w-0 space-y-3 rounded-3xl p-5 md:p-6 xl:sticky xl:top-28" aria-label="سجل الورديات"><div className="flex items-center justify-between gap-3 border-b border-current/10 pb-3"><div><h2 className="text-lg font-bold">سجل الورديات</h2></div></div>
+        {loading ? <div className="grid gap-2" role="status" aria-label="جارٍ تحميل الورديات السابقة"><span className="sr-only">جارٍ تحميل الورديات السابقة</span>{[0, 1].map(index => <div key={index} aria-hidden="true" className="space-y-2 border-b border-current/10 py-3"><span className="app-skeleton h-4 w-40" /><span className="app-skeleton h-3 w-64 max-w-full" /></div>)}</div> : previousShifts.length === 0 ? <p className="app-muted py-8 text-center text-sm">لا توجد ورديات مغلقة بعد.</p> : <div className="max-h-[min(68vh,640px)] divide-y divide-current/10 overflow-y-auto">{previousShifts.map(shift => <article key={shift.id} data-search-id={shift.id} className="space-y-2 py-4 text-sm">
+          <strong>{new Date(shift.opened_at).toLocaleString("ar-EG")}</strong>
+          {isAdmin ? <p className="app-muted text-xs">{shift.opening_cash !== null ? `رصيد البداية ${money(shift.opening_cash)} ج.م` : ""}{shift.closing_cash !== null ? ` · المعدود ${money(shift.closing_cash)} ج.م` : ""}</p> : <p className="app-muted text-xs">أُغلقت {shift.closed_at ? new Date(shift.closed_at).toLocaleString("ar-EG") : "الوردية"}</p>}
+          {isAdmin && shift.difference !== null && <p className={`text-xs font-semibold ${shift.difference === 0 ? "text-green-500" : "text-amber-500"}`}>فرق العد: {money(shift.difference)} ج.م</p>}
+        </article>)}</div>}
+      </section>
+      </div>
     </main>
   </div>;
 }

@@ -11,10 +11,12 @@ import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
 import { useSectionSearchSelection } from "@/lib/useSectionSearchSelection";
 import { ProductSelect } from "@/components/ProductSelect";
+import { useConfirmAction } from "@/components/ConfirmationProvider";
 import { fetchApi } from "@/lib/api";
 import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
 import { errorMessage } from "@/lib/errors";
 import { useHydrated } from "@/lib/useHydrated";
+import BrandsManagement from "@/components/BrandsManagement";
 
 // ─── Schemas ──────────────────────────────────────────────────────────────────
 const categorySchema = z.object({
@@ -182,11 +184,14 @@ function SubcategoryModal({
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function CategoriesPage() {
+  const confirmAction = useConfirmAction();
+  const [activeTab, setActiveTab] = useState<"categories" | "brands">("categories");
   const [categories, setCategories] = useState<Category[]>(() => readSectionSnapshot<{ categories: Category[] }>("categories")?.categories || []);
   const [subcategories, setSubcategories] = useState<Subcategory[]>(() => readSectionSnapshot<{ subcategories: Subcategory[] }>("categories")?.subcategories || []);
   const [loading, setLoading] = useState(() => !readSectionSnapshot("categories"));
   const [expandedCats, setExpandedCats] = useState<Set<string>>(new Set());
   useSectionSearchSelection(id => {
+    setActiveTab("categories");
     const parent = subcategories.find(item => item.id === id)?.category_id;
     if (parent) setExpandedCats(current => new Set(current).add(parent));
   });
@@ -241,7 +246,7 @@ export default function CategoriesPage() {
   };
 
   const deleteCategory = async (id: string) => {
-    if (!confirm("حذف هذا التصنيف سيؤثر على المنتجات المرتبطة به. هل تريد المتابعة؟")) return;
+    if (!await confirmAction({ title: "حذف التصنيف؟", message: "حذف هذا التصنيف سيؤثر على المنتجات المرتبطة به.", confirmLabel: "حذف التصنيف", tone: "danger" })) return;
     try {
       await fetchApi(`/products/categories/${id}`, { method: "DELETE" });
       loadAll();
@@ -249,7 +254,7 @@ export default function CategoriesPage() {
   };
 
   const deleteSubcategory = async (id: string) => {
-    if (!confirm("هل أنت متأكد من حذف هذا التصنيف الفرعي؟")) return;
+    if (!await confirmAction({ title: "حذف التصنيف الفرعي؟", message: "سيُزال هذا التصنيف الفرعي من القائمة.", confirmLabel: "حذف التصنيف", tone: "danger" })) return;
     try {
       await fetchApi(`/products/subcategories/${id}`, { method: "DELETE" });
       loadAll();
@@ -261,14 +266,14 @@ export default function CategoriesPage() {
   return (
     <div className="min-h-screen" dir="rtl">
       <SideNav />
-      <TopNav title="إدارة التصنيفات" />
+      <TopNav title="التصنيفات والعلامات التجارية" />
       <main className="app-main">
         {/* Header */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-8">
           <div>
-            <h1 className="app-heading">إدارة التصنيفات</h1>
-            <p className="app-subtitle">شجرة تصنيفات المنتجات والفئات الفرعية</p>
+            <h1 className="app-heading">التصنيفات والعلامات التجارية</h1>
           </div>
+          {activeTab === "categories" &&
           <div className="flex flex-wrap gap-3">
             <button onClick={() => setCatModal({ mode: "add" })} className="flex items-center gap-2 glass border border-white/10 text-white font-bold px-5 py-3 rounded-full hover:bg-white/5 transition-all">
               <span className="material-symbols-outlined text-[18px]">add</span>
@@ -278,8 +283,15 @@ export default function CategoriesPage() {
               <span className="material-symbols-outlined text-[18px]">add</span>
               تصنيف فرعي
             </button>
-          </div>
+          </div>}
         </div>
+
+        <div className="app-panel mb-7 inline-flex max-w-full gap-1 rounded-full p-1" role="group" aria-label="أقسام التصنيفات والعلامات التجارية">
+          <button type="button" aria-pressed={activeTab === "categories"} className={`rounded-full px-5 py-2.5 text-sm font-bold transition-colors ${activeTab === "categories" ? "bg-primary text-white" : "app-muted hover:text-white"}`} onClick={() => setActiveTab("categories")}>التصنيفات</button>
+          <button type="button" aria-pressed={activeTab === "brands"} className={`rounded-full px-5 py-2.5 text-sm font-bold transition-colors ${activeTab === "brands" ? "bg-primary text-white" : "app-muted hover:text-white"}`} onClick={() => setActiveTab("brands")}>العلامات التجارية</button>
+        </div>
+
+        {activeTab === "brands" ? <BrandsManagement /> : <>
 
         {/* Stats */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
@@ -287,7 +299,7 @@ export default function CategoriesPage() {
             <div className="flex items-center justify-between gap-4 text-right">
               <div>
                 <p className="text-[#e2bfb0]/80 text-sm font-semibold">التصنيفات الرئيسية</p>
-                <p className="text-2xl font-bold text-primary">{categories.length}</p>
+                {loading ? <span className="app-skeleton mt-2 h-7 w-14" role="status" aria-label="جاري تحميل عدد التصنيفات الرئيسية" /> : <p className="text-2xl font-bold text-primary">{categories.length}</p>}
               </div>
               <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center">
                 <span className="material-symbols-outlined text-primary">category</span>
@@ -298,7 +310,7 @@ export default function CategoriesPage() {
             <div className="flex items-center justify-between gap-4 text-right">
               <div>
                 <p className="text-[#e2bfb0]/80 text-sm font-semibold">التصنيفات الفرعية</p>
-                <p className="text-2xl font-bold text-white">{subcategories.length}</p>
+                {loading ? <span className="app-skeleton mt-2 h-7 w-14" role="status" aria-label="جاري تحميل عدد التصنيفات الفرعية" /> : <p className="text-2xl font-bold text-white">{subcategories.length}</p>}
               </div>
               <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center">
                 <span className="material-symbols-outlined text-[#e2bfb0]/60">subdirectory_arrow_right</span>
@@ -309,15 +321,11 @@ export default function CategoriesPage() {
 
         {/* Tree */}
         {loading ? (
-          <div className="glass rounded-2xl p-16 text-center text-[#e2bfb0]/40">
-            <span className="material-symbols-outlined text-4xl animate-spin block mb-2">progress_activity</span>
-            جاري التحميل...
-          </div>
+          <div className="space-y-4" role="status" aria-label="جاري تحميل التصنيفات"><span className="sr-only">جاري تحميل التصنيفات</span>{[0, 1, 2].map(index => <div key={index} aria-hidden="true" className="glass flex items-center gap-4 rounded-2xl p-6"><span className="app-skeleton h-10 w-10 rounded-xl" /><span className="app-skeleton h-5 w-40 max-w-[60%]" /><span className="app-skeleton mr-auto h-5 w-12" /></div>)}</div>
         ) : categories.length === 0 ? (
           <div className="glass rounded-2xl p-16 text-center text-[#e2bfb0]/40">
             <span className="material-symbols-outlined text-6xl block mb-4">category</span>
             <p className="font-bold mb-2">لا توجد تصنيفات بعد</p>
-            <p className="text-sm">ابدأ بإضافة تصنيف رئيسي لتنظيم منتجاتك</p>
           </div>
         ) : (
           <div className="flex flex-col gap-4">
@@ -396,6 +404,7 @@ export default function CategoriesPage() {
             })}
           </div>
         )}
+        </>}
       </main>
 
       {/* Category Modal */}

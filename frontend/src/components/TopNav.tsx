@@ -8,9 +8,10 @@ import { searchSection, sectionSearchLabel, type SectionSearchResult } from "@/l
 import { cachedCurrentUser, getCurrentUser } from "@/lib/currentUser";
 import ThemeToggle from "@/components/ThemeToggle";
 import NotificationBell from "@/components/NotificationBell";
+import { notifyError } from "@/lib/notifications";
 
 interface TopNavProps { title: string }
-interface CurrentUser { email: string; role: string }
+interface CurrentUser { email: string | null; username?: string | null; full_name?: string | null; role: string }
 
 const roleLabels: Record<string, string> = {
   ADMIN: "مدير النظام",
@@ -31,6 +32,7 @@ export default function TopNav({ title }: TopNavProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchLabel = sectionSearchLabel(pathname);
+  const posSearch = pathname === "/pos";
   const remoteSearch = ["/inventory", "/inventory/product", "/suppliers", "/audit"].includes(pathname);
   const [user, setUser] = useState<CurrentUser | null>(() => cachedCurrentUser());
   const [query, setQuery] = useState("");
@@ -40,6 +42,7 @@ export default function TopNav({ title }: TopNavProps) {
   const [accountOpen, setAccountOpen] = useState(false);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
   const searchedPath = useRef(pathname);
   const accountRef = useRef<HTMLDivElement>(null);
@@ -88,10 +91,18 @@ export default function TopNav({ title }: TopNavProps) {
     return () => { active = false; controller.abort(); window.clearTimeout(timer); };
   }, [query, submittedQuery, pathname, searchLabel, remoteSearch]);
 
-  const logout = () => {
-    fetchApi("/auth/logout", { method: "POST" }).catch(console.error);
-    localStorage.removeItem("access_token");
-    router.replace("/login");
+  const logout = async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      await fetchApi("/auth/logout", { method: "POST" });
+      localStorage.removeItem("access_token");
+      router.replace("/login");
+    } catch {
+      if (localStorage.getItem("access_token")) notifyError("تعذر إنهاء الجلسة. حاول مرة أخرى.");
+    } finally {
+      setLoggingOut(false);
+    }
   };
 
   return (
@@ -100,7 +111,10 @@ export default function TopNav({ title }: TopNavProps) {
         <h2 className="text-lg font-bold text-primary">{title}</h2>
       </div>
       <div className="app-top-search relative min-w-0 w-[min(34vw,480px)]" ref={searchRef}>
-        <div className="app-search app-search-focus flex h-10 items-center gap-2 rounded-full px-4">
+        {posSearch ? <button type="button" className="app-search app-search-focus flex h-10 w-full items-center gap-2 rounded-full px-4 text-start" onClick={() => document.getElementById("pos-product-search")?.focus()} aria-label="الانتقال لبحث الأصناف والباركود في نقطة البيع">
+          <span className="material-symbols-outlined text-xl app-muted" aria-hidden="true">search</span>
+          <span className="app-muted min-w-0 truncate text-sm">ابحث عن صنف أو امسح باركود</span>
+        </button> : <div className="app-search app-search-focus flex h-10 items-center gap-2 rounded-full px-4">
           <span className="material-symbols-outlined text-xl app-muted" aria-hidden="true">search</span>
           <input type="search" value={query} disabled={!searchLabel}
             onChange={(event) => { setQuery(event.target.value); setSubmittedQuery(""); setSearchOpen(true); setResults([]); }}
@@ -108,7 +122,7 @@ export default function TopNav({ title }: TopNavProps) {
             onFocus={() => setSearchOpen(true)} placeholder={searchLabel ? `ابحث عن ${searchLabel}...` : "لا توجد سجلات للبحث في هذا القسم"} aria-label={searchLabel ? `البحث عن ${searchLabel}` : "البحث غير متاح في هذا القسم"}
             className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:opacity-60" />
           {remoteSearch && <button type="button" onClick={() => { setSubmittedQuery(query.trim()); setSearchOpen(true); }} disabled={query.trim().length < 3} aria-label="تنفيذ البحث" className="app-muted text-xs disabled:opacity-40">بحث</button>}
-        </div>
+        </div>}
         {searchOpen && remoteSearch && query.trim().length >= 3 && !submittedQuery && <div className="app-menu absolute left-0 right-0 top-[calc(100%+8px)] rounded-2xl p-3 text-xs shadow-xl">اضغط Enter أو زر بحث لعرض النتائج</div>}
         {searchOpen && (remoteSearch ? submittedQuery.trim().length >= 3 : query.trim().length >= 2) && (
           <div className="app-menu absolute left-0 right-0 top-[calc(100%+8px)] max-h-72 overflow-y-auto rounded-2xl p-2 shadow-xl">
@@ -131,11 +145,11 @@ export default function TopNav({ title }: TopNavProps) {
           {accountOpen && (
             <div className="app-menu absolute left-0 top-[calc(100%+8px)] w-64 rounded-2xl p-3 shadow-xl">
               <p className="text-sm font-bold">{user ? roleLabels[user.role] || user.role : "الحساب"}</p>
-              <p className="app-muted mt-1 truncate text-xs" dir="ltr">{user?.email}</p>
+              <p className="app-muted mt-1 truncate text-xs">{user?.full_name || user?.username || user?.email}</p>
               <div className="app-divider my-3" />
               {user?.role === "ADMIN" && <Link href="/settings" className="app-menu-action"><span className="material-symbols-outlined text-lg">settings</span>الإعدادات</Link>}
               <div className="app-menu-action justify-between"><span>المظهر</span><ThemeToggle /></div>
-              <button type="button" onClick={logout} className="app-menu-action w-full text-[#d95143]"><span className="material-symbols-outlined text-lg">logout</span>تسجيل الخروج</button>
+              <button type="button" onClick={() => void logout()} disabled={loggingOut} className="app-menu-action w-full text-[#d95143]"><span className="material-symbols-outlined text-lg">logout</span>{loggingOut ? "جاري تسجيل الخروج..." : "تسجيل الخروج"}</button>
             </div>
           )}
         </div>

@@ -133,30 +133,33 @@ export function InventoryTableRow({ item, onEdit, onDelete, userRole }: Inventor
 
       {/* Actions */}
       <td className="px-8 py-6">
-        <div className="flex items-center justify-center gap-3 shrink-0">
+        <div className="flex items-center justify-center gap-2 shrink-0">
           <button
+            type="button"
             onClick={() => setShowBarcodeModal(true)}
             disabled={!barcodeUnits.length}
-            className="w-9 h-9 rounded-full glass flex items-center justify-center text-[#e2bfb0]/60 hover:text-primary hover:border-primary/30 transition-all"
+            className="h-9 px-3 rounded-full glass flex items-center justify-center text-xs font-bold text-[#e2bfb0] hover:text-primary hover:border-primary/30 transition-all disabled:opacity-40"
             title={barcodeUnits.length ? "طباعة باركودات الوحدات" : "لا توجد باركودات للوحدات"}
+            aria-label={`طباعة باركود ${item.nameAr}`}
           >
-            <span className="material-symbols-outlined text-[18px]">barcode</span>
+            باركود
           </button>
           
           {canEditProduct(userRole) && (
             <button
+              type="button"
               onClick={() => onEdit(item)}
-              className="w-9 h-9 rounded-full glass flex items-center justify-center text-[#e2bfb0]/60 hover:text-primary hover:border-primary/30 transition-all"
-              title="تعديل"
+              className="h-9 px-3 rounded-full glass flex items-center justify-center text-xs font-bold text-[#e2bfb0] hover:text-primary hover:border-primary/30 transition-all"
+              aria-label={`تعديل ${item.nameAr}`}
             >
-              <span className="material-symbols-outlined text-[18px]">edit</span>
+              تعديل
             </button>
           )}
 
           <Link href={`/inventory/product?id=${encodeURIComponent(String(item.id))}`}
-            className="w-9 h-9 rounded-full glass flex items-center justify-center text-[#e2bfb0]/60 hover:text-primary hover:border-primary/30 transition-all"
-            title="تفاصيل المنتج وسجله" aria-label={`تفاصيل ${item.nameAr}`}>
-            <span className="material-symbols-outlined text-[18px]">history</span>
+            className="h-9 px-3 rounded-full glass flex items-center justify-center text-xs font-bold text-[#e2bfb0] hover:text-primary hover:border-primary/30 transition-all"
+            aria-label={`تفاصيل وسجل ${item.nameAr}`}>
+            التفاصيل والسجل
           </Link>
           {userRole === "ADMIN" && (
             <button
