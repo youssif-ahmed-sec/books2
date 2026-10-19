@@ -269,6 +269,9 @@ async def get_order_quotation(
     order["amount_received"] = (await db.execute(select(func.coalesce(func.sum(Payment.amount), 0)).where(
         Payment.order_id == order_id, Payment.kind == "SALE",
     ))).scalar_one()
+    order["received_method"] = (await db.execute(select(Payment.method).where(
+        Payment.order_id == order_id, Payment.kind == "SALE",
+    ).order_by(Payment.created_at.asc()).limit(1))).scalar_one_or_none()
     product_ids = {item["product_id"] for item in order["items"]}
     names = dict((await db.execute(select(Product.id, Product.name_ar).where(Product.id.in_(product_ids)))).all()) if product_ids else {}
     unit_ids = {item["unit_id"] for item in order["items"]}

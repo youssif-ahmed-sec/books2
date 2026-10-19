@@ -3,5 +3,5 @@
 3:I[6152,["1188","static/chunks/1188-6e901a875082972f.js","2752","static/chunks/app/product-approvals/layout-fc1a20559eb85423.js"],"default"]
 4:I[7121,[],""]
 5:I[4581,[],""]
-0:{"rsc":["$","$1","c",{"children":[null,["$","$L2",null,{"Component":"$3","slots":{"children":["$","$L4",null,{"parallelRouterKey":"children","template":["$","$L5",null,{}]}]},"serverProvidedParams":{"params":{},"promises":["$@6"]}}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"t59vbQI4idazqewGdP1ia"}
+0:{"rsc":["$","$1","c",{"children":[null,["$","$L2",null,{"Component":"$3","slots":{"children":["$","$L4",null,{"parallelRouterKey":"children","template":["$","$L5",null,{}]}]},"serverProvidedParams":{"params":{},"promises":["$@6"]}}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"nDZms2305ljm095NVhXIi"}
 6:"$0:rsc:props:children:1:props:serverProvidedParams:params"

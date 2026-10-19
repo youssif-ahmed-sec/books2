@@ -17,6 +17,7 @@ export const orderStatusLabels: Record<string, string> = {
 
 export const orderSourceLabels: Record<string, string> = {
   "Walk-In Customer": "عميل مباشر",
+  Delivery: "دليفري",
   WhatsApp: "واتساب",
   Messenger: "ماسنجر",
   "Phone Call": "مكالمة هاتفية",

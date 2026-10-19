@@ -173,4 +173,5 @@ class QuotationResponse(OrderResponse):
     customer_address: Optional[str] = None
     employee_name: Optional[str] = None
     amount_received: float = 0
+    received_method: Optional[str] = None
     items: List[QuotationItemResponse]

@@ -13,6 +13,7 @@ interface OrderDocument {
   customer_address?: string | null;
   employee_name?: string | null;
   amount_received?: number;
+  received_method?: string | null;
   source?: string | null;
   total_amount: number;
   discount_amount: number;
@@ -62,6 +63,7 @@ export async function printOrderInvoice(orderId: string): Promise<void> {
     customer_address: order.customer_address,
     employee_name: order.employee_name,
     operation_type: "sale",
+    source: order.source,
     subtotal: order.items.reduce((sum, item) => sum + Number(item.quantity_requested) * Number(item.unit_price), 0),
     discount_amount: order.discount_amount,
     shipping_cost: order.shipping_cost,
@@ -69,9 +71,11 @@ export async function printOrderInvoice(orderId: string): Promise<void> {
     total_amount: order.total_amount,
     payment_method: order.payment_method,
     amount_received: order.amount_received,
+    received_method: order.received_method,
     remaining_amount: Math.max(0, Number(order.total_amount) - Number(order.amount_received || 0)),
     cart: order.items.map(item => ({
-      name: item.unit_name ? `${item.product_name} (${item.unit_name})` : item.product_name,
+      name: item.product_name,
+      unit: item.unit_name,
       qty: item.quantity_requested,
       price: item.unit_price,
     })),

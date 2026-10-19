@@ -24,7 +24,7 @@ async def audit_history(
         query = query.where(or_(
             AuditLog.action.ilike(pattern, escape="\\"), AuditLog.entity_type.ilike(pattern, escape="\\"),
             AuditLog.entity_id.ilike(pattern, escape="\\"), cast(AuditLog.id, String).ilike(pattern, escape="\\"),
-            cast(AuditLog.user_id, String).ilike(pattern, escape="\\"),
+            cast(AuditLog.user_id, String).ilike(pattern, escape="\\"), User.full_name.ilike(pattern, escape="\\"),
         ))
     rows = (await db.execute(query.order_by(AuditLog.created_at.desc()).offset(offset).limit(limit))).all()
     return [{"id": row.id, "user_id": row.user_id, "user_name": full_name or username or email,
