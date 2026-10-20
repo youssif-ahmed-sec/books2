@@ -17,10 +17,12 @@ interface OrderDocument {
   source?: string | null;
   total_amount: number;
   discount_amount: number;
+  discount_percent?: number | null;
+  wallet_fee_amount?: number;
   shipping_cost: number;
   tax_amount: number;
   payment_method: string;
-  items: Array<{ product_name: string; unit_name?: string; quantity_requested: number; unit_price: number }>;
+  items: Array<{ product_name: string; unit_name?: string; price_level: string; quantity_requested: number; unit_price: number }>;
 }
 
 export async function sendLocalPrint(order: Record<string, unknown>, receiptType: LocalPrintType): Promise<void> {
@@ -66,6 +68,8 @@ export async function printOrderInvoice(orderId: string): Promise<void> {
     source: order.source,
     subtotal: order.items.reduce((sum, item) => sum + Number(item.quantity_requested) * Number(item.unit_price), 0),
     discount_amount: order.discount_amount,
+    discount_percent: order.discount_percent,
+    wallet_fee_amount: order.wallet_fee_amount,
     shipping_cost: order.shipping_cost,
     tax_amount: order.tax_amount,
     total_amount: order.total_amount,
@@ -76,6 +80,7 @@ export async function printOrderInvoice(orderId: string): Promise<void> {
     cart: order.items.map(item => ({
       name: item.product_name,
       unit: item.unit_name,
+      price_level: item.price_level,
       qty: item.quantity_requested,
       price: item.unit_price,
     })),

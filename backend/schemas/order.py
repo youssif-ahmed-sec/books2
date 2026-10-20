@@ -31,10 +31,11 @@ class OrderCreate(BaseModel):
     status:          OrderStatusEnum = OrderStatusEnum.CLOSED
     source:          Optional[str] = "Walk-In Customer"
     discount_amount: Decimal = Field(default=Decimal("0"), ge=0, allow_inf_nan=False)
+    discount_percent: Optional[Decimal] = Field(default=None, ge=0, le=100, max_digits=5, decimal_places=2, allow_inf_nan=False)
     expected_total: Optional[Decimal] = Field(default=None, ge=0, allow_inf_nan=False)
     payment_method:  PaymentMethod = "Cash"
     amount_received: Optional[Decimal] = Field(default=None, ge=0, allow_inf_nan=False, max_digits=12, decimal_places=2)
-    received_method: Optional[Literal["Cash", "Instapay", "Wallet"]] = None
+    received_method: Optional[Literal["Cash", "Instapay", "Wallet", "Credit Card"]] = None
     notes:           Optional[str] = None
     items:           List[OrderItemCreate]
     request_id:      UUID
@@ -152,6 +153,8 @@ class OrderResponse(BaseModel):
     total_amount:    float
     tax_amount:      float
     discount_amount: float
+    discount_percent: Optional[float] = None
+    wallet_fee_amount: float = 0
     shipping_cost:   float
     payment_method:  str
     notes:           Optional[str] = None

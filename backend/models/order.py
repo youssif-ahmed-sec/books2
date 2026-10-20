@@ -57,6 +57,8 @@ class Order(Base):
     total_amount    = Column(Numeric(12, 2), nullable=False, default=0)
     tax_amount      = Column(Numeric(12, 2), nullable=False, default=0)
     discount_amount = Column(Numeric(12, 2), nullable=False, default=0)
+    discount_percent = Column(Numeric(5, 2), nullable=True)
+    wallet_fee_amount = Column(Numeric(12, 2), nullable=False, default=0)
     shipping_cost   = Column(Numeric(12, 2), nullable=False, default=0)
 
     payment_method  = Column(String, default="Cash")

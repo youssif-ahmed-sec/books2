@@ -102,15 +102,14 @@ class PrinterManager:
         y += 48 * scale
         date_text, time_text = self._format_date_parts(created_at)
         number_label = "رقم الفاتورة:" if title.startswith("فاتورة") else "رقم المستند:"
-        draw.text((width - margin, y), number_label, fill="black", font=fonts["small"], anchor="ra", direction="rtl")
-        draw.text((margin, y), str(number), fill="black", font=fonts["tiny"], anchor="la")
+        draw.text((width - margin, y), f"{number_label} {number}", fill="black", font=fonts["small"], anchor="ra", direction="rtl")
         y += 34 * scale
         draw.text((width - margin, y), f"التاريخ: {date_text}", fill="black", font=fonts["small"], anchor="ra", direction="rtl")
-        draw.text((width // 2 - margin, y), f"الوقت: {time_text}", fill="black", font=fonts["tiny"], anchor="ra", direction="rtl")
+        draw.text((width // 2 - margin, y), f"الوقت: {time_text}", fill="black", font=fonts["small"], anchor="ra", direction="rtl")
         y += 40 * scale
         x = margin
         while x < width - margin:
-            draw.line((x, y, min(x + 10 * scale, width - margin), y), fill="black", width=scale)
+            draw.line((x, y, min(x + 10 * scale, width - margin), y), fill="black", width=2 * scale)
             x += 16 * scale
         y += 18 * scale
         if employee and title != "فاتورة بيع":
@@ -118,7 +117,8 @@ class PrinterManager:
             y += 34 * scale
         return y
 
-    def _document_barcode(self, image: Image.Image, y: int, value: Any, scale: int) -> int:
+    def _document_barcode(self, image: Image.Image, y: int, value: Any, scale: int,
+                          *, large: bool = False, show_text: bool = True) -> int:
         code = str(value or "").strip()
         if not code or len(code) > 64 or any(ord(char) < 32 or ord(char) > 126 for char in code):
             raise ValueError("Document barcode must contain 1-64 printable ASCII characters")
@@ -130,13 +130,17 @@ class PrinterManager:
         if ink:
             rendered = rendered.crop((0, max(0, ink[1] - 2), rendered.width, min(rendered.height, ink[3] + 2)))
         max_width = image.width - 2 * self.MARGIN * scale
-        if rendered.width > max_width:
+        if large:
+            rendered = rendered.resize((min(max_width, 280 * scale), 60 * scale), Image.Resampling.NEAREST)
+        elif rendered.width > max_width:
             rendered = rendered.resize((max_width, 80 * scale), Image.Resampling.NEAREST)
         image.paste(rendered, ((image.width - rendered.width) // 2, y))
         y += rendered.height + 12 * scale
-        draw = _PrintDraw(image)
-        draw.text((image.width // 2, y), code, fill="black", font=self._font("arialbd", 21 * scale), anchor="ma")
-        return y + 32 * scale
+        if show_text:
+            draw = _PrintDraw(image)
+            draw.text((image.width // 2, y), code, fill="black", font=self._font("arialbd", 21 * scale), anchor="ma")
+            y += 32 * scale
+        return y
 
     def _quantity_table(self, image: Image.Image, y: int, rows: List[Dict[str, Any]], scale: int) -> int:
         draw = _PrintDraw(image)
@@ -384,9 +388,9 @@ class PrinterManager:
         return {
             "body": self._font("arial", size(22)),
             "small": self._font("arialbd", size(22)),
-            "tiny": self._font("arial", size(18)),
-            "item": self._font("arial", size(22)),
-            "table": self._font("arialbd", size(16)),
+            "tiny": self._font("arialbd", size(18)),
+            "item": self._font("arialbd", size(22)),
+            "table": self._font("arialbd", size(19)),
             "customer": self._font("arial", size(22)),
             "footer": self._font("arialbd", size(28)),
             "order": self._font("arialbd", size(28)),
@@ -563,10 +567,10 @@ class PrinterManager:
             if dash:
                 x = margin
                 while x < content_right:
-                    draw.line((x, y_pos, min(x + u(12), content_right), y_pos), fill=fill, width=scale)
+                    draw.line((x, y_pos, min(x + u(12), content_right), y_pos), fill=fill, width=2 * scale)
                     x += u(18)
             else:
-                draw.line((margin, y_pos, content_right, y_pos), fill=fill, width=scale)
+                draw.line((margin, y_pos, content_right, y_pos), fill=fill, width=2 * scale)
 
         def wrap_text(text: Any, font, max_width: int) -> list[str]:
             raw = str(text or "")
@@ -622,22 +626,20 @@ class PrinterManager:
         customer_phone = self._value(order, "customer_phone", "customerPhone", default="")
         customer_address = self._address_to_text(self._value(order, "customer_address", "customerAddress", default=""))
         payment_method = self._value(order, "payment_method", default="")
-        payment_names = {"Cash": "نقدي", "Instapay": "إنستاباي", "Wallet": "محفظة", "Deferred Payment": "آجل"}
+        payment_names = {"Cash": "نقدي", "Instapay": "إنستاباي", "Wallet": "محفظة", "Credit Card": "فيزا", "Deferred Payment": "آجل"}
         payment_label = payment_names.get(payment_method, payment_method)
         def info_pair(right_label: str, right_value: Any, left_label: str = "", left_value: Any = ""):
             nonlocal y
             right_text = f"{right_label}: {right_value}" if right_value else ""
             left_text = f"{left_label}: {left_value}" if left_value else ""
             half_width = width // 2 - 2 * margin
-            if right_text and left_text and all(text_size(value, fonts["small"])[0] <= half_width for value in (right_text, left_text)):
-                draw_right(right_text, y, fonts["small"])
-                draw_right(left_text, y, fonts["small"], width // 2 - margin)
-                y += u(33)
-                return
-            for value in (right_text, left_text):
-                for part in wrap_text(value, fonts["small"], width - 2 * margin) if value else []:
-                    draw_right(part, y, fonts["small"])
-                    y += u(33)
+            right_lines = wrap_text(right_text, fonts["small"], half_width) if right_text else []
+            left_lines = wrap_text(left_text, fonts["small"], half_width) if left_text else []
+            for index, part in enumerate(right_lines):
+                draw_right(part, y + index * u(33), fonts["small"])
+            for index, part in enumerate(left_lines):
+                draw_right(part, y + index * u(33), fonts["small"], width // 2 - margin)
+            y += max(len(right_lines), len(left_lines), 1) * u(33)
 
         info_pair("العميل", customer_name, "الهاتف", customer_phone)
         source = self._value(order, "source", default="")
@@ -650,12 +652,14 @@ class PrinterManager:
         y += u(16)
 
         item_right = content_right - u(8)
-        unit_x = margin + u(310)
-        qty_x = margin + u(237)
-        price_x = margin + u(148)
-        total_x = margin + u(48)
+        level_x = margin + u(330)
+        unit_x = margin + u(250)
+        qty_x = margin + u(195)
+        price_x = margin + u(125)
+        total_x = margin + u(43)
 
         draw_right("الصنف", y, fonts["table"], item_right)
+        draw_text("التسعير", level_x, y, fonts["table"], "ma")
         draw_text("الوحدة", unit_x, y, fonts["table"], "ma")
         draw_text("العدد", qty_x, y, fonts["table"], "ma")
         draw_text("السعر", price_x, y, fonts["table"], "ma")
@@ -672,9 +676,11 @@ class PrinterManager:
             unit = item_data.get("unit") or cart_item.get("unit") or ""
             total = qty * price
 
-            name_lines = wrap_text(name, fonts["item"], u(190))
+            name_lines = wrap_text(name, fonts["item"], u(154))
             row_start_y = y
-            draw_text(str(unit)[:12], unit_x, row_start_y, fonts["tiny"], "ma")
+            unit_lines = wrap_text(str(unit), fonts["tiny"], u(65))
+            for line_index, unit_line in enumerate(unit_lines):
+                draw_text(unit_line, unit_x, row_start_y + line_index * u(30), fonts["tiny"], "ma")
             draw_text(f"{qty:g}", qty_x, row_start_y, fonts["item"], "ma")
             for line_index, line_text in enumerate(name_lines):
                 draw.text(
@@ -685,10 +691,18 @@ class PrinterManager:
                     anchor="ra",
                     direction="rtl" if is_arabic(line_text) else "ltr",
                 )
+            price_level = item_data.get("price_level") or cart_item.get("price_level")
+            level_lines = []
+            if price_level:
+                level_names = {"Retail": "مستهلك", "Semi Wholesale": "نصف جملة", "Wholesale": "جملة",
+                               "Super Wholesale": "سوبر جملة", "VIP": "كبار العملاء"}
+                level_lines = wrap_text(level_names.get(price_level, price_level), fonts["tiny"], u(72))
+                for line_index, level_line in enumerate(level_lines):
+                    draw_text(level_line, level_x, row_start_y + line_index * u(30), fonts["tiny"], "ma")
             draw_text(f"{price:.2f}", price_x, row_start_y, fonts["tiny"], "ma")
             draw_text(f"{total:.2f}", total_x, row_start_y, fonts["tiny"], "ma")
-            y += max(u(44), len(name_lines) * u(34) + u(10))
-            draw.line((margin, y, content_right, y), fill="#eeeeee", width=scale)
+            y += max(u(44), len(name_lines) * u(34), len(level_lines) * u(30), len(unit_lines) * u(30)) + u(10)
+            draw.line((margin, y, content_right, y), fill="black", width=2 * scale)
             y += u(12)
 
         y += u(2)
@@ -703,11 +717,14 @@ class PrinterManager:
         y += u(34)
 
         discount_amount = self._number(self._value(order, "discount_amount", "discountAmount", default=0))
+        discount_percent = self._value(order, "discount_percent", default=None)
         discount_reason = self._value(order, "discount_reason", "discountReason", default="")
         
         if discount_amount > 0:
             discount_label = "الخصم:"
-            if discount_reason:
+            if discount_percent is not None:
+                discount_label = f"الخصم ({self._number(discount_percent):g}٪):"
+            elif discount_reason:
                 discount_label = f"الخصم ({discount_reason}):"
             draw_right(discount_label, y, fonts["small"])
             draw_text(f"- {discount_amount:.2f}", margin, y, fonts["small"])
@@ -723,6 +740,12 @@ class PrinterManager:
         if tax_amount > 0:
             draw_right("ضريبة ضمن السعر:", y, fonts["small"])
             draw_text(f"{tax_amount:.2f}", margin, y, fonts["small"])
+            y += u(34)
+
+        wallet_fee = self._number(self._value(order, "wallet_fee_amount", default=0))
+        if wallet_fee > 0:
+            draw_right("ضريبة المحفظة (١٪):", y, fonts["small"])
+            draw_text(f"+ {wallet_fee:.2f}", margin, y, fonts["small"])
             y += u(34)
 
         y += u(2)
@@ -741,17 +764,19 @@ class PrinterManager:
             draw_right(f"المتبقي: {remaining:.2f} ج.م", y, fonts["small"])
             y += u(34)
 
-        line(y, fill="#777777", dash=True)
+        line(y, dash=True)
         y += u(16)
         draw_center("شكرًا لزيارتكم", y, fonts["footer"])
         y += u(34)
-        y = self._document_barcode(image, y + u(18), order_number, scale)
+        y = self._document_barcode(image, y + u(18), order_number, scale, large=True, show_text=False)
         draw_center("امسح الباركود للبحث عن الفاتورة", y, fonts["tiny"])
         y += u(35)
         line(y, dash=True)
-        y += u(8)
+        y += u(14)
+        draw_center("الزقازيق - الشرقية", y, fonts["small"])
+        y += u(38)
 
-        return image.crop((0, 0, width, y))
+        return image.crop((0, 0, width, y)).convert("L").point(lambda pixel: 0 if pixel < 210 else 255).convert("RGB")
 
     def _generate_barcode_image(self, product: Dict[str, Any]) -> Image.Image:
         scale = self.RENDER_SCALE

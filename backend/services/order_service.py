@@ -171,6 +171,8 @@ class OrderService:
             "total_amount":    float(order.total_amount),
             "tax_amount":      float(order.tax_amount),
             "discount_amount": float(order.discount_amount),
+            "discount_percent": float(order.discount_percent) if order.discount_percent is not None else None,
+            "wallet_fee_amount": float(order.wallet_fee_amount or 0),
             "shipping_cost":   float(order.shipping_cost),
             "payment_method":  order.payment_method,
             "notes":           order.notes,
@@ -237,6 +239,8 @@ class OrderService:
             status=order_in.status.value,
             source=order_in.source if hasattr(order_in, "source") and order_in.source else OrderSourceEnum.WALK_IN.value,
             discount_amount=Decimal(str(order_in.discount_amount)),
+            discount_percent=order_in.discount_percent,
+            wallet_fee_amount=Decimal("0"),
             shipping_cost=Decimal("0"),
             payment_method=order_in.payment_method,
             notes=order_in.notes,
@@ -361,15 +365,32 @@ class OrderService:
             grand_total += item_total
             items_out.append(order_item)
 
-        if Decimal(str(order_in.discount_amount)) > grand_total:
+        discount_amount = Decimal(str(order_in.discount_amount))
+        if discount_amount > grand_total:
             await db.rollback()
             raise ValueError("Discount cannot exceed the order subtotal.")
-        order.total_amount = grand_total - Decimal(str(order_in.discount_amount))
+        if order_in.discount_percent is not None:
+            percentage_discount = (grand_total * order_in.discount_percent / Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            if discount_amount != percentage_discount:
+                await db.rollback()
+                raise ValueError("Discount percentage does not match the order subtotal.")
+        base_total = grand_total - discount_amount
+        wallet_base = Decimal("0")
+        if order_in.payment_method == "Wallet":
+            wallet_base = base_total
+        elif order_in.payment_method == "Deferred Payment" and order_in.received_method == "Wallet":
+            wallet_base = order_in.amount_received or Decimal("0")
+        wallet_fee = (wallet_base / Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        order.wallet_fee_amount = wallet_fee
+        order.total_amount = base_total + wallet_fee
         if order_in.expected_total is not None and order.total_amount != order_in.expected_total:
             await db.rollback()
             raise ValueError("Prices changed. Refresh the cart before checkout.")
-        order.tax_amount = OrderService._included_tax(items_out, Decimal(str(order_in.discount_amount)))
-        await OrderService._settle_sale(db, order, current_user_id, order_in.amount_received, order_in.received_method)
+        order.tax_amount = OrderService._included_tax(items_out, discount_amount)
+        collected_base = order_in.amount_received
+        if order_in.payment_method == "Deferred Payment" and order_in.received_method == "Wallet" and collected_base is not None:
+            collected_base += wallet_fee
+        await OrderService._settle_sale(db, order, current_user_id, collected_base, order_in.received_method)
         await OrderService._record_customer_sale(db, order.customer_id, order.total_amount)
         db.add(AuditLog(user_id=current_user_id, action="CREATE_POS_INVOICE", entity_type="Order", entity_id=str(order.id), new_value={"total": str(order.total_amount), "payment_method": order.payment_method}))
         await db.commit()

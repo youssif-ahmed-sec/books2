@@ -24,6 +24,7 @@ interface CheckoutPayload {
   status: string;
   source: string;
   discount_amount: number;
+  discount_percent?: number;
   expected_total: number;
   payment_method: string;
   amount_received?: number;
@@ -36,11 +37,11 @@ interface CheckoutPayload {
 interface CompletedCheckout {
   id: string; public_number: number; created_at: string; payment_method: string;
   customer_address?: string | null;
-  discount_amount: number; total_amount: number;
+  discount_amount: number; discount_percent?: number | null; wallet_fee_amount?: number; total_amount: number;
   items: { product_id: string; unit_id: string; price_level: string; quantity_requested: number; unit_price: number; total_price: number }[];
 }
 
-interface PrintedOrder { id: string; publicNumber: number; createdAt: string; employeeName: string; paymentMethod: string; receivedMethod?: string; subtotal: number; discount: number; totalAmount: number; isDelivery?: boolean; customerName?: string; customerPhone?: string; customerAddress?: string; amountReceived?: number; remainingAmount?: number }
+interface PrintedOrder { id: string; publicNumber: number; createdAt: string; employeeName: string; paymentMethod: string; receivedMethod?: string; subtotal: number; discount: number; discountPercent?: number | null; walletFee?: number; totalAmount: number; isDelivery?: boolean; customerName?: string; customerPhone?: string; customerAddress?: string; amountReceived?: number; remainingAmount?: number }
 
 interface ProductUnit {
   id: string;
@@ -121,7 +122,8 @@ interface PosDraft {
   cart: CartItem[];
   warehouseId: string;
   selectedCustomer: string;
-  discount: number;
+  discountPercent?: number;
+  discount?: number;
   paymentMethod: string;
   cashReceived: string;
   isCreditSale?: boolean;
@@ -153,7 +155,7 @@ const readHeldCarts = (userId: string): HeldCart[] => {
         Date.now() - row.savedAt < heldLifetimeMs && row.draft && validCart(row.draft.cart))) : [];
   } catch { return []; }
 };
-const posPaymentMethods = ["Cash", "Instapay", "Wallet"] as const;
+const posPaymentMethods = ["Cash", "Instapay", "Wallet", "Credit Card"] as const;
 const customerTypes = [
   { value: "Retail Customer", label: "عميل تجزئة" },
   { value: "Student", label: "طالب" },
@@ -234,7 +236,7 @@ export default function POSPage() {
   const [savingCustomer, setSavingCustomer] = useState(false);
   const [userRole, setUserRole] = useState<UserRole | null>(null);
   const [cashierName, setCashierName] = useState("");
-  const [discount, setDiscount] = useState(0);
+  const [discountPercent, setDiscountPercent] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState("Cash");
   const [walletAvailable, setWalletAvailable] = useState(false);
   const [warehouses, setWarehouses] = useState<{ id: string; name: string }[]>([]);
@@ -285,7 +287,8 @@ export default function POSPage() {
             cartRef.current = restoredCart;
             setWarehouseId(current => current || saved.warehouseId || "");
             setSelectedCustomer(saved.selectedCustomer || "");
-            setDiscount(Number(saved.discount) || 0);
+            setDiscountPercent(Number(saved.discountPercent) || 0);
+            if (saved.discount && saved.discountPercent == null) setCheckoutError("الخصم القديم كان بالجنيه؛ أدخله كنسبة قبل البيع.");
             setPaymentMethod(posPaymentMethods.some(method => method === saved.paymentMethod) ? saved.paymentMethod : "Cash");
             setCashReceived(saved.isCreditSale ? saved.cashReceived || "" : "");
             setIsCreditSale(Boolean(saved.isCreditSale));
@@ -312,7 +315,7 @@ export default function POSPage() {
               cartRef.current = attempt.draft.cart;
               setWarehouseId(attempt.draft.warehouseId);
               setSelectedCustomer(attempt.draft.selectedCustomer);
-              setDiscount(attempt.draft.discount);
+              setDiscountPercent(Number(attempt.draft.discountPercent) || 0);
               setPaymentMethod(attempt.draft.paymentMethod);
               setCashReceived(attempt.draft.cashReceived);
               setIsCreditSale(Boolean(attempt.draft.isCreditSale));
@@ -352,13 +355,13 @@ export default function POSPage() {
       return;
     }
     const saved: PosDraft = { savedAt: Date.now(), cart, warehouseId, selectedCustomer,
-      discount, paymentMethod, cashReceived, isCreditSale, isDelivery, saleCustomerName,
+      discountPercent, paymentMethod, cashReceived, isCreditSale, isDelivery, saleCustomerName,
       customerPhone, customerAddress, customerType, checkoutRequest: checkoutRequest.current };
     try { sessionStorage.setItem(key, JSON.stringify(saved)); } catch { /* Storage is optional; checkout still works. */ }
-  }, [draftReady, cart, warehouseId, selectedCustomer, discount, paymentMethod, cashReceived, isCreditSale, isDelivery, saleCustomerName, customerPhone, customerAddress, customerType]);
+  }, [draftReady, cart, warehouseId, selectedCustomer, discountPercent, paymentMethod, cashReceived, isCreditSale, isDelivery, saleCustomerName, customerPhone, customerAddress, customerType]);
 
   const currentDraft = (): PosDraft => ({ savedAt: timestamp(), cart, warehouseId, selectedCustomer,
-    discount, paymentMethod, cashReceived, isCreditSale, isDelivery, saleCustomerName,
+    discountPercent, paymentMethod, cashReceived, isCreditSale, isDelivery, saleCustomerName,
     customerPhone, customerAddress, customerType, checkoutRequest: checkoutRequest.current });
 
   const persistHeld = (next: HeldCart[]) => {
@@ -381,7 +384,7 @@ export default function POSPage() {
     setCart([]); cartRef.current = []; checkoutRequest.current = null;
     setSelectedCustomer(""); setSaleCustomerName(""); setCustomerName(""); setCustomerPhone("");
     setCustomerAddress(""); setCustomerType("Retail Customer"); setCustomerLookup("idle");
-    setDiscount(0); setCashReceived("");
+    setDiscountPercent(0); setCashReceived("");
     setIsCreditSale(false); setIsDelivery(false); setPaymentMethod("Cash"); setCheckoutError(""); setCartReviewError("");
     searchInput.current?.focus();
   };
@@ -428,14 +431,15 @@ export default function POSPage() {
       setCart(result.reviewed); cartRef.current = result.reviewed;
       const customerMissing = Boolean(saved.selectedCustomer && !customers.some(customer => customer.id === saved.selectedCustomer));
       setSelectedCustomer(customerMissing ? "" : saved.selectedCustomer);
-      setDiscount(saved.discount); setPaymentMethod(saved.paymentMethod);
+      setDiscountPercent(Number(saved.discountPercent) || 0); setPaymentMethod(saved.paymentMethod);
       setCashReceived(saved.cashReceived); setIsCreditSale(Boolean(saved.isCreditSale)); setIsDelivery(Boolean(saved.isDelivery));
       setSaleCustomerName(saved.saleCustomerName || ""); setCustomerName(saved.saleCustomerName || "");
       setCustomerPhone(saved.customerPhone || ""); setCustomerAddress(saved.customerAddress || "");
       setCustomerType(saved.customerType || "Retail Customer"); setCustomerLookup("idle");
       checkoutRequest.current = null;
       setCartReviewError(result.issue || (customerMissing ? "العميل المسجل في السلة لم يعد متاحًا. اختر عميلًا قبل البيع." : ""));
-      setCheckoutError(result.priceChanged ? "تغيّر سعر صنف في السلة؛ راجع الإجمالي قبل إتمام البيع." : "");
+      setCheckoutError(result.priceChanged ? "تغيّر سعر صنف في السلة؛ راجع الإجمالي قبل إتمام البيع." :
+        saved.discount && saved.discountPercent == null ? "الخصم القديم كان بالجنيه؛ أدخله كنسبة قبل البيع." : "");
       persistHeld(heldCarts.filter(row => row.id !== held.id));
       setHeldOpen(false);
     } catch (error) {
@@ -800,20 +804,28 @@ export default function POSPage() {
     setCart(prev => prev.filter(item => item.id !== id));
   };
 
-  const subtotal = Math.round(cart.reduce((sum, item) => sum + item.totalPrice, 0) * 100) / 100;
-  const totalAmount = Math.max(0, Math.round((subtotal - discount) * 100) / 100);
+  const subtotalCents = Math.round(cart.reduce((sum, item) => sum + item.totalPrice, 0) * 100);
+  const subtotal = subtotalCents / 100;
+  const discountCents = Math.round(subtotalCents * discountPercent / 100);
+  const discountAmount = discountCents / 100;
+  const baseTotalCents = Math.max(0, subtotalCents - discountCents);
+  const baseTotal = baseTotalCents / 100;
   const validReceivedAmount = /^\d+(?:\.\d{1,2})?$/.test(cashReceived);
   const receivedAmount = validReceivedAmount ? Number(cashReceived) : 0;
+  const receivedCents = Math.round(receivedAmount * 100);
+  const walletFeeCents = paymentMethod === "Wallet" ? Math.round((isCreditSale ? receivedCents : baseTotalCents) / 100) : 0;
+  const walletFee = walletFeeCents / 100;
+  const totalAmount = (baseTotalCents + walletFeeCents) / 100;
   const checkoutBlock = savingCustomer ? "جارٍ حفظ العميل" : !referenceReady || !draftReady ? "جارٍ تحميل بيانات البيع" : referenceError || (!warehouseId ? "اختر مخزن البيع" :
     cart.length === 0 ? "أضف صنفًا إلى السلة" :
-    !Number.isFinite(discount) || discount < 0 || discount > subtotal || Math.abs(discount * 100 - Math.round(discount * 100)) > 1e-6 ? "راجع قيمة الخصم (رقمان بعد الفاصلة كحد أقصى)" :
+    !Number.isFinite(discountPercent) || discountPercent < 0 || discountPercent > 100 || Math.abs(discountPercent * 100 - Math.round(discountPercent * 100)) > 1e-6 ? "راجع نسبة الخصم من 0 إلى 100 (رقمان بعد الفاصلة كحد أقصى)" :
     customerPhone.length === 11 && (customerLookup === "idle" || customerLookup === "searching") ? "جارٍ البحث عن العميل" :
     customerPhone.length === 11 && customerLookup === "error" ? "تعذر البحث عن رقم العميل. حاول مجددًا" :
     customerPhone.length > 0 && !selectedCustomer && customerLookup !== "new" ? "أكمل رقم التليفون أو امسحه قبل البيع" :
     isCreditSale && !selectedCustomer && customerLookup !== "new" ? "اكتب رقم تليفون العميل للبيع الآجل" :
     userRole !== "ADMIN" && selectedCustomer && cart.some(item => item.priceLevel !== (customers.find(customer => customer.id === selectedCustomer)?.price_level || "Retail")) ? "راجع مستوى سعر الأصناف مع العميل قبل البيع" :
     isCreditSale && !validReceivedAmount ? "اكتب المبلغ المستلم، واكتب 0 لو البيع كله آجل" :
-    isCreditSale && receivedAmount > totalAmount ? "المبلغ المستلم لا يتجاوز صافي البيع" :
+    isCreditSale && receivedAmount > baseTotal ? "المبلغ المسدد لا يتجاوز صافي المشتريات" :
     !posPaymentMethods.some(method => method === paymentMethod) ? "اختر طريقة دفع متاحة" :
     paymentMethod === "Wallet" && (isCreditSale ? receivedAmount > 0 : true) && !walletAvailable ? "المحفظة تحتاج تحديث السيرفر قبل البيع بها" :
     paymentMethod === "Cash" && (!isCreditSale || receivedAmount > 0) && shiftOpen !== true ? (shiftError || "افتح وردية الصندوق قبل البيع النقدي") : "");
@@ -822,19 +834,22 @@ export default function POSPage() {
     playUiSound("saleComplete");
     const serverItemFor = (item: CartItem) => res.items.find(row => row.product_id === item.productId && row.unit_id === item.unitId && row.price_level === item.priceLevel);
     const serverSubtotal = res.items.reduce((sum, item) => sum + Number(item.total_price), 0);
-    const paid = sold.isCreditSale ? Number(sold.cashReceived) : Number(res.total_amount);
+    const walletFeeAmount = Number(res.wallet_fee_amount || 0);
+    const paid = sold.isCreditSale ? Number(sold.cashReceived) + (sold.paymentMethod === "Wallet" ? walletFeeAmount : 0) : Number(res.total_amount);
     const customerName = customers.find(customer => customer.id === sold.selectedCustomer)?.name || sold.saleCustomerName || "عميل نقدي";
     setLastOrder({ id: res.id, publicNumber: Number(res.public_number), createdAt: res.created_at,
       employeeName: cashierName, paymentMethod: sold.isCreditSale ? "آجل" : res.payment_method,
       receivedMethod: sold.isCreditSale && paid > 0 ? sold.paymentMethod : undefined, subtotal: serverSubtotal,
-      discount: Number(res.discount_amount), totalAmount: Number(res.total_amount),
+      discount: Number(res.discount_amount), discountPercent: res.discount_percent,
+      walletFee: walletFeeAmount, totalAmount: Number(res.total_amount),
       isDelivery: Boolean(sold.isDelivery),
       amountReceived: paid,
-      remainingAmount: sold.isCreditSale ? Math.max(0, Number(res.total_amount) - paid) : 0,
+      remainingAmount: Math.max(0, Number(res.total_amount) - paid),
       customerName, customerPhone: sold.customerPhone,
       customerAddress: res.customer_address ?? sold.customerAddress });
     setReceiptItems(sold.cart.map(item => ({ ...item,
       quantity: Number(serverItemFor(item)?.quantity_requested ?? item.quantity),
+      priceLevel: serverItemFor(item)?.price_level ?? item.priceLevel,
       unitPrice: Number(serverItemFor(item)?.unit_price ?? item.unitPrice) })));
     const receiptJob = {
       id: res.id, order_number: res.public_number, created_at: res.created_at,
@@ -846,11 +861,14 @@ export default function POSPage() {
       payment_method: sold.isCreditSale ? "آجل" : res.payment_method,
       received_method: sold.isCreditSale && paid > 0 ? sold.paymentMethod : null,
       amount_received: paid,
-      remaining_amount: sold.isCreditSale ? Math.max(0, Number(res.total_amount) - paid) : 0,
-      subtotal: serverSubtotal, discount_amount: Number(res.discount_amount), total_amount: Number(res.total_amount),
+      remaining_amount: Math.max(0, Number(res.total_amount) - paid),
+      subtotal: serverSubtotal, discount_amount: Number(res.discount_amount),
+      discount_percent: res.discount_percent, wallet_fee_amount: walletFeeAmount,
+      total_amount: Number(res.total_amount),
       cart: sold.cart.map(item => ({ qty: Number(serverItemFor(item)?.quantity_requested ?? item.quantity),
         price: Number(serverItemFor(item)?.unit_price ?? item.unitPrice),
-        name: item.nameAr || "صنف غير معروف", unit: item.unitName })),
+        name: item.nameAr || "صنف غير معروف", unit: item.unitName,
+        price_level: serverItemFor(item)?.price_level ?? item.priceLevel })),
     };
     setLastPrintJob(receiptJob);
     setCart([]); cartRef.current = []; checkoutRequest.current = null;
@@ -861,7 +879,7 @@ export default function POSPage() {
       } catch { /* The committed sale is still shown on screen. */ }
     }
     setPendingCheckout(null); setAttemptNotice(""); setCheckoutError(""); setCartReviewError("");
-    setDiscount(0); setCashReceived(""); setIsCreditSale(false); setIsDelivery(false); setSaleCustomerName("");
+    setDiscountPercent(0); setCashReceived(""); setIsCreditSale(false); setIsDelivery(false); setSaleCustomerName("");
     setSelectedCustomer(""); setCustomerName(""); setCustomerPhone(""); setCustomerAddress("");
     setNewAddress(""); setAddingAddress(false);
     catalogCache.current = null; setCatalogRefresh(value => value + 1);
@@ -925,7 +943,8 @@ export default function POSPage() {
         warehouse_id: warehouseId,
         status: "Delivered",
         source: isDelivery ? "Delivery" : "Walk-In Customer",
-        discount_amount: discount,
+        discount_amount: discountAmount,
+        discount_percent: discountPercent,
         expected_total: totalAmount,
         payment_method: isCreditSale ? "Deferred Payment" : paymentMethod,
         items: saleCart.map(item => ({
@@ -1097,23 +1116,25 @@ export default function POSPage() {
               </div>
 
               <div className="flex items-center justify-between gap-4">
-                <span className="text-[#e2bfb0]/60 text-sm">الخصم:</span>
+                <span className="text-[#e2bfb0]/60 text-sm">الخصم (%):</span>
                 <div className="relative w-24">
                   <input
                     type="number"
                     min="0"
-                    max={subtotal}
+                    max="100"
                     step="0.01"
                     aria-label="الخصم"
-                    value={discount || ""}
-                    onChange={(e) => setDiscount(Number(e.target.value))}
+                    value={discountPercent || ""}
+                    onChange={(e) => setDiscountPercent(Number(e.target.value))}
                     disabled={userRole !== "ADMIN"}
                     className="w-full bg-[#131313] border border-white/10 rounded-lg py-1 px-3 text-sm text-center focus:ring-1 focus:ring-primary focus:outline-none"
                     placeholder="0"
                   />
-                  <span className="absolute left-2 top-1.5 text-xs text-[#e2bfb0]/40">ج.م</span>
+                  <span className="absolute left-2 top-1.5 text-xs text-[#e2bfb0]/40">٪</span>
                 </div>
               </div>
+              {discountAmount > 0 && <div className="flex justify-between text-sm"><span>قيمة الخصم</span><span>-{discountAmount.toFixed(2)} ج.م</span></div>}
+              {walletFee > 0 && <div className="flex justify-between text-sm"><span>ضريبة المحفظة (١٪)</span><span>+{walletFee.toFixed(2)} ج.م</span></div>}
 
               <div className="flex justify-between items-center text-xl">
                 <span className="font-black text-white">الصافي:</span>
@@ -1124,15 +1145,16 @@ export default function POSPage() {
                 <button type="button" aria-pressed={!isCreditSale} onClick={() => { setIsCreditSale(false); setCashReceived(""); }} className={!isCreditSale ? "app-primary-button justify-center" : "app-secondary-button justify-center"}>دفع كامل</button>
                 <button type="button" aria-pressed={isCreditSale} onClick={() => { setIsCreditSale(true); setCashReceived(""); }} className={isCreditSale ? "app-primary-button justify-center" : "app-secondary-button justify-center"}>بيع آجل</button>
               </div>
-              {isCreditSale && <label className="block text-sm">المبلغ المستلم *
-                <input className="app-field mt-2" type="number" inputMode="decimal" min="0" max={totalAmount} step="0.01" required
+              {isCreditSale && <label className="block text-sm">المبلغ المسدد من قيمة الفاتورة *
+                <input className="app-field mt-2" type="number" inputMode="decimal" min="0" max={baseTotal} step="0.01" required
                   value={cashReceived} onChange={event => setCashReceived(event.target.value)} disabled={isProcessing} placeholder="اكتب 0 لو كله آجل" />
               </label>}
-              {isCreditSale && validReceivedAmount && <p className="text-sm font-bold">المتبقي على العميل: {Math.max(0, totalAmount - receivedAmount).toFixed(2)} ج.م</p>}
+              {isCreditSale && validReceivedAmount && <p className="text-sm font-bold">المتبقي على العميل: {Math.max(0, baseTotal - receivedAmount).toFixed(2)} ج.م</p>}
+              {isCreditSale && paymentMethod === "Wallet" && walletFee > 0 && <p className="text-sm">المبلغ المحصل بالمحفظة شامل الضريبة: {(receivedAmount + walletFee).toFixed(2)} ج.م</p>}
               <label className="block text-sm font-bold">{isCreditSale ? "طريقة دفع المستلم" : "طريقة الدفع"}</label>
               <ProductSelect label="طريقة الدفع" value={paymentMethod} disabled={isProcessing}
                 onChange={setPaymentMethod}
-                placeholder="طريقة الدفع" options={[{ value: "Cash", label: "كاش" }, { value: "Instapay", label: "إنستا باي" }, ...(walletAvailable ? [{ value: "Wallet", label: "محفظة" }] : [])]} allowClear={false} />
+                placeholder="طريقة الدفع" options={[{ value: "Cash", label: "كاش" }, { value: "Instapay", label: "إنستا باي" }, { value: "Credit Card", label: "فيزا" }, ...(walletAvailable ? [{ value: "Wallet", label: "محفظة" }] : [])]} allowClear={false} />
               {paymentMethod === "Cash" && (!isCreditSale || receivedAmount > 0) && <>
                 {shiftOpen !== true && <p className="rounded-lg bg-amber-500/10 p-2 text-sm text-amber-300">
                   {shiftError || "افتح وردية الصندوق قبل البيع النقدي."} <Link href="/cash-register" className="font-bold underline">فتح الصندوق</Link>

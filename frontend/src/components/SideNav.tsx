@@ -12,9 +12,7 @@ const navItems = [
   { href: "/dashboard", icon: "dashboard", label: "لوحة التحكم", disabled: false },
   { href: "/pos", icon: "point_of_sale", label: "نقطة البيع", disabled: false },
   { href: "/cash-register", icon: "payments", label: "الصندوق", disabled: false },
-  { href: "/orders", icon: "shopping_cart", label: "الطلبات", disabled: false },
-  { href: "/preparation", icon: "inventory", label: "تجهيز الطلبات", disabled: false },
-  { href: "/inbox", icon: "inbox", label: "متابعة الطلبات", disabled: false },
+  { href: "/orders", icon: "receipt_long", label: "الفواتير", disabled: false },
   { href: "/returns", icon: "assignment_return", label: "المرتجعات", disabled: false },
   { href: "/customers", icon: "group", label: "العملاء", disabled: false },
   { href: "/inventory", icon: "inventory_2", label: "المخزون", filled: true, disabled: false },
@@ -78,10 +76,10 @@ export default function SideNav() {
     if (["/inventory", "/stock-operations", "/product-approvals", "/purchases", "/categories", "/offers"].includes(item.href)) {
       return role === "ADMIN" || role === "INVENTORY_CONTROLLER";
     }
-    if (["/pos", "/cash-register", "/returns", "/orders", "/inbox", "/customers"].includes(item.href)) {
+    if (item.href === "/orders") return role === "ADMIN";
+    if (["/pos", "/cash-register", "/returns", "/customers"].includes(item.href)) {
       return role === "ADMIN" || role === "CASHIER_ORDERS";
     }
-    if (item.href === "/preparation") return role === "ADMIN" || role === "CASHIER_ORDERS";
     if (item.href === "/financials") return role === "ADMIN";
     if (item.href === "/audit") return role === "ADMIN";
     return true;
