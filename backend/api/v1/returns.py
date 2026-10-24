@@ -27,6 +27,8 @@ async def lookup_invoice(
     _user: User = Depends(require_pos_orders_access),
 ):
     number = invoice_number.strip().lower()
+    if number.startswith("inv") and re.fullmatch(r"inv[1-9][0-9]*", number):
+        number = number[3:]
     if re.fullmatch(r"[1-9][0-9]*", number):
         if int(number) > 9223372036854775807:
             raise HTTPException(status_code=400, detail="رقم الفاتورة غير صالح")

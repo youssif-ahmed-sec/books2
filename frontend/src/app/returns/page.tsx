@@ -24,7 +24,7 @@ type ReturnRecord = { id: string; kind: string; refund_amount: number; charge_am
 const statusLabel: Record<string, string> = { Delivered: "تم التسليم", Closed: "مغلق", Returned: "مسترجع" };
 const RETURNABLE_PAGE_SIZE = 50;
 const paymentLabel: Record<string, string> = {
-  Cash: "نقدي", "Credit Card": "بطاقة", "Vodafone Cash": "فودافون كاش",
+  Cash: "نقدي", Wallet: "محفظة", "Credit Card": "فيزا", "Vodafone Cash": "فودافون كاش",
   Instapay: "إنستاباي", "Bank Transfer": "تحويل بنكي", "Deferred Payment": "آجل",
 };
 
@@ -33,6 +33,7 @@ export default function ReturnsPage() {
   const [hasMoreOrders, setHasMoreOrders] = useState(true);
   const [loadingMoreOrders, setLoadingMoreOrders] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [showRecentOrders, setShowRecentOrders] = useState(false);
   const [orderFilter, setOrderFilter] = useState("");
   const [orderId, setOrderId] = useState("");
   const [eligibility, setEligibility] = useState<Eligibility | null>(null);
@@ -50,6 +51,7 @@ export default function ReturnsPage() {
   const [searching, setSearching] = useState(false);
   const [lookingUp, setLookingUp] = useState(false);
   const [message, setMessage] = useState("");
+  const [actionError, setActionError] = useState("");
   const [success, setSuccess] = useState("");
   const [printStatus, setPrintStatus] = useState("");
   const [printingId, setPrintingId] = useState<string | null>(null);
@@ -107,7 +109,7 @@ export default function ReturnsPage() {
     return () => { active = false; window.clearTimeout(timer); };
   }, [search, kind, eligibility]);
 
-  const invalidatePreview = () => { ++reviewSequence.current; setPreview(null); setSettlementConfirmed(false); requestRef.current = null; setMessage(""); };
+  const invalidatePreview = () => { ++reviewSequence.current; setPreview(null); setSettlementConfirmed(false); requestRef.current = null; setMessage(""); setActionError(""); };
   const selectOrder = (id: string) => {
     if (busy) return;
     invalidatePreview(); setOrderId(id); setEligibility(null); setHistory([]); setQuantities({});
@@ -130,12 +132,17 @@ export default function ReturnsPage() {
     const value = quantities[item.order_item_id];
     return Number.isFinite(value) && value > 0 && value <= item.remaining_quantity && !item.manual_review && Math.abs(value * 100 - Math.round(value * 100)) < 1e-6;
   });
+  const replacementQuantities = new Map<string, number>();
+  for (const item of replacements) {
+    const unit = item.product.units.find(candidate => candidate.id === item.unit_id);
+    replacementQuantities.set(item.product.id, (replacementQuantities.get(item.product.id) || 0) + item.quantity * Number(unit?.conversion_factor || 0));
+  }
   const replacementsValid = kind === "REFUND" || (replacements.length > 0 && replacements.every(item => {
     const unit = item.product.units.find(candidate => candidate.id === item.unit_id);
     const price = unit?.prices.find(candidate => candidate.price_level === item.price_level);
     return Boolean(unit && price && Number(price.price) > 0 && item.quantity > 0 &&
       Math.abs(item.quantity * 100 - Math.round(item.quantity * 100)) < 1e-6 &&
-      item.quantity * Number(unit?.conversion_factor || 1) <= item.product.current_stock);
+      (replacementQuantities.get(item.product.id) || 0) <= item.product.current_stock);
   }));
   const canPreview = Boolean(eligibility && selectedLines.length && quantitiesValid && replacementsValid && !busy);
   const shownOrders = orders.filter(order => String(order.public_number).includes(orderFilter.trim()) || order.id.toLowerCase().includes(orderFilter.trim().toLowerCase()));
@@ -153,7 +160,7 @@ export default function ReturnsPage() {
   async function review() {
     if (!canPreview) return;
     const sequence = ++reviewSequence.current;
-    setBusy(true); setShiftOpen(null); setMessage(""); setSuccess("");
+    setBusy(true); setShiftOpen(null); setMessage(""); setActionError(""); setSuccess("");
     try {
       const draft = payload(crypto.randomUUID(), false);
       const fingerprint = JSON.stringify({ ...draft, request_id: undefined, settlement_confirmed: undefined });
@@ -169,15 +176,25 @@ export default function ReturnsPage() {
           .then(shift => { if (sequence === reviewSequence.current) setShiftOpen(Boolean(shift)); })
           .catch(() => { if (sequence === reviewSequence.current) setShiftOpen(null); });
       }
-    } catch (error) { if (sequence === reviewSequence.current) setMessage(errorMessage(error, "تعذر حساب التسوية")); }
+    } catch (error) { if (sequence === reviewSequence.current) setActionError(errorMessage(error, "تعذر حساب التسوية")); }
     finally { if (sequence === reviewSequence.current) setBusy(false); }
   }
 
   async function submit() {
-    if (!preview || !requestRef.current || !canPreview ||
-        (preview.payment_method !== "Deferred Payment" && (preview.refund_amount > 0 || preview.charge_amount > 0) && !settlementConfirmed) ||
-        (preview.payment_method === "Cash" && (preview.refund_amount > 0 || preview.charge_amount > 0) && shiftOpen !== true)) return;
-    setBusy(true); setMessage("");
+    if (!preview || busy) return;
+    if (!requestRef.current || !canPreview) {
+      setActionError("تغيّرت بيانات العملية. راجع المبلغ مرة أخرى قبل التسجيل.");
+      return;
+    }
+    if (preview.payment_method === "Cash" && (preview.refund_amount > 0 || preview.charge_amount > 0) && shiftOpen !== true) {
+      setActionError(shiftOpen === null ? "تعذر التأكد من الوردية. أعد مراجعة المبلغ." : "افتح ورديتك أولًا لإتمام التسوية النقدية.");
+      return;
+    }
+    if (preview.payment_method !== "Deferred Payment" && (preview.refund_amount > 0 || preview.charge_amount > 0) && !settlementConfirmed) {
+      setActionError("أكّد رد المبلغ أو تحصيل الفرق قبل التسجيل.");
+      return;
+    }
+    setBusy(true); setMessage(""); setActionError("");
     try {
       const record = await fetchApi("/returns", { method: "POST", body: JSON.stringify({
         ...payload(requestRef.current.id, settlementConfirmed),
@@ -207,7 +224,7 @@ export default function ReturnsPage() {
     } catch (error) {
       const detail = errorMessage(error, "تعذر تسجيل العملية. يمكنك إعادة المحاولة بنفس الطلب.");
       if (detail.includes("settlement changed")) { setPreview(null); setSettlementConfirmed(false); requestRef.current = null; }
-      setMessage(detail);
+      setActionError(detail);
     } finally { setBusy(false); }
   }
 
@@ -224,9 +241,10 @@ export default function ReturnsPage() {
 
   function addReplacement(product: Product) {
     if (busy) return;
-    const unit = product.units[0];
     const level = eligibility?.customer_price_level || "Retail";
-    const price = unit?.prices.find(candidate => candidate.price_level === level) ||
+    const unit = product.units.find(candidate => candidate.prices.some(price => price.price_level === level && Number(price.price) > 0)) ||
+      (getUserRole() === "ADMIN" ? product.units.find(candidate => candidate.prices.some(price => Number(price.price) > 0)) : undefined);
+    const price = unit?.prices.find(candidate => candidate.price_level === level && Number(candidate.price) > 0) ||
       (getUserRole() === "ADMIN" ? unit?.prices.find(candidate => Number(candidate.price) > 0) : undefined);
     if (!unit || !price || product.current_stock <= 0) return;
     invalidatePreview();
@@ -255,49 +273,58 @@ export default function ReturnsPage() {
 
   return <div className="min-h-screen" dir="rtl">
     <SideNav /><TopNav title="الاسترجاع والاستبدال" />
-    <main className="app-main space-y-5">
-      <div><h1 className="text-2xl font-bold">الاسترجاع والاستبدال</h1></div>
+    <main className="app-main space-y-4">
+      <h1 className="sr-only">الاسترجاع والاستبدال</h1>
       {message && <p role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm">{message}</p>}
-      {success && <p role="status" className="rounded-xl border border-green-500/30 bg-green-500/10 p-3 text-sm">{success}</p>}
-      {printStatus && <p role="status" className="app-muted text-sm">{printStatus}</p>}
-      <section className="app-panel space-y-3 rounded-2xl p-4 md:p-5">
-        <h2 className="font-bold">1. الفاتورة الأصلية</h2>
-        {isAdmin ? <>
+      {(success || printStatus) && <div role="status" className="fixed bottom-5 left-5 right-5 z-[80] ml-auto max-w-sm rounded-xl border border-green-500/30 bg-[var(--color-surface-container-low)] p-3 text-sm shadow-lg">
+        {success && <p className="font-semibold">{success}</p>}
+        {printStatus && <p className="app-muted mt-1">{printStatus}</p>}
+        <button type="button" className="app-muted mt-2 text-xs underline" onClick={() => { setSuccess(""); setPrintStatus(""); }}>إغلاق</button>
+      </div>}
+      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
+      <div className="min-w-0 space-y-4">
+      <section className="app-panel space-y-3 rounded-2xl p-4">
+        <h2 className="font-bold">الفاتورة الأصلية</h2>
           <form className="flex flex-wrap gap-2" onSubmit={event => { event.preventDefault(); void lookupOrder(); }}>
-            <input className="app-field min-w-48 flex-1" aria-label="ابحث برقم الفاتورة" placeholder="رقم الفاتورة" value={orderFilter} disabled={busy || lookingUp} onChange={event => setOrderFilter(event.target.value)} />
-            <button type="submit" className="app-secondary-button" disabled={busy || lookingUp || !orderFilter.trim()}>{lookingUp ? "جارٍ البحث..." : "فتح برقم الفاتورة"}</button>
+            <input className="app-field min-w-40 flex-1" aria-label="رقم الفاتورة المطبوع" placeholder="رقم الفاتورة المطبوع" value={orderFilter} disabled={busy || lookingUp} onChange={event => { setOrderFilter(event.target.value); if (orderId) selectOrder(""); }} />
+            <button type="submit" className="app-primary-button disabled:opacity-50" disabled={busy || lookingUp || !orderFilter.trim()}>{lookingUp ? "جارٍ البحث..." : "فتح الفاتورة"}</button>
           </form>
-          <select className="app-field" aria-label="الفاتورة الأصلية" value={orderId} disabled={busy} onChange={event => selectOrder(event.target.value)}>
-            <option value="">اختر الفاتورة</option>
-            {shownOrders.map(order => <option value={order.id} key={order.id}>فاتورة {order.public_number} · {money(order.total_amount)} ج.م · {statusLabel[order.status] || order.status}</option>)}
-            {orderId && !shownOrders.some(order => order.id === orderId) && <option value={orderId}>{orderId.slice(-12)}</option>}
-          </select>
-          {hasMoreOrders && <button type="button" className="app-secondary-button" disabled={busy || loadingMoreOrders}
-            onClick={loadMoreReturnableOrders}>{loadingMoreOrders ? "جارٍ التحميل..." : "تحميل فواتير أقدم"}</button>}
-        </> : <form className="flex flex-wrap gap-2" onSubmit={event => { event.preventDefault(); void lookupOrder(); }}>
-          <input className="app-field min-w-48 flex-1" aria-label="رقم الفاتورة المطبوع" placeholder="رقم الفاتورة المطبوع" value={orderFilter} disabled={busy || lookingUp} onChange={event => { setOrderFilter(event.target.value); if (orderId) selectOrder(""); }} />
-          <button type="submit" className="app-primary-button disabled:opacity-50" disabled={!orderFilter.trim() || busy || lookingUp}>{lookingUp ? "جارٍ البحث..." : "فتح الفاتورة"}</button>
-        </form>}
-        {!isAdmin && orderId && <p className="app-muted text-sm">الفاتورة {orderId.slice(-12)}</p>}
+          {isAdmin && orders.length > 0 && <div>
+            <button type="button" className="app-muted text-sm underline underline-offset-4" aria-expanded={showRecentOrders} onClick={() => setShowRecentOrders(value => !value)}>
+              {showRecentOrders ? "إخفاء الفواتير الأخيرة" : "عرض الفواتير الأخيرة"}
+            </button>
+            {showRecentOrders && <div className="mt-2 max-h-48 space-y-1 overflow-y-auto rounded-xl border border-current/10 p-2">
+              {shownOrders.map(order => <button type="button" key={order.id} disabled={busy} onClick={() => { setOrderFilter(String(order.public_number)); selectOrder(order.id); setShowRecentOrders(false); }}
+                className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-2 text-sm hover:bg-primary/10 disabled:opacity-50">
+                <span>فاتورة {order.public_number} · {statusLabel[order.status] || order.status}</span><strong>{money(order.total_amount)} ج.م</strong>
+              </button>)}
+              {shownOrders.length === 0 && <p className="app-muted p-2 text-sm">لا توجد فاتورة مطابقة في القائمة الأخيرة؛ افتحها برقمها أعلاه.</p>}
+              {hasMoreOrders && <button type="button" className="app-secondary-button w-full" disabled={busy || loadingMoreOrders} onClick={loadMoreReturnableOrders}>
+                {loadingMoreOrders ? "جارٍ التحميل..." : "تحميل فواتير أقدم"}
+              </button>}
+            </div>}
+          </div>}
         {loadingOrder && <div className="space-y-3 rounded-xl border border-current/10 p-4" role="status" aria-label="جارٍ تحميل الفاتورة"><span className="sr-only">جارٍ تحميل الفاتورة</span><span aria-hidden="true" className="app-skeleton h-5 w-40" /><span aria-hidden="true" className="app-skeleton h-4 w-64 max-w-full" /><span aria-hidden="true" className="app-skeleton h-12 w-full rounded-xl" /></div>}
-        {eligibility && <p className="app-muted text-sm">المخزن الأصلي محدد تلقائيًا · وسيلة الدفع: {paymentLabel[eligibility.payment_method] || eligibility.payment_method}</p>}
+        {eligibility && <p className="text-sm font-semibold">فاتورة {orderFilter || orderId.slice(-12)} <span className="app-muted font-normal">· {paymentLabel[eligibility.payment_method] || eligibility.payment_method}</span></p>}
       </section>
 
-      {eligibility && <section className="app-panel space-y-4 rounded-2xl p-4 md:p-5">
-        <h2 className="font-bold">2. الأصناف المسترجعة</h2>
+      {eligibility && <section className="app-panel space-y-3 rounded-2xl p-4">
+        <h2 className="font-bold">الأصناف المسترجعة</h2>
         {eligibility.items.every(item => item.remaining_quantity <= 0) && <p className="app-muted">لا توجد كميات متبقية للاسترجاع.</p>}
         <div className="grid gap-3">
           {eligibility.items.filter(item => item.remaining_quantity > 0).map(item => <div key={item.order_item_id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-current/10 p-3">
             <div><strong>{item.product_name}</strong><p className="app-muted text-sm">{item.unit_name} · متاح {item.remaining_quantity} · سعر البيع {money(item.unit_price)} ج.م</p>
               {item.manual_review && <p className="text-sm text-amber-600">يلزم مراجعة مكونات هذا الصنف قبل إرجاعه.</p>}</div>
-            <label className="text-sm">كمية الإرجاع<input className="app-field mt-1 w-32" aria-label={`كمية إرجاع ${item.product_name}`} type="number" inputMode="decimal" min="0" max={item.remaining_quantity} step="0.01" disabled={item.manual_review || busy}
+            <label className="text-sm">كمية الإرجاع<ZeroHintNumberInput className="app-field mt-1 w-32" aria-label={`كمية إرجاع ${item.product_name}`} inputMode="decimal" min="0" max={item.remaining_quantity} step="0.01" disabled={item.manual_review || busy}
               value={quantities[item.order_item_id] || ""} onChange={event => { invalidatePreview(); setQuantities(previous => ({ ...previous, [item.order_item_id]: Number(event.target.value) || 0 })); }} /></label>
           </div>)}
         </div>
       </section>}
+      </div>
+      <div className="min-w-0 space-y-4">
 
       {eligibility && eligibility.items.some(item => item.remaining_quantity > 0) && <section className="app-panel space-y-4 rounded-2xl p-4 md:p-5">
-        <h2 className="font-bold">3. نوع العملية</h2>
+        <h2 className="font-bold">نوع العملية</h2>
         <div className="flex flex-wrap gap-3">
           <label className="app-secondary-button cursor-pointer"><input type="radio" className="ml-2" checked={kind === "REFUND"} disabled={busy} onChange={() => { invalidatePreview(); setKind("REFUND"); }} />استرجاع</label>
           <label className="app-secondary-button cursor-pointer"><input type="radio" className="ml-2" checked={kind === "EXCHANGE"} disabled={busy} onChange={() => { invalidatePreview(); setKind("EXCHANGE"); }} />استبدال</label>
@@ -314,8 +341,10 @@ export default function ReturnsPage() {
           {searching && <p className="app-muted text-sm">جارٍ البحث...</p>}
           {products.length > 0 && <div className="grid gap-2">{products.map(product => {
             const level = eligibility.customer_price_level;
-            const unit = product.units[0];
-            const price = unit?.prices.find(candidate => candidate.price_level === level) || (getUserRole() === "ADMIN" ? unit?.prices.find(candidate => Number(candidate.price) > 0) : undefined);
+            const unit = product.units.find(candidate => candidate.prices.some(price => price.price_level === level && Number(price.price) > 0)) ||
+              (getUserRole() === "ADMIN" ? product.units.find(candidate => candidate.prices.some(price => Number(price.price) > 0)) : undefined);
+            const price = unit?.prices.find(candidate => candidate.price_level === level && Number(candidate.price) > 0) ||
+              (getUserRole() === "ADMIN" ? unit?.prices.find(candidate => Number(candidate.price) > 0) : undefined);
             return <button key={product.id} type="button" onClick={() => addReplacement(product)} disabled={busy || product.current_stock <= 0 || !price}
               className="flex w-full items-center justify-between gap-2 rounded-xl border border-current/10 p-3 text-right disabled:opacity-50">
               <span>{product.name_ar} <span className="app-muted text-xs">· متاح {product.current_stock}</span></span><strong>{price ? `${money(price.price)} ج.م` : "بلا سعر"}</strong>
@@ -341,32 +370,34 @@ export default function ReturnsPage() {
         {!quantitiesValid && selectedLines.length > 0 && <p className="text-sm text-red-500">راجع كميات الإرجاع المتاحة.</p>}
         {!replacementsValid && kind === "EXCHANGE" && replacements.length > 0 && <p className="text-sm text-red-500">راجع سعر وكمية الصنف البديل والمخزون المتاح.</p>}
         <button type="button" className="app-primary-button disabled:opacity-50" disabled={!canPreview} onClick={review}>{busy && !preview ? "جارٍ الحساب..." : "مراجعة المبلغ"}</button>
+        {actionError && !preview && <p role="alert" className="text-sm text-red-500">{actionError}</p>}
       </section>}
 
       {preview && <section className="app-panel space-y-4 rounded-2xl border-primary/30 p-4 md:p-5" aria-label="مراجعة التسوية">
-        <h2 className="font-bold">4. مراجعة التسوية قبل التسجيل</h2>
+        <h2 className="font-bold">مراجعة التسوية</h2>
         <div className="grid gap-2 text-sm sm:grid-cols-2"><p>قيمة المرتجع بعد خصم الفاتورة: <strong>{money(preview.returned_value)} ج.م</strong></p>
           <p>قيمة البديل: <strong>{money(preview.replacement_value)} ج.م</strong></p></div>
         <p className="text-lg font-bold">{preview.refund_amount > 0 ? `يُرد للعميل ${money(preview.refund_amount)} ج.م` : preview.charge_amount > 0 ? `يُحصّل من العميل ${money(preview.charge_amount)} ج.م` : "لا يوجد فرق مالي"}</p>
-        <p className="app-muted text-sm">وسيلة التسوية: {paymentLabel[preview.payment_method] || preview.payment_method}. القيم النهائية تُراجع مجددًا عند التسجيل.</p>
+        <p className="app-muted text-sm">وسيلة التسوية: {paymentLabel[preview.payment_method] || preview.payment_method}</p>
         {preview.payment_method === "Cash" && (preview.refund_amount > 0 || preview.charge_amount > 0) && shiftOpen !== true &&
           <p className="text-sm text-amber-600">يلزم فتح وردية الصندوق لإتمام التسوية النقدية. <Link href="/cash-register" className="underline">فتح الصندوق</Link></p>}
         {preview.payment_method !== "Deferred Payment" && (preview.refund_amount > 0 || preview.charge_amount > 0) &&
-          <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={settlementConfirmed} disabled={busy} onChange={event => setSettlementConfirmed(event.target.checked)} />
+          <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={settlementConfirmed} disabled={busy} onChange={event => { setSettlementConfirmed(event.target.checked); setActionError(""); }} />
             <span>تأكدت من {preview.refund_amount > 0 ? "رد المبلغ" : "تحصيل الفرق"} عبر وسيلة الدفع الأصلية قبل تسجيل العملية.</span></label>}
-        <button type="button" className="app-primary-button disabled:opacity-50" disabled={busy || !canPreview ||
-          (preview.payment_method !== "Deferred Payment" && (preview.refund_amount > 0 || preview.charge_amount > 0) && !settlementConfirmed) ||
-          (preview.payment_method === "Cash" && (preview.refund_amount > 0 || preview.charge_amount > 0) && shiftOpen !== true)} onClick={submit}>
+        <button type="button" className="app-primary-button disabled:opacity-50" disabled={busy} onClick={submit}>
           {busy ? "جارٍ التسجيل..." : kind === "REFUND" ? "تسجيل الاسترجاع" : "تسجيل الاستبدال"}</button>
+        {actionError && <p role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-500">{actionError}</p>}
       </section>}
+      </div>
+      </div>
 
-      {history.length > 0 && <section className="app-panel space-y-3 rounded-2xl p-4 md:p-5"><h2 className="font-bold">عمليات سابقة على الفاتورة</h2>
-        {history.map(record => <div key={record.id} className="flex flex-wrap items-center justify-between gap-2 border-b border-current/10 pb-2 text-sm">
+      {history.length > 0 && <details className="app-panel rounded-2xl p-4"><summary className="cursor-pointer font-bold">عمليات سابقة على الفاتورة ({history.length})</summary>
+        <div className="mt-3 space-y-3">{history.map(record => <div key={record.id} className="flex flex-wrap items-center justify-between gap-2 border-b border-current/10 pb-2 text-sm">
           <p>{record.kind === "REFUND" ? "استرجاع" : "استبدال"} · رد {money(record.refund_amount)} / تحصيل {money(record.charge_amount)} ج.م · {new Date(record.created_at).toLocaleString("ar-EG")}</p>
           <button type="button" className="app-secondary-button disabled:opacity-50" disabled={printingId !== null} onClick={() => reprint(record.id)}>
             {printingId === record.id ? "جارٍ الإرسال..." : "إعادة طباعة الإيصال"}
           </button>
-        </div>)}</section>}
+        </div>)}</div></details>}
     </main>
   </div>;
 }
