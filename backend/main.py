@@ -8,6 +8,7 @@ from pathlib import Path
 from core.reference_cache import open_reference_cache, close_reference_cache
 from core.dashboard_events import dashboard_event_hub
 from services.notification_retention import run_notification_retention
+from services.customer_due_alerts import run_customer_due_alerts
 
 from api.v1.products import router as products_router
 from api.v1.product_approvals import router as product_approvals_router
@@ -18,6 +19,7 @@ from api.v1.global_units import router as global_units_router
 from api.v1.upload import router as upload_router
 from api.v1.suppliers import router as suppliers_router
 from api.v1.customers import router as customers_router
+from api.v1.customer_accounts import router as customer_accounts_router
 from api.v1.pos import router as pos_router
 from api.v1.financials import router as financials_router
 from api.v1.webhooks import router as webhooks_router
@@ -39,12 +41,16 @@ from contextlib import asynccontextmanager, suppress
 async def lifespan(app: FastAPI):
     await open_reference_cache(os.getenv("REDIS_URL"))
     retention_task = asyncio.create_task(run_notification_retention())
+    due_alert_task = asyncio.create_task(run_customer_due_alerts())
     try:
         yield
     finally:
         retention_task.cancel()
+        due_alert_task.cancel()
         with suppress(asyncio.CancelledError):
             await retention_task
+        with suppress(asyncio.CancelledError):
+            await due_alert_task
         await dashboard_event_hub.close()
         await close_reference_cache()
 app = FastAPI(
@@ -123,6 +129,7 @@ if WAREHOUSE_ONLY_MODE:
 else:
     app.include_router(orders_router, prefix="/api/v1")
     app.include_router(customers_router, prefix="/api/v1")
+    app.include_router(customer_accounts_router, prefix="/api/v1")
     app.include_router(pos_router, prefix="/api/v1")
     app.include_router(financials_router, prefix="/api/v1")
     app.include_router(webhooks_router, prefix="/api/v1")

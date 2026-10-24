@@ -1,6 +1,6 @@
 "use client";
 
-import { notifyError } from "@/lib/notifications";
+import { notifyError, notifySuccess } from "@/lib/notifications";
 
 import { useState, useEffect, useRef } from "react";
 import { fetchApi } from "@/lib/api";
@@ -9,12 +9,15 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import SideNav from "@/components/SideNav";
 import TopNav from "@/components/TopNav";
-import { ZeroHintNumberInput } from "@/components/ZeroHintNumberInput";
 import { ProductSelect } from "@/components/ProductSelect";
+import { DatePicker } from "@/components/DatePicker";
+import InvoiceDetailsDialog from "@/components/InvoiceDetailsDialog";
+import { exportCustomers, type CustomerExportFormat } from "@/lib/customerExport";
 import { LoadingTableRows } from "@/components/LoadingState";
 import { getUserRole, type UserRole } from "@/utils/auth";
 import { errorMessage } from "@/lib/errors";
 import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
+import { useConfirmAction } from "@/components/ConfirmationProvider";
 
 const customerSchema = z.object({
   name: z.string().min(2, "الاسم مطلوب (أكثر من حرفين)"),
@@ -36,15 +39,38 @@ type CustomerFormInput = z.input<typeof customerSchema>;
 type Customer = CustomerFormValues & { id: string; total_purchases: number | null; balance: number | null; purchase_count: number | null; average_purchase: number | null; last_purchase_date?: string | null; tags?: string[]; favorite_categories?: string[]; addresses?: string[] };
 type CustomerPayment = { id: string; amount: number; wallet_fee_amount?: number; method: string; kind: string; created_at: string };
 type Interaction = { id: string; channel: string; note: string; follow_up_at: string | null; created_at: string };
-type CustomerOrder = { id: string; public_number: number; status: string; total_amount: number; created_at: string };
+type DueInvoice = { order_id: string; public_number: number; remaining: number; due_date: string | null };
+type CustomerDues = { balance: number; unlinked_balance: number; invoices: DueInvoice[] };
+type StatementEntry = { id: string; kind: string; order_id: string | null; public_number: number | null; at: string; amount: number; direction: "debit" | "credit"; balance: number; method?: string };
+type CustomerStatement = { opening_balance: number; closing_balance: number; entries: StatementEntry[] };
+type DuplicateGroup = { phone: string; customers: { id: string; name: string; phone: string; balance: number; credit_limit: number; purchase_count: number }[] };
+type OverdueInvoice = DueInvoice & { customer_id: string; customer_name: string; customer_phone: string };
 
 const customerTypeLabels: Record<string, string> = {
   "Retail Customer": "تجزئة", Student: "طالب", Teacher: "مدرس", School: "مدرسة",
   NURSERY: "حضانة", "Speech Therapy Center": "مركز تخاطب",
   "Wholesale Customer": "جملة", "Super Wholesale Customer": "سوبر جملة", "VIP Customer": "VIP",
 };
+const cairoToday = () => {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
+  const value = (kind: string) => parts.find(part => part.type === kind)?.value || "";
+  return `${value("year")}-${value("month")}-${value("day")}`;
+};
+
+const needsNextDueDate = (dues: CustomerDues | null, amount: number) => {
+  if (!dues || amount <= 0) return false;
+  let allocatable = Math.max(0, Math.round((amount - dues.unlinked_balance) * 100));
+  for (const invoice of dues.invoices) {
+    const remaining = Math.round(invoice.remaining * 100);
+    const applied = Math.min(allocatable, remaining);
+    if (applied > 0 && applied < remaining) return true;
+    allocatable -= applied;
+  }
+  return false;
+};
 
 export default function CustomersPage() {
+  const confirmAction = useConfirmAction();
   const [userRole, setUserRole] = useState<UserRole | null>(null);
   const [customers, setCustomers] = useState<Customer[]>(() => readSectionSnapshot<Customer[]>("customers-list") || []);
   const [loading, setLoading] = useState(() => !readSectionSnapshot("customers-list"));
@@ -54,13 +80,24 @@ export default function CustomersPage() {
   const [paymentCustomer, setPaymentCustomer] = useState<Customer | null>(null);
   const [paymentAmount, setPaymentAmount] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState("Cash");
+  const [nextDueDate, setNextDueDate] = useState("");
   const [paymentHistory, setPaymentHistory] = useState<CustomerPayment[]>([]);
+  const [dues, setDues] = useState<CustomerDues | null>(null);
+  const [statement, setStatement] = useState<CustomerStatement | null>(null);
+  const [overdue, setOverdue] = useState<OverdueInvoice[]>([]);
+  const [overdueError, setOverdueError] = useState(false);
+  const [mailConfigured, setMailConfigured] = useState<boolean | null>(null);
+  const [filterOverdue, setFilterOverdue] = useState(false);
+  const [duplicateGroups, setDuplicateGroups] = useState<DuplicateGroup[] | null>(null);
+  const [duplicateTargets, setDuplicateTargets] = useState<Record<string, string>>({});
+  const [duplicatesBusy, setDuplicatesBusy] = useState(false);
   const [paymentBusy, setPaymentBusy] = useState(false);
   const [paymentError, setPaymentError] = useState("");
   const paymentAttempt = useRef<{ fingerprint: string; id: string } | null>(null);
   const profileRequest = useRef(0);
   const [profileCustomer, setProfileCustomer] = useState<Customer | null>(null);
-  const [profileTab, setProfileTab] = useState<"details" | "orders" | "payments" | "followup">("details");
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
+  const [profileTab, setProfileTab] = useState<"details" | "statement" | "payments" | "followup">("details");
   const [profileBusy, setProfileBusy] = useState(false);
   const [profileError, setProfileError] = useState("");
   const [filterType, setFilterType] = useState("");
@@ -69,13 +106,10 @@ export default function CustomersPage() {
   const [filterActivity, setFilterActivity] = useState("");
   const [activityCutoff, setActivityCutoff] = useState<number | null>(null);
   const [interactions, setInteractions] = useState<Interaction[]>([]);
-  const [orderHistory, setOrderHistory] = useState<CustomerOrder[]>([]);
   const [interactionChannel, setInteractionChannel] = useState("Phone Call");
   const [interactionNote, setInteractionNote] = useState("");
   const [followUpAt, setFollowUpAt] = useState("");
-  const [segmentTag, setSegmentTag] = useState("");
-  const [segmentMin, setSegmentMin] = useState(0);
-  const [segmentCustomers, setSegmentCustomers] = useState<Customer[]>([]);
+  const [exportFormat, setExportFormat] = useState<CustomerExportFormat>("xlsx");
 
   const { control, register, handleSubmit, reset, setValue, formState: { errors, isSubmitting } } = useForm<CustomerFormInput, unknown, CustomerFormValues>({
     resolver: zodResolver(customerSchema),
@@ -102,7 +136,10 @@ export default function CustomersPage() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => setUserRole(getUserRole()), 0);
-    fetchApi("/customers").then((data: Customer[]) => { setCustomers(data); setLoadError(false); writeSectionSnapshot("customers-list", data); }).catch((err) => {
+    fetchApi("/customers").then((data: Customer[]) => { setCustomers(data); setLoadError(false); writeSectionSnapshot("customers-list", data);
+      const requested = new URLSearchParams(window.location.search).get("customer_id");
+      if (requested) setProfileCustomer(data.find(customer => customer.id === requested) || null);
+    }).catch((err) => {
       console.error("Failed to load customers:", err);
       setLoadError(true);
     }).finally(() => setLoading(false));
@@ -110,7 +147,13 @@ export default function CustomersPage() {
   }, []);
 
   useEffect(() => {
-    const revealCustomer = () => { setFilterType(""); setFilterCity(""); setFilterDebt(false); setFilterActivity(""); };
+    if (userRole !== "ADMIN") return;
+    fetchApi("/customers/overdue").then((rows: OverdueInvoice[]) => { setOverdue(rows); setOverdueError(false); }).catch(() => setOverdueError(true));
+    fetchApi("/notifications/email/status").then((status: { configured: boolean }) => setMailConfigured(status.configured)).catch(() => setMailConfigured(null));
+  }, [userRole]);
+
+  useEffect(() => {
+    const revealCustomer = () => { setFilterType(""); setFilterCity(""); setFilterDebt(false); setFilterActivity(""); setFilterOverdue(false); };
     window.addEventListener("section-search-focus", revealCustomer);
     return () => window.removeEventListener("section-search-focus", revealCustomer);
   }, []);
@@ -187,37 +230,39 @@ export default function CustomersPage() {
 
   const collectPayment = async () => {
     if (!paymentCustomer || !Number.isFinite(paymentAmount) || paymentAmount <= 0 || Math.abs(Math.round(paymentAmount * 100) - paymentAmount * 100) > 1e-6 || paymentAmount > Number(paymentCustomer.balance)) return;
+    if (needsNextDueDate(dues, paymentAmount) && (!nextDueDate || nextDueDate < cairoToday())) { setPaymentError("حدد موعد الدفعة التالية للباقي"); return; }
     const request = profileRequest.current;
     setPaymentBusy(true); setPaymentError("");
     try {
-      const fingerprint = JSON.stringify([paymentCustomer.id, paymentAmount, paymentMethod]);
+      const fingerprint = JSON.stringify([paymentCustomer.id, paymentAmount, paymentMethod, nextDueDate]);
       if (paymentAttempt.current?.fingerprint !== fingerprint) paymentAttempt.current = { fingerprint, id: crypto.randomUUID() };
-      await fetchApi(`/customers/${paymentCustomer.id}/payments`, { method: "POST", body: JSON.stringify({ request_id: paymentAttempt.current.id, amount: paymentAmount, method: paymentMethod }) });
-      const [updatedCustomers, history] = await Promise.all([fetchApi("/customers"), fetchApi(`/customers/${paymentCustomer.id}/payments`)]);
+      await fetchApi(`/customers/${paymentCustomer.id}/payments`, { method: "POST", body: JSON.stringify({ request_id: paymentAttempt.current.id, amount: paymentAmount, method: paymentMethod, ...(needsNextDueDate(dues, paymentAmount) ? { next_due_date: nextDueDate } : {}) }) });
+      const [updatedCustomers, history, updatedDues] = await Promise.all([fetchApi("/customers"), fetchApi(`/customers/${paymentCustomer.id}/payments`), fetchApi(`/customers/${paymentCustomer.id}/dues`)]);
       setCustomers(updatedCustomers);
       writeSectionSnapshot("customers-list", updatedCustomers);
       const updated = updatedCustomers.find((customer: Customer) => customer.id === paymentCustomer.id) || null;
       setProfileCustomer(previous => previous?.id === updated?.id ? updated : previous);
-      if (request === profileRequest.current) { setPaymentHistory(history); setPaymentCustomer(updated); setPaymentAmount(0); }
+      if (request === profileRequest.current) { setPaymentHistory(history); setDues(updatedDues); setPaymentCustomer(updated); setPaymentAmount(0); setNextDueDate(""); }
+      if (userRole === "ADMIN") void fetchApi("/customers/overdue").then((rows: OverdueInvoice[]) => { setOverdue(rows); setOverdueError(false); }).catch(() => setOverdueError(true));
       paymentAttempt.current = null;
     } catch (error) { setPaymentError(errorMessage(error, "تعذر تسجيل التحصيل")); }
     finally { setPaymentBusy(false); }
   };
 
-  const selectProfileTab = async (customer: Customer, tab: "details" | "orders" | "payments" | "followup") => {
+  const selectProfileTab = async (customer: Customer, tab: "details" | "statement" | "payments" | "followup") => {
     const request = ++profileRequest.current;
     setProfileTab(tab); setProfileError("");
     if (tab === "details") { setProfileBusy(false); return; }
     setProfileBusy(true);
     try {
-      if (tab === "orders" && userRole === "ADMIN") {
-        const orders = await fetchApi(`/customers/${customer.id}/orders`);
-        if (request === profileRequest.current) setOrderHistory(orders);
+      if (tab === "statement" && userRole === "ADMIN") {
+        const account = await fetchApi(`/customers/${customer.id}/statement`);
+        if (request === profileRequest.current) setStatement(account);
       }
       if (tab === "payments") {
-        setPaymentCustomer(customer); setPaymentAmount(0); setPaymentError("");
-        const payments = await fetchApi(`/customers/${customer.id}/payments`);
-        if (request === profileRequest.current) setPaymentHistory(payments);
+        setPaymentCustomer(customer); setPaymentAmount(0); setNextDueDate(""); setPaymentError("");
+        const [payments, openDues] = await Promise.all([fetchApi(`/customers/${customer.id}/payments`), fetchApi(`/customers/${customer.id}/dues`)]);
+        if (request === profileRequest.current) { setPaymentHistory(payments); setDues(openDues); }
       }
       if (tab === "followup") {
         const contact = await fetchApi(`/customers/${customer.id}/interactions`);
@@ -229,8 +274,37 @@ export default function CustomersPage() {
 
   const openProfile = (customer: Customer) => {
     ++profileRequest.current;
+    setSelectedInvoiceId(null);
     setProfileCustomer(customer); setProfileTab("details"); setInteractionNote("");
-    setOrderHistory([]); setPaymentHistory([]); setInteractions([]); setProfileError(""); setPaymentCustomer(null); setProfileBusy(false);
+    setStatement(null); setDues(null); setPaymentHistory([]); setInteractions([]); setProfileError(""); setPaymentCustomer(null); setProfileBusy(false);
+  };
+
+  const reviewDuplicates = async () => {
+    setDuplicatesBusy(true);
+    try {
+      const groups = await fetchApi("/customers/duplicates") as DuplicateGroup[];
+      if (groups.length) setDuplicateGroups(groups);
+      else { setDuplicateGroups(null); notifySuccess("لا توجد أرقام هاتف مكررة"); }
+    }
+    catch (error) { notifyError(errorMessage(error, "تعذر فحص السجلات المكررة")); }
+    finally { setDuplicatesBusy(false); }
+  };
+
+  const mergeDuplicate = async (source: DuplicateGroup["customers"][number], target: DuplicateGroup["customers"][number]) => {
+    const accepted = await confirmAction({ title: "دمج سجلَي العميل؟",
+      message: `سيبقى سجل ${target.name}، وتُنقل إليه فواتير وتحصيلات ${source.name}. الرصيد النهائي ${Number(source.balance + target.balance).toFixed(2)} ج.م. لا يمكن التراجع عن الدمج تلقائيًا.`,
+      confirmLabel: "دمج السجلين", tone: "danger" });
+    if (!accepted) return;
+    setDuplicatesBusy(true);
+    try {
+      await fetchApi("/customers/merge", { method: "POST", body: JSON.stringify({ source_id: source.id, target_id: target.id }) });
+      await loadCustomers();
+      const groups = await fetchApi("/customers/duplicates") as DuplicateGroup[];
+      setDuplicateGroups(groups.length ? groups : null);
+      notifySuccess("تم دمج سجلّي العميل");
+      if (profileCustomer?.id === source.id) setProfileCustomer(null);
+    } catch (error) { notifyError(errorMessage(error, "تعذر دمج السجلين")); }
+    finally { setDuplicatesBusy(false); }
   };
 
   const saveInteraction = async () => {
@@ -241,23 +315,12 @@ export default function CustomersPage() {
     } catch (error) { notifyError(errorMessage(error, "تعذر حفظ التواصل")); }
   };
 
-  const loadSegment = async () => {
-    try { setSegmentCustomers(await fetchApi(`/customers/segments?tag=${encodeURIComponent(segmentTag)}&min_purchases=${segmentMin}`)); }
-    catch (error) { notifyError(errorMessage(error, "تعذر تجهيز القائمة")); }
-  };
-
-  const exportSegment = () => {
-    const rows = [["name", "phone", "type", "purchases"], ...segmentCustomers.map(customer => [customer.name, customer.phone, customer.customer_type, String(customer.total_purchases)])];
-    const csv = "\uFEFF" + rows.map(row => row.map(value => `"${String(value || "").replaceAll('"', '""')}"`).join(",")).join("\r\n");
-    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-    const anchor = document.createElement("a"); anchor.href = url; anchor.download = "customer-list.csv"; anchor.click(); URL.revokeObjectURL(url);
-  };
-
   const cities = [...new Set(customers.map(customer => customer.city?.trim()).filter((city): city is string => Boolean(city)))].sort((a, b) => a.localeCompare(b, "ar"));
   const filteredCustomers = customers.filter(customer => {
     if (filterType && customer.customer_type !== filterType) return false;
     if (filterCity && customer.city?.trim() !== filterCity) return false;
     if (filterDebt && Number(customer.balance || 0) <= 0) return false;
+    if (filterOverdue && !overdue.some(invoice => invoice.customer_id === customer.id)) return false;
     if (userRole === "ADMIN" && filterActivity && activityCutoff !== null) {
       const recent = Boolean(customer.last_purchase_date && activityCutoff - new Date(customer.last_purchase_date).getTime() <= 30 * 86400000);
       if (filterActivity === "recent" && !recent) return false;
@@ -265,6 +328,16 @@ export default function CustomersPage() {
     }
     return true;
   });
+
+  const exportVisibleCustomers = () => {
+    try {
+      exportCustomers(filteredCustomers.map(customer => ({
+        name: customer.name, phone: customer.phone, type: customerTypeLabels[customer.customer_type] || customer.customer_type,
+        city: customer.city || "", purchases: Number(customer.total_purchases || 0),
+        balance: Number(customer.balance || 0), creditLimit: Number(customer.credit_limit || 0),
+      })), exportFormat);
+    } catch (error) { notifyError(errorMessage(error, "تعذر تصدير العملاء")); }
+  };
 
   return (
     <div className="min-h-screen" dir="rtl">
@@ -276,12 +349,14 @@ export default function CustomersPage() {
             <div>
               <h1 className="app-heading">العملاء</h1>
             </div>
-            <button
-              onClick={openAdd}
-              className="app-primary-button"
-            >
-              + إضافة عميل
-            </button>
+            <div className="flex flex-wrap gap-2">
+              {userRole === "ADMIN" && <div className="flex items-center gap-2">
+                <div className="min-w-28"><ProductSelect label="صيغة تصدير العملاء" value={exportFormat} onChange={value => setExportFormat(value as CustomerExportFormat)} placeholder="اختر الصيغة" allowClear={false} compact options={[{ value: "xlsx", label: "Excel" }, { value: "csv", label: "CSV" }, { value: "pdf", label: "PDF من الطباعة" }]} /></div>
+                <button type="button" className="app-secondary-button" disabled={loading || loadError || filteredCustomers.length === 0} onClick={exportVisibleCustomers}>تصدير</button>
+              </div>}
+              {userRole === "ADMIN" && <button type="button" className="app-secondary-button" disabled={duplicatesBusy} onClick={reviewDuplicates}>مراجعة التكرار</button>}
+              <button onClick={openAdd} className="app-primary-button">+ إضافة عميل</button>
+            </div>
           </div>
 
           <section className="app-panel p-4 sm:p-5" aria-label="تصفية العملاء">
@@ -299,11 +374,35 @@ export default function CustomersPage() {
                   options={[{ value: "recent", label: "آخر ٣٠ يومًا" }, { value: "older", label: "أقدم أو بلا مشتريات" }]} compact />
               </div>}
               {(userRole === "ADMIN" || userRole === "CASHIER_ORDERS") && <label className="flex min-h-12 items-center gap-2 text-sm"><input type="checkbox" checked={filterDebt} onChange={event => setFilterDebt(event.target.checked)} />عليهم مديونية</label>}
-              {(filterType || filterCity || filterDebt || filterActivity) && <button type="button" className="app-secondary-button" onClick={() => { setFilterType(""); setFilterCity(""); setFilterDebt(false); setFilterActivity(""); }}>مسح الفلاتر</button>}
+              {userRole === "ADMIN" && <label className="flex min-h-12 items-center gap-2 text-sm"><input type="checkbox" checked={filterOverdue} disabled={overdueError} onChange={event => setFilterOverdue(event.target.checked)} />متأخرون عن السداد</label>}
+              {(filterType || filterCity || filterDebt || filterActivity || filterOverdue) && <button type="button" className="app-secondary-button" onClick={() => { setFilterType(""); setFilterCity(""); setFilterDebt(false); setFilterActivity(""); setFilterOverdue(false); }}>مسح الفلاتر</button>}
             </div>
           </section>
+          {userRole === "ADMIN" && overdueError && <p role="alert" className="text-sm text-[#ffb4ab]">تعذر تحميل المستحقات المتأخرة. حدّث الصفحة قبل الاعتماد على فلتر التأخير.</p>}
+          {userRole === "ADMIN" && mailConfigured === false && <p role="status" className="app-muted text-sm">تنبيهات التأخير تظهر داخل النظام. إرسالها بالبريد يحتاج إعداد Gmail في السيرفر.</p>}
+          {userRole === "ADMIN" && filterOverdue && !overdueError && <section className="app-panel p-4 sm:p-5" aria-label="الفواتير المتأخرة">
+            <h2 className="mb-2 font-bold">الفواتير المتأخرة</h2>
+            {overdue.length === 0 && <p className="app-muted text-sm">لا توجد فواتير متأخرة.</p>}
+            <div className="divide-y divide-current/10">{overdue.map(invoice => <div key={invoice.order_id} className="flex flex-wrap items-center justify-between gap-2 py-3 text-sm">
+              <div className="min-w-0"><strong>{invoice.customer_name} · فاتورة {invoice.public_number}</strong><p className="app-muted">الاستحقاق {invoice.due_date} · {invoice.customer_phone}</p></div>
+              <div className="flex items-center gap-3"><strong className="text-[#ffb4ab]">{invoice.remaining.toFixed(2)} ج.م</strong><button type="button" className="text-primary" onClick={() => { const customer = customers.find(row => row.id === invoice.customer_id); if (customer) openProfile(customer); }}>فتح العميل</button></div>
+            </div>)}</div>
+          </section>}
 
-          {userRole === "ADMIN" && <details className="app-panel p-4 sm:p-5"><summary className="cursor-pointer font-semibold">تصدير قائمة العملاء</summary><div className="mt-4 flex flex-wrap gap-3"><input className="app-field" aria-label="وسم العميل" placeholder="وسم العميل" value={segmentTag} onChange={event => setSegmentTag(event.target.value)} /><ZeroHintNumberInput aria-label="أقل إجمالي مشتريات" className="app-field" min="0" value={segmentMin} onChange={event => setSegmentMin(Number(event.target.value) || 0)} /><button className="app-secondary-button" onClick={loadSegment}>تجهيز القائمة</button><button disabled={!segmentCustomers.length} className="app-secondary-button disabled:opacity-40" onClick={exportSegment}>تنزيل CSV</button></div></details>}
+          {userRole === "ADMIN" && duplicateGroups !== null && <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 p-4" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setDuplicateGroups(null); }}>
+            <section className="app-panel max-h-[85vh] w-full max-w-xl space-y-4 overflow-y-auto p-4 sm:p-5" role="dialog" aria-modal="true" aria-label="مراجعة العملاء المكررين">
+            <div className="flex items-center justify-between gap-3"><h2 className="font-bold">سجلات بنفس رقم الهاتف</h2><button type="button" className="app-icon-button" aria-label="إغلاق مراجعة التكرار" onClick={() => setDuplicateGroups(null)}><span className="material-symbols-outlined" aria-hidden="true">close</span></button></div>
+            {duplicateGroups.map(group => {
+              const targetId = duplicateTargets[group.phone] || group.customers[0].id;
+              const target = group.customers.find(customer => customer.id === targetId) || group.customers[0];
+              return <div key={group.phone} className="space-y-3 border-t border-current/10 pt-4">
+                <div className="flex flex-wrap items-center gap-3"><strong dir="ltr">{group.phone}</strong><div className="min-w-48 flex-1"><ProductSelect label="السجل الذي سيبقى" value={target.id} onChange={value => setDuplicateTargets(current => ({ ...current, [group.phone]: value }))} placeholder="اختر السجل" allowClear={false} compact options={group.customers.map(customer => ({ value: customer.id, label: customer.name }))} /></div></div>
+                <p className="app-muted text-sm">المحفوظ: {target.name} · الرصيد {target.balance.toFixed(2)} ج.م · الحد {target.credit_limit.toFixed(2)} ج.م</p>
+                {group.customers.filter(customer => customer.id !== target.id).map(source => <div key={source.id} className="flex flex-wrap items-center justify-between gap-3 text-sm"><span>{source.name} · الرصيد {source.balance.toFixed(2)} ج.م{source.balance + target.balance > target.credit_limit ? " · ارفع حد السجل المحفوظ أولًا" : ""}</span><button type="button" disabled={duplicatesBusy || source.balance + target.balance > target.credit_limit} className="app-secondary-button !px-3 !py-2 disabled:opacity-40" onClick={() => void mergeDuplicate(source, target)}>دمج في {target.name}</button></div>)}
+              </div>;
+            })}
+            </section>
+          </div>}
 
       {loadError && <p role="alert" className="app-panel rounded-xl border-red-500/30 p-4 text-sm text-red-300">تعذر تحديث العملاء. حاول تحديث الصفحة.</p>}
       <div className="app-panel overflow-hidden">
@@ -317,7 +416,7 @@ export default function CustomersPage() {
           {!loading && !loadError && filteredCustomers.length === 0 && <p className="app-muted p-6 text-center text-sm">{customers.length ? "لا يوجد عملاء مطابقون للفلاتر" : "لا يوجد عملاء مضافين بعد"}</p>}
         </div>
         <div className="hidden overflow-x-auto md:block">
-          <table className="w-full text-right text-sm">
+          <table className="w-full text-center text-sm [&_td]:text-center [&_th]:text-center">
             <thead className="app-table-head border-b border-white/5">
               <tr>
                 <th className="px-4 py-3 font-medium">اسم العميل</th>
@@ -336,7 +435,7 @@ export default function CustomersPage() {
                   <td className="px-4 py-3 font-medium text-white">{c.name}</td>
                   <td className="px-4 py-3" dir="ltr">{c.phone}</td>
                   <td className="px-4 py-3">
-                    <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-[#e2bfb0]">
+                    <span className="inline-block rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-[#e2bfb0]">
                       {customerTypeLabels[c.customer_type] || c.customer_type}
                     </span>
                   </td>
@@ -364,10 +463,10 @@ export default function CustomersPage() {
         <section className="customer-drawer flex h-full w-full max-w-[760px] flex-col shadow-2xl">
           <header className="flex shrink-0 items-center justify-between gap-4 border-b border-current/10 px-5 py-5 sm:px-7">
             <div className="min-w-0"><h2 className="truncate text-xl font-bold">{profileCustomer.name}</h2><span className="app-muted text-sm" dir="ltr">{profileCustomer.phone}</span></div>
-            <button type="button" aria-label="إغلاق ملف العميل" className="app-icon-button !rounded-xl" onClick={() => { ++profileRequest.current; setProfileCustomer(null); setPaymentCustomer(null); }}><span className="material-symbols-outlined" aria-hidden="true">close</span></button>
+            <button type="button" aria-label="إغلاق ملف العميل" className="app-icon-button !rounded-xl" onClick={() => { ++profileRequest.current; setProfileCustomer(null); setPaymentCustomer(null); setSelectedInvoiceId(null); }}><span className="material-symbols-outlined" aria-hidden="true">close</span></button>
           </header>
           <nav className="flex shrink-0 gap-1 overflow-x-auto border-b border-current/10 px-4 py-2 sm:px-6" aria-label="أقسام ملف العميل">
-            {([ ["details", "البيانات"], ...(userRole === "ADMIN" ? [["orders", "الفواتير"]] : []), ["payments", "التحصيل"], ["followup", "المتابعة"] ] as Array<["details" | "orders" | "payments" | "followup", string]>).map(([tab, label]) =>
+            {([ ["details", "البيانات"], ...(userRole === "ADMIN" ? [["statement", "كشف الحساب"]] : []), ["payments", "التحصيل"], ["followup", "المتابعة"] ] as Array<["details" | "statement" | "payments" | "followup", string]>).map(([tab, label]) =>
               <button key={tab} type="button" aria-current={profileTab === tab ? "page" : undefined} className={`shrink-0 rounded-xl px-4 py-2.5 text-sm font-semibold ${profileTab === tab ? "bg-primary text-white" : "app-muted hover:bg-white/5"}`} onClick={() => void selectProfileTab(profileCustomer, tab)}>{label}</button>
             )}
           </nav>
@@ -376,36 +475,50 @@ export default function CustomersPage() {
             {profileError && <p role="alert" className="mb-4 text-sm text-red-400">{profileError}</p>}
             {profileTab === "details" && <div className="space-y-6">
               <div className="flex flex-wrap items-center justify-between gap-3"><span className="app-muted text-sm">{customerTypeLabels[profileCustomer.customer_type] || profileCustomer.customer_type}{profileCustomer.city ? ` · ${profileCustomer.city}` : ""}</span><button type="button" className="app-secondary-button" onClick={() => openEdit(profileCustomer)}>تعديل البيانات</button></div>
-              <dl className="grid gap-x-6 gap-y-4 border-y border-current/10 py-5 text-sm sm:grid-cols-2">
-                <div><dt className="app-muted">الهاتف</dt><dd className="mt-1 font-semibold" dir="ltr">{profileCustomer.phone}</dd></div>
-                <div><dt className="app-muted">واتساب</dt><dd className="mt-1 font-semibold" dir="ltr">{profileCustomer.whatsapp_number || "—"}</dd></div>
-                <div><dt className="app-muted">البريد الإلكتروني</dt><dd className="mt-1 break-all font-semibold">{profileCustomer.email || "—"}</dd></div>
-                <div><dt className="app-muted">المدينة</dt><dd className="mt-1 font-semibold">{profileCustomer.city || "—"}</dd></div>
-                <div className="sm:col-span-2"><dt className="app-muted">العناوين</dt><dd className="mt-1 font-semibold">{(profileCustomer.addresses?.length ? profileCustomer.addresses : [profileCustomer.address]).filter(Boolean).join(" · ") || "—"}</dd></div>
-                <div><dt className="app-muted">الوسوم</dt><dd className="mt-1">{(profileCustomer.tags || []).join("، ") || "—"}</dd></div>
-                <div><dt className="app-muted">الاهتمامات</dt><dd className="mt-1">{(profileCustomer.favorite_categories || []).join("، ") || "—"}</dd></div>
-                {profileCustomer.notes && <div className="sm:col-span-2"><dt className="app-muted">ملاحظات</dt><dd className="mt-1 whitespace-pre-wrap">{profileCustomer.notes}</dd></div>}
+              <dl className="grid gap-x-6 rounded-2xl border border-current/10 px-4 text-sm sm:grid-cols-2 sm:px-5">
+                <div className="grid min-w-0 grid-cols-[5.5rem_minmax(0,1fr)] gap-2 border-b border-current/10 py-3"><dt className="app-muted">الهاتف</dt><dd className="min-w-0 font-semibold" dir="ltr">{profileCustomer.phone}</dd></div>
+                {profileCustomer.whatsapp_number && <div className="grid min-w-0 grid-cols-[5.5rem_minmax(0,1fr)] gap-2 border-b border-current/10 py-3"><dt className="app-muted">واتساب</dt><dd className="min-w-0 font-semibold" dir="ltr">{profileCustomer.whatsapp_number}</dd></div>}
+                {profileCustomer.city && <div className="grid min-w-0 grid-cols-[5.5rem_minmax(0,1fr)] gap-2 border-b border-current/10 py-3"><dt className="app-muted">المدينة</dt><dd className="min-w-0 font-semibold">{profileCustomer.city}</dd></div>}
+                {profileCustomer.email && <div className="grid min-w-0 grid-cols-[5.5rem_minmax(0,1fr)] gap-2 border-b border-current/10 py-3"><dt className="app-muted">البريد</dt><dd className="min-w-0 break-all font-semibold" dir="ltr">{profileCustomer.email}</dd></div>}
+                {(profileCustomer.addresses?.length || profileCustomer.address) && <div className="grid min-w-0 grid-cols-[5.5rem_minmax(0,1fr)] gap-2 border-b border-current/10 py-3 sm:col-span-2"><dt className="app-muted">العناوين</dt><dd className="min-w-0 space-y-1 font-semibold">{(profileCustomer.addresses?.length ? profileCustomer.addresses : [profileCustomer.address]).filter(Boolean).map((address, index) => <div key={`${address}-${index}`}>{address}</div>)}</dd></div>}
+                {(profileCustomer.tags?.length || 0) > 0 && <div className="grid min-w-0 grid-cols-[5.5rem_minmax(0,1fr)] gap-2 border-b border-current/10 py-3"><dt className="app-muted">الوسوم</dt><dd className="min-w-0">{profileCustomer.tags?.join("، ")}</dd></div>}
+                {(profileCustomer.favorite_categories?.length || 0) > 0 && <div className="grid min-w-0 grid-cols-[5.5rem_minmax(0,1fr)] gap-2 border-b border-current/10 py-3"><dt className="app-muted">الاهتمامات</dt><dd className="min-w-0">{profileCustomer.favorite_categories?.join("، ")}</dd></div>}
+                {profileCustomer.notes && <div className="grid min-w-0 grid-cols-[5.5rem_minmax(0,1fr)] gap-2 py-3 sm:col-span-2"><dt className="app-muted">ملاحظات</dt><dd className="min-w-0 whitespace-pre-wrap">{profileCustomer.notes}</dd></div>}
               </dl>
-              {userRole === "ADMIN" && <dl className="grid gap-x-6 gap-y-4 text-sm sm:grid-cols-2">
-                <div><dt className="app-muted">عدد المشتريات</dt><dd className="mt-1 font-semibold">{profileCustomer.purchase_count ?? 0}</dd></div>
-                <div><dt className="app-muted">إجمالي المشتريات</dt><dd className="mt-1 font-semibold">{Number(profileCustomer.total_purchases || 0).toFixed(2)} ج.م</dd></div>
-                <div><dt className="app-muted">متوسط الطلب</dt><dd className="mt-1 font-semibold">{Number(profileCustomer.average_purchase || 0).toFixed(2)} ج.م</dd></div>
-                <div><dt className="app-muted">آخر شراء</dt><dd className="mt-1 font-semibold">{profileCustomer.last_purchase_date ? new Date(profileCustomer.last_purchase_date).toLocaleDateString("ar-EG") : "لا يوجد"}</dd></div>
+              {userRole === "ADMIN" && <dl className="grid gap-x-6 border-t border-current/10 text-sm sm:grid-cols-2">
+                <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-2 border-b border-current/10 py-3"><dt className="app-muted">عدد المشتريات</dt><dd className="font-semibold">{profileCustomer.purchase_count ?? 0}</dd></div>
+                <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-2 border-b border-current/10 py-3"><dt className="app-muted">إجمالي المشتريات</dt><dd className="font-semibold">{Number(profileCustomer.total_purchases || 0).toFixed(2)} ج.م</dd></div>
+                <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-2 border-b border-current/10 py-3"><dt className="app-muted">متوسط الطلب</dt><dd className="font-semibold">{Number(profileCustomer.average_purchase || 0).toFixed(2)} ج.م</dd></div>
+                <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-2 border-b border-current/10 py-3"><dt className="app-muted">آخر شراء</dt><dd className="font-semibold">{profileCustomer.last_purchase_date ? new Date(profileCustomer.last_purchase_date).toLocaleDateString("ar-EG") : "لا يوجد"}</dd></div>
               </dl>}
             </div>}
-            {profileTab === "orders" && userRole === "ADMIN" && <div className="space-y-2">
-              {orderHistory.length === 0 && !profileBusy ? <p className="app-muted text-sm">لا توجد فواتير لهذا العميل.</p> : orderHistory.map(order => <div key={order.id} className="flex flex-wrap items-center justify-between gap-2 border-b border-current/10 py-3 text-sm"><span className="font-semibold">فاتورة {order.public_number}</span><span className="app-muted">{new Date(order.created_at).toLocaleDateString("ar-EG")}</span><span>{Number(order.total_amount).toFixed(2)} ج.م</span></div>)}
+            {profileTab === "statement" && userRole === "ADMIN" && <div className="space-y-4 text-sm">
+              {statement && <><div className="flex justify-between border-b border-current/10 pb-3"><span>الرصيد السابق</span><strong>{statement.opening_balance.toFixed(2)} ج.م</strong></div>
+                {statement.entries.length === 0 && <p className="app-muted">لا توجد حركات مسجلة.</p>}
+                <div className="divide-y divide-current/10">{statement.entries.map(entry => <div key={`${entry.kind}-${entry.id}`} className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1 py-3 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+                  <div className="min-w-0"><strong>{entry.kind === "invoice" ? "فاتورة بيع" : entry.kind === "return" ? "استرجاع أو استبدال" : entry.kind === "refund" ? "رد مبلغ" : "دفعة"}{entry.public_number ? ` · ${entry.public_number}` : ""}</strong><div className="app-muted">{new Date(entry.at).toLocaleString("ar-EG")}{entry.method ? ` · ${entry.method}` : ""}</div></div>
+                  <span className={entry.direction === "debit" ? "text-[#ffb4ab]" : "text-emerald-400"}>{entry.direction === "debit" ? "+" : "−"}{entry.amount.toFixed(2)} ج.م</span>
+                  <span className="app-muted col-span-2 sm:col-span-1">الرصيد {entry.balance.toFixed(2)} ج.م</span>
+                  {entry.order_id && <button type="button" className="w-fit text-primary underline-offset-4 hover:underline" onClick={() => setSelectedInvoiceId(entry.order_id)}>عرض الفاتورة</button>}
+                </div>)}</div>
+                <div className="flex justify-between border-t border-current/10 pt-3 font-bold"><span>الرصيد الحالي</span><span>{statement.closing_balance.toFixed(2)} ج.م</span></div></>}
             </div>}
             {profileTab === "payments" && <div className="space-y-6">
               <div className="flex items-baseline justify-between border-b border-current/10 pb-4"><span className="app-muted text-sm">الرصيد المستحق</span><strong className="text-xl">{Number(profileCustomer.balance || 0).toFixed(2)} ج.م</strong></div>
+              {dues && <div className="space-y-2 text-sm"><h3 className="font-semibold">الفواتير المستحقة</h3>
+                {dues.unlinked_balance > 0 && <div className="app-muted border-b border-current/10 py-2">رصيد سابق غير مربوط بفاتورة: {dues.unlinked_balance.toFixed(2)} ج.م · موعده غير مسجل</div>}
+                {dues.invoices.map(invoice => <div key={invoice.order_id} className="flex flex-wrap justify-between gap-2 border-b border-current/10 py-2"><span>فاتورة {invoice.public_number} · {invoice.remaining.toFixed(2)} ج.م</span><span className={invoice.due_date && invoice.due_date < cairoToday() ? "text-[#ffb4ab]" : "app-muted"}>{invoice.due_date ? `استحقاق ${invoice.due_date}` : "الموعد غير مسجل"}</span></div>)}
+                {dues.invoices.length === 0 && dues.unlinked_balance === 0 && <p className="app-muted">لا توجد مديونيات مستحقة.</p>}
+              </div>}
               {paymentError && <p role="alert" className="text-sm text-red-400">{paymentError}</p>}
               <div className="grid gap-3 sm:grid-cols-2"><label className="text-sm">المبلغ المحصّل<input type="number" min="0.01" max={Number(profileCustomer.balance || 0)} step="0.01" value={paymentAmount || ""} onChange={event => setPaymentAmount(Number(event.target.value) || 0)} className="app-field mt-1" /></label><div className="text-sm"><span className="mb-1 block">وسيلة التحصيل</span><ProductSelect label="وسيلة التحصيل" value={paymentMethod} onChange={setPaymentMethod} placeholder="اختر وسيلة التحصيل" allowClear={false} compact options={[{ value: "Cash", label: "نقدًا" }, { value: "Instapay", label: "إنستا باي" }, { value: "Credit Card", label: "فيزا" }, { value: "Wallet", label: "محفظة" }]} /></div></div>
+              {needsNextDueDate(dues, paymentAmount) && <div className="text-sm">موعد الدفعة التالية للباقي *<div className="mt-1"><DatePicker label="موعد الدفعة التالية للباقي" value={nextDueDate} onChange={setNextDueDate} min={cairoToday()} /></div></div>}
               {paymentMethod === "Wallet" && paymentAmount > 0 && <p className="app-muted text-sm">رسوم المحفظة ١٪: {(Math.round(paymentAmount) / 100).toFixed(2)} ج.م · المحصل: {(paymentAmount + Math.round(paymentAmount) / 100).toFixed(2)} ج.م</p>}
-              <button type="button" disabled={profileBusy || paymentBusy || paymentAmount <= 0 || Math.abs(Math.round(paymentAmount * 100) - paymentAmount * 100) > 1e-6 || paymentAmount > Number(profileCustomer.balance || 0)} onClick={collectPayment} className="app-primary-button disabled:opacity-40">{paymentBusy ? "جارٍ التسجيل..." : "تسجيل التحصيل"}</button>
+              <button type="button" disabled={profileBusy || paymentBusy || paymentAmount <= 0 || Math.abs(Math.round(paymentAmount * 100) - paymentAmount * 100) > 1e-6 || paymentAmount > Number(profileCustomer.balance || 0) || needsNextDueDate(dues, paymentAmount) && (!nextDueDate || nextDueDate < cairoToday())} onClick={collectPayment} className="app-primary-button disabled:opacity-40">{paymentBusy ? "جارٍ التسجيل..." : "تسجيل التحصيل"}</button>
               <div className="border-t border-current/10 pt-4"><h3 className="mb-2 font-semibold">{userRole === "ADMIN" ? "سجل المدفوعات" : "سجل التحصيل"}</h3>{paymentHistory.length === 0 && !profileBusy ? <p className="app-muted text-sm">لا توجد دفعات مسجلة.</p> : paymentHistory.map(payment => <div key={payment.id} className="flex flex-wrap justify-between gap-2 border-b border-current/10 py-3 text-sm"><span>{userRole === "ADMIN" ? `${payment.kind === "SALE" ? "دفعة بيع" : "تحصيل"} · ` : ""}{Number(payment.amount).toFixed(2)} ج.م{Number(payment.wallet_fee_amount || 0) > 0 ? ` · رسوم ${Number(payment.wallet_fee_amount).toFixed(2)}` : ""}</span><span className="app-muted">{payment.method} · {new Date(payment.created_at).toLocaleDateString("ar-EG")}</span></div>)}</div>
             </div>}
             {profileTab === "followup" && <div className="space-y-5">
-              <div className="grid gap-3 sm:grid-cols-2"><div className="text-sm"><span className="mb-1 block">طريقة التواصل</span><ProductSelect label="طريقة التواصل" value={interactionChannel} onChange={setInteractionChannel} placeholder="اختر طريقة التواصل" allowClear={false} compact options={[{ value: "Phone Call", label: "اتصال هاتفي" }, { value: "In Person", label: "زيارة" }, { value: "Other", label: "أخرى" }]} /></div><label className="text-sm">موعد متابعة · اختياري<input type="datetime-local" className="app-field mt-1" value={followUpAt} onChange={event => setFollowUpAt(event.target.value)} /></label></div>
+              <div className="grid gap-3 sm:grid-cols-2"><div className="text-sm"><span className="mb-1 block">طريقة التواصل</span><ProductSelect label="طريقة التواصل" value={interactionChannel} onChange={setInteractionChannel} placeholder="اختر طريقة التواصل" allowClear={false} compact options={[{ value: "Phone Call", label: "اتصال هاتفي" }, { value: "In Person", label: "زيارة" }, { value: "Other", label: "أخرى" }]} /></div><div className="text-sm"><span className="mb-1 block">موعد متابعة · اختياري</span><div className="grid grid-cols-[minmax(0,1fr)_7rem] gap-2"><DatePicker label="تاريخ المتابعة" value={followUpAt.slice(0, 10)} onChange={date => setFollowUpAt(date ? `${date}T${followUpAt.slice(11, 16) || "09:00"}` : "")} allowClear /><input type="time" aria-label="وقت المتابعة" disabled={!followUpAt} className="app-field" value={followUpAt.slice(11, 16)} onChange={event => setFollowUpAt(`${followUpAt.slice(0, 10)}T${event.target.value}`)} /></div></div></div>
               <label className="block text-sm">ملخص التواصل<textarea className="app-field mt-1 min-h-24" value={interactionNote} onChange={event => setInteractionNote(event.target.value)} /></label>
               <button type="button" className="app-primary-button" onClick={saveInteraction} disabled={interactionNote.trim().length < 2}>حفظ التواصل</button>
               <div className="border-t border-current/10 pt-4">{interactions.length === 0 && !profileBusy ? <p className="app-muted text-sm">لا توجد متابعات مسجلة.</p> : interactions.map(entry => <div key={entry.id} className="border-b border-current/10 py-3 text-sm"><div className="flex flex-wrap justify-between gap-2"><strong>{entry.channel}</strong><span className="app-muted">{new Date(entry.created_at).toLocaleString("ar-EG")}</span></div><p className="mt-1 whitespace-pre-wrap">{entry.note}</p>{entry.follow_up_at && <span className="app-muted">متابعة: {new Date(entry.follow_up_at).toLocaleString("ar-EG")}</span>}</div>)}</div>
@@ -413,6 +526,8 @@ export default function CustomersPage() {
           </div>
         </section>
       </div>}
+
+      {selectedInvoiceId && <InvoiceDetailsDialog key={selectedInvoiceId} invoiceId={selectedInvoiceId} onClose={() => setSelectedInvoiceId(null)} />}
 
       {isSlideoverOpen && (
         <div className="fixed inset-0 z-[100] flex justify-end" role="dialog" aria-modal="true" aria-labelledby="customer-form-title">

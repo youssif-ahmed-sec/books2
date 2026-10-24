@@ -38,6 +38,7 @@ class Payment(Base):
     wallet_fee_amount = Column(Numeric(12, 2), nullable=False, default=0)
     method = Column(String, nullable=False)
     kind = Column(String, nullable=False)  # SALE, COLLECTION, REFUND
+    request_fingerprint = Column(String(64), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

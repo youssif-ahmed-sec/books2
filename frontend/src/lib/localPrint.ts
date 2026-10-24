@@ -15,6 +15,7 @@ interface OrderDocument {
   amount_received?: number;
   received_method?: string | null;
   expected_collection_method?: string | null;
+  next_due_date?: string | null;
   source?: string | null;
   total_amount: number;
   discount_amount: number;
@@ -78,6 +79,7 @@ export async function printOrderInvoice(orderId: string): Promise<void> {
     amount_received: order.amount_received,
     received_method: order.received_method,
     expected_collection_method: order.expected_collection_method,
+    next_due_date: order.next_due_date,
     remaining_amount: Math.max(0, Number(order.total_amount) - Number(order.amount_received || 0)),
     cart: order.items.map(item => ({
       name: item.product_name,

@@ -306,6 +306,25 @@ class ReturnService:
             if next_balance > Decimal(str(customer.credit_limit or 0)):
                 raise ValueError("Exchange exceeds customer credit limit.")
             customer.balance = next_balance
+            if order.deferred_remaining is not None and difference > 0:
+                order.deferred_remaining = Decimal(str(order.deferred_remaining)) + difference
+                if order.next_due_date is None:
+                    from datetime import datetime
+                    from zoneinfo import ZoneInfo
+                    order.next_due_date = datetime.now(ZoneInfo("Africa/Cairo")).date()
+            open_dues = (await db.execute(select(Order).where(
+                Order.customer_id == order.customer_id, Order.deferred_remaining > 0,
+            ).order_by(Order.next_due_date.asc().nulls_last(), Order.created_at, Order.id).with_for_update())).scalars().all()
+            tracked_total = sum((Decimal(str(due.deferred_remaining)) for due in open_dues), Decimal("0"))
+            excess = max(Decimal("0"), tracked_total - next_balance)
+            for due in open_dues:
+                if excess <= 0:
+                    break
+                reduction = min(excess, Decimal(str(due.deferred_remaining)))
+                due.deferred_remaining = Decimal(str(due.deferred_remaining)) - reduction
+                if due.deferred_remaining == 0:
+                    due.next_due_date = None
+                excess -= reduction
         else:
             if (result.refund_amount or result.charge_amount) and not payload.settlement_confirmed:
                 raise ValueError("Confirm refund or collection through the original payment method before recording the return.")

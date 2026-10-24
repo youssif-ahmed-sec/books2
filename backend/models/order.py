@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Text, Numeric, JSON, UniqueConstraint, Index, BigInteger, Sequence
+from sqlalchemy import Column, String, Boolean, Date, DateTime, ForeignKey, Text, Numeric, JSON, UniqueConstraint, Index, BigInteger, Sequence, CheckConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from .user import Base
@@ -40,6 +40,7 @@ class Order(Base):
         Index("ix_orders_status_created", "status", "created_at"),
         Index("ix_orders_created_id", "created_at", "id"),
         Index("ix_orders_customer_status", "customer_id", "status"),
+        Index("ix_orders_open_due", "next_due_date", postgresql_where=text("deferred_remaining > 0")),
     )
 
     id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
@@ -61,6 +62,8 @@ class Order(Base):
     wallet_fee_amount = Column(Numeric(12, 2), nullable=False, default=0)
     shipping_cost   = Column(Numeric(12, 2), nullable=False, default=0)
     expected_collection_method = Column(String(32), nullable=True)
+    next_due_date = Column(Date, nullable=True)
+    deferred_remaining = Column(Numeric(12, 2), nullable=True)
 
     payment_method  = Column(String, default="Cash")
     notes           = Column(Text, nullable=True)
@@ -71,6 +74,39 @@ class Order(Base):
     updated_at      = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     preparing_started_at = Column(DateTime(timezone=True), nullable=True)
     priority = Column(String, nullable=False, default="Normal")
+
+
+class CustomerDebtAllocation(Base):
+    __tablename__ = "customer_debt_allocations"
+    __table_args__ = (
+        UniqueConstraint("payment_id", "order_id", name="uq_customer_debt_allocation_payment_order"),
+        CheckConstraint("amount > 0", name="ck_customer_debt_allocation_positive"),
+        Index("ix_customer_debt_allocations_order", "order_id"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    payment_id = Column(UUID(as_uuid=True), ForeignKey("payments.id"), nullable=False)
+    order_id = Column(UUID(as_uuid=True), ForeignKey("orders.id"), nullable=False)
+    amount = Column(Numeric(12, 2), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class CustomerDueAlert(Base):
+    __tablename__ = "customer_due_alerts"
+    __table_args__ = (
+        UniqueConstraint("order_id", "due_date", "user_id", name="uq_customer_due_alert_order_date_user"),
+        Index("ix_customer_due_alerts_email_pending", "email_sent_at", "created_at"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    order_id = Column(UUID(as_uuid=True), ForeignKey("orders.id"), nullable=False)
+    due_date = Column(Date, nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    email_sent_at = Column(DateTime(timezone=True), nullable=True)
+    email_attempts = Column(BigInteger, nullable=False, default=0)
+    email_last_attempt_at = Column(DateTime(timezone=True), nullable=True)
+    email_last_error = Column(String(500), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class OrderItem(Base):

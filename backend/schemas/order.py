@@ -2,7 +2,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from typing import List, Optional
 from typing import Literal
 from uuid import UUID
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from models.order import OrderStatusEnum, OrderSourceEnum
@@ -38,6 +38,7 @@ class OrderCreate(BaseModel):
     amount_received: Optional[Decimal] = Field(default=None, ge=0, allow_inf_nan=False, max_digits=12, decimal_places=2)
     received_method: Optional[Literal["Cash", "Instapay", "Wallet", "Credit Card"]] = None
     expected_collection_method: Optional[Literal["Cash", "Instapay", "Wallet", "Credit Card"]] = None
+    next_due_date: Optional[date] = None
     notes:           Optional[str] = None
     items:           List[OrderItemCreate]
     request_id:      UUID
@@ -67,7 +68,7 @@ class OrderCreate(BaseModel):
                 raise ValueError("Enter the amount received, including zero for full credit")
             if self.amount_received > 0 and self.received_method is None:
                 raise ValueError("Choose how the received amount was paid")
-        elif self.amount_received is not None or self.received_method is not None or self.expected_collection_method is not None:
+        elif self.amount_received is not None or self.received_method is not None or self.expected_collection_method is not None or self.next_due_date is not None:
             raise ValueError("Partial collection applies only to deferred payment")
         return self
 
@@ -161,6 +162,7 @@ class OrderResponse(BaseModel):
     wallet_fee_amount: float = 0
     shipping_cost:   float
     expected_collection_method: Optional[str] = None
+    next_due_date: Optional[date] = None
     payment_method:  str
     notes:           Optional[str] = None
     created_at:      datetime

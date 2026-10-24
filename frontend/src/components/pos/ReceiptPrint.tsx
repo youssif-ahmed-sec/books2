@@ -4,7 +4,7 @@ import Barcode from "react-barcode";
 interface ReceiptPrintProps {
   order: {
     publicNumber?: number; createdAt?: string; employeeName?: string;
-    paymentMethod?: string; receivedMethod?: string; expectedCollectionMethod?: string; customerName?: string;
+    paymentMethod?: string; receivedMethod?: string; expectedCollectionMethod?: string; nextDueDate?: string; customerName?: string;
     customerPhone?: string; customerAddress?: string; subtotal?: number;
     discount?: number; discountPercent?: number | null; walletFee?: number; shippingCost?: number; totalAmount?: number; amountReceived?: number; remainingAmount?: number;
     isDelivery?: boolean;
@@ -42,6 +42,7 @@ export const ReceiptPrint = forwardRef<HTMLDivElement, ReceiptPrintProps>(({ ord
       {pair(field("الدفع", paymentLabel(order?.paymentMethod)), order?.isDelivery ? field("العنوان", order.customerAddress) : null)}
       {order?.receivedMethod && field("طريقة تحصيل المستلم", paymentLabel(order.receivedMethod))}
       {order?.expectedCollectionMethod && field("تحصيل الباقي لاحقًا", paymentLabel(order.expectedCollectionMethod))}
+      {order?.nextDueDate && field("استحقاق الدفعة القادمة", order.nextDueDate)}
     </div>
 
     <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", marginTop: 8, fontSize: 10 }}>

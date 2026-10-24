@@ -652,6 +652,9 @@ class PrinterManager:
         expected_method = self._value(order, "expected_collection_method", default="")
         if expected_method:
             info_pair("تحصيل الباقي لاحقًا", payment_names.get(expected_method, expected_method))
+        next_due_date = self._value(order, "next_due_date", default="")
+        if next_due_date:
+            info_pair("استحقاق الدفعة القادمة", str(next_due_date))
         line(y, dash=True)
         y += u(16)
 

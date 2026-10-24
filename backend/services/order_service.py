@@ -140,6 +140,7 @@ class OrderService:
             if next_balance > Decimal(str(customer.credit_limit or 0)):
                 raise ValueError("Customer credit limit would be exceeded.")
             customer.balance = next_balance
+            order.deferred_remaining = amount - collected
             if collected > 0:
                 if received_method is None:
                     raise ValueError("Choose how the received amount was paid.")
@@ -175,6 +176,7 @@ class OrderService:
             "wallet_fee_amount": float(order.wallet_fee_amount or 0),
             "shipping_cost":   float(order.shipping_cost),
             "expected_collection_method": order.expected_collection_method,
+            "next_due_date": order.next_due_date,
             "payment_method":  order.payment_method,
             "notes":           order.notes,
             "created_at":      order.created_at,
@@ -393,6 +395,16 @@ class OrderService:
                 raise ValueError("Choose the expected collection method for the remaining balance.")
             if remaining <= 0 and order_in.expected_collection_method is not None:
                 raise ValueError("No remaining balance needs a collection method.")
+            if remaining > 0 and order_in.next_due_date is None:
+                raise ValueError("حدد تاريخ استحقاق الدفعة القادمة.")
+            if remaining <= 0 and order_in.next_due_date is not None:
+                raise ValueError("لا يوجد مبلغ آجل يحتاج تاريخ استحقاق.")
+            if order_in.next_due_date is not None:
+                from datetime import datetime
+                from zoneinfo import ZoneInfo
+                if order_in.next_due_date < datetime.now(ZoneInfo("Africa/Cairo")).date():
+                    raise ValueError("تاريخ الاستحقاق لا يمكن أن يكون في الماضي.")
+            order.next_due_date = order_in.next_due_date
         if order_in.expected_total is not None and order.total_amount != order_in.expected_total:
             await db.rollback()
             raise ValueError("Prices changed. Refresh the cart before checkout.")

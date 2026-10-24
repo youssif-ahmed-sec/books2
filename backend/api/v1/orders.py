@@ -1,23 +1,106 @@
 from typing import List, Optional
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import String, cast, func, or_, select
 
-from core.dependencies import require_pos_orders_access, get_current_user
+from core.dependencies import require_admin, require_pos_orders_access, get_current_user
 from core.idempotency import IdempotencyConflict
 from database import get_db
 from models.user import User, RoleEnum
 from schemas.order import OrderCreate, OrderDraftCreate, OrderResponse, OrderStatusUpdate, QuotationResponse, OrderAssignmentUpdate, OrderPreparation, LeadCreate
 from models.customer import Customer
 from models.financial import Payment
-from models.order import Order, OrderStatusEnum
+from models.order import CustomerDebtAllocation, Order, OrderStatusEnum
+from models.returns import SalesReturn
 from models.product import Product, ProductUnit
 from services.order_service import OrderService
 
 router = APIRouter(prefix="/orders", tags=["Orders"])
+
+
+@router.get("/invoices")
+async def list_invoices(
+    search: str = Query("", max_length=80),
+    date_from: date | None = None,
+    date_to: date | None = None,
+    payment_status: str | None = Query(None, pattern="^(paid|due|untracked)$"),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_admin),
+):
+    if date_from and date_to and date_from > date_to:
+        raise HTTPException(status_code=422, detail="تاريخ البداية بعد تاريخ النهاية")
+    query = select(Order, Customer.name).outerjoin(Customer, Customer.id == Order.customer_id).where(
+        Order.status.in_((OrderStatusEnum.DELIVERED.value, OrderStatusEnum.CLOSED.value, OrderStatusEnum.RETURNED.value)),
+    )
+    term = search.strip()
+    if term:
+        escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped}%"
+        query = query.where(or_(
+            cast(Order.public_number, String).ilike(pattern, escape="\\"),
+            Customer.name.ilike(pattern, escape="\\"),
+            Customer.phone.ilike(pattern, escape="\\"),
+        ))
+    cairo = ZoneInfo("Africa/Cairo")
+    if date_from:
+        query = query.where(Order.created_at >= datetime.combine(date_from, datetime.min.time(), tzinfo=cairo))
+    if date_to:
+        query = query.where(Order.created_at <= datetime.combine(date_to, datetime.max.time(), tzinfo=cairo))
+    is_credit = Order.payment_method == "Deferred Payment"
+    if payment_status == "paid":
+        query = query.where(or_(~is_credit, Order.deferred_remaining == 0))
+    elif payment_status == "due":
+        query = query.where(is_credit, Order.deferred_remaining > 0)
+    elif payment_status == "untracked":
+        query = query.where(is_credit, Order.deferred_remaining.is_(None))
+    rows = (await db.execute(query.order_by(Order.created_at.desc(), Order.id.desc()).limit(limit).offset(offset))).all()
+    return [{
+        "id": str(order.id), "public_number": order.public_number,
+        "customer_id": str(order.customer_id) if order.customer_id else None,
+        "customer_name": customer_name or "عميل نقدي", "status": order.status,
+        "total_amount": order.total_amount, "payment_method": order.payment_method,
+        "payment_status": "paid" if order.payment_method != "Deferred Payment" or order.deferred_remaining == 0
+            else "untracked" if order.deferred_remaining is None else "due",
+        "created_at": order.created_at,
+    } for order, customer_name in rows]
+
+
+@router.get("/{order_id}/activity")
+async def invoice_activity(
+    order_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_admin),
+):
+    order = (await db.execute(select(Order).where(Order.id == order_id))).scalar_one_or_none()
+    if order is None or order.status not in (OrderStatusEnum.DELIVERED.value, OrderStatusEnum.CLOSED.value, OrderStatusEnum.RETURNED.value):
+        raise HTTPException(status_code=404, detail="الفاتورة غير موجودة")
+    direct_payments = (await db.execute(select(Payment).where(Payment.order_id == order_id)
+                                        .order_by(Payment.created_at, Payment.id))).scalars().all()
+    allocations = (await db.execute(select(Payment, CustomerDebtAllocation.amount).join(
+        CustomerDebtAllocation, CustomerDebtAllocation.payment_id == Payment.id,
+    ).where(CustomerDebtAllocation.order_id == order_id).order_by(Payment.created_at, Payment.id))).all()
+    returns = (await db.execute(select(SalesReturn).where(or_(
+        SalesReturn.order_id == order_id, SalesReturn.exchange_order_id == order_id,
+    )).order_by(SalesReturn.created_at, SalesReturn.id))).scalars().all()
+    events = [{"id": str(payment.id), "kind": payment.kind.lower(), "at": payment.created_at,
+               "amount": payment.amount, "method": payment.method, "related_invoice": None}
+              for payment in direct_payments]
+    events.extend({"id": str(payment.id), "kind": "collection", "at": payment.created_at,
+                   "amount": amount, "method": payment.method, "related_invoice": None}
+                  for payment, amount in allocations)
+    events.extend({"id": str(record.id), "kind": ("exchange" if record.kind == "EXCHANGE" else "return") if record.order_id == order_id else "exchange_invoice",
+                   "at": record.created_at, "amount": record.returned_value if record.order_id == order_id else record.replacement_value,
+                   "method": record.payment_method,
+                   "related_invoice": str(record.exchange_order_id) if record.order_id == order_id and record.exchange_order_id else None}
+                  for record in returns)
+    events.sort(key=lambda event: (event["at"], event["id"]))
+    return {"remaining": order.deferred_remaining, "events": events}
 
 
 @router.get("/preparation-alerts")

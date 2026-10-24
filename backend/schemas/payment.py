@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 from uuid import UUID
@@ -14,6 +14,7 @@ class CustomerPaymentCreate(BaseModel):
     request_id: UUID
     amount: Decimal = Field(gt=0, max_digits=12, decimal_places=2, allow_inf_nan=False)
     method: CollectedPaymentMethod
+    next_due_date: date | None = None
 
 
 class PaymentResponse(BaseModel):

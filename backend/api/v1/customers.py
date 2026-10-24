@@ -4,6 +4,10 @@ from sqlalchemy.future import select
 from uuid import UUID
 from typing import List
 from decimal import Decimal, ROUND_HALF_UP
+from datetime import datetime
+from zoneinfo import ZoneInfo
+import hashlib
+import json
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 
@@ -16,7 +20,7 @@ from models.user import User, RoleEnum
 from models.customer import CustomerTypeEnum
 from models.customer import CustomerInteraction
 from models.product import PriceLevelEnum
-from models.order import Order
+from models.order import Order, CustomerDebtAllocation
 from schemas.customer import CustomerCreate, CustomerUpdate, CustomerResponse, CreditLimitUpdate, InteractionCreate, InteractionResponse
 from schemas.payment import CustomerPaymentCreate, PaymentResponse
 from services.cash_register_service import open_shift
@@ -197,9 +201,14 @@ async def collect_customer_payment(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_pos_orders_access),
 ):
+    fingerprint = hashlib.sha256(json.dumps({
+        "customer_id": str(customer_id), "user_id": str(current_user.id),
+        "amount": str(payment_in.amount), "method": payment_in.method,
+        "next_due_date": payment_in.next_due_date.isoformat() if payment_in.next_due_date else None,
+    }, sort_keys=True).encode()).hexdigest()
     existing = (await db.execute(select(Payment).where(Payment.id == payment_in.request_id))).scalar_one_or_none()
     if existing is not None:
-        if existing.customer_id != customer_id or existing.user_id != current_user.id or existing.kind != "COLLECTION" or existing.method != payment_in.method or Decimal(str(existing.amount)) != payment_in.amount:
+        if existing.customer_id != customer_id or existing.user_id != current_user.id or existing.kind != "COLLECTION" or existing.method != payment_in.method or Decimal(str(existing.amount)) != payment_in.amount or (existing.request_fingerprint is None and payment_in.next_due_date is not None) or (existing.request_fingerprint is not None and existing.request_fingerprint != fingerprint):
             raise HTTPException(status_code=409, detail="Payment request ID was already used differently")
         return existing
     customer = (await db.execute(select(Customer).where(
@@ -211,6 +220,26 @@ async def collect_customer_payment(
     wallet_fee = (amount / Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if payment_in.method == "Wallet" else Decimal("0")
     if amount > Decimal(str(customer.balance or 0)):
         raise HTTPException(status_code=400, detail="Payment exceeds the customer balance")
+    if payment_in.next_due_date and payment_in.next_due_date < datetime.now(ZoneInfo("Africa/Cairo")).date():
+        raise HTTPException(status_code=422, detail="تاريخ الدفعة القادمة لا يمكن أن يكون في الماضي")
+    open_orders = (await db.execute(select(Order).where(
+        Order.customer_id == customer_id, Order.deferred_remaining > 0,
+    ).order_by(Order.next_due_date.asc().nulls_last(), Order.created_at, Order.id).with_for_update())).scalars().all()
+    tracked = sum((Decimal(str(order.deferred_remaining)) for order in open_orders), Decimal("0"))
+    old_unlinked = max(Decimal("0"), Decimal(str(customer.balance or 0)) - tracked)
+    allocatable = max(Decimal("0"), amount - old_unlinked)
+    allocations: list[tuple[Order, Decimal]] = []
+    for order in open_orders:
+        applied = min(allocatable, Decimal(str(order.deferred_remaining)))
+        if applied <= 0:
+            break
+        allocations.append((order, applied))
+        allocatable -= applied
+    partly_paid = [order for order, applied in allocations if Decimal(str(order.deferred_remaining)) > applied]
+    if partly_paid and payment_in.next_due_date is None:
+        raise HTTPException(status_code=422, detail="حدد تاريخ استحقاق الدفعة التالية للباقي")
+    if payment_in.next_due_date and not partly_paid:
+        raise HTTPException(status_code=422, detail="لا توجد فاتورة مسددة جزئيًا تحتاج موعدًا جديدًا")
     customer.balance = Decimal(str(customer.balance)) - amount
     try:
         shift_id = (await open_shift(db, current_user.id)).id if payment_in.method == "Cash" else None
@@ -220,16 +249,23 @@ async def collect_customer_payment(
         id=payment_in.request_id,
         customer_id=customer_id, user_id=current_user.id,
         shift_id=shift_id, amount=amount, wallet_fee_amount=wallet_fee,
-        method=payment_in.method, kind="COLLECTION",
+        method=payment_in.method, kind="COLLECTION", request_fingerprint=fingerprint,
     )
     db.add(payment)
+    for order, applied in allocations:
+        order.deferred_remaining = Decimal(str(order.deferred_remaining)) - applied
+        if order.deferred_remaining == 0:
+            order.next_due_date = None
+        elif payment_in.next_due_date is not None:
+            order.next_due_date = payment_in.next_due_date
+        db.add(CustomerDebtAllocation(payment_id=payment.id, order_id=order.id, amount=applied))
     db.add(AuditLog(user_id=current_user.id, action="COLLECT_CUSTOMER_DEBT", entity_type="Customer", entity_id=str(customer_id), new_value={"amount": str(amount), "wallet_fee_amount": str(wallet_fee), "method": payment_in.method}))
     try:
         await db.commit()
     except IntegrityError:
         await db.rollback()
         replay = (await db.execute(select(Payment).where(Payment.id == payment_in.request_id))).scalar_one_or_none()
-        if replay is None or replay.customer_id != customer_id or replay.user_id != current_user.id or replay.kind != "COLLECTION" or replay.method != payment_in.method or Decimal(str(replay.amount)) != amount:
+        if replay is None or replay.customer_id != customer_id or replay.user_id != current_user.id or replay.kind != "COLLECTION" or replay.method != payment_in.method or Decimal(str(replay.amount)) != amount or replay.request_fingerprint != fingerprint:
             raise HTTPException(status_code=409, detail="Payment request ID was already used differently")
         return replay
     await db.refresh(payment)

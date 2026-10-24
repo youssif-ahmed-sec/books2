@@ -16,6 +16,7 @@ import { armUiSound, playUiSound } from "@/lib/uiSounds";
 import { getCurrentUser } from "@/lib/currentUser";
 import { useConfirmAction } from "@/components/ConfirmationProvider";
 import { ProductSelect } from "@/components/ProductSelect";
+import { DatePicker } from "@/components/DatePicker";
 import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
 import { emptyBarcodeScanCapture, englishBarcodeFromArabicLayout, englishBarcodeFromScan, recordBarcodeScanKey } from "@/lib/barcodeScanner";
 
@@ -31,19 +32,26 @@ interface CheckoutPayload {
   amount_received?: number;
   received_method?: string;
   expected_collection_method?: string;
+  next_due_date?: string;
   items: { product_id: string; unit_id: string; quantity: number; price_level: string }[];
   customer_id?: string;
   customer_address?: string;
   request_id?: string;
 }
+
+const cairoToday = () => {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
+  const value = (kind: string) => parts.find(part => part.type === kind)?.value || "";
+  return `${value("year")}-${value("month")}-${value("day")}`;
+};
 interface CompletedCheckout {
   id: string; public_number: number; created_at: string; payment_method: string; source: string;
   customer_address?: string | null;
-  discount_amount: number; discount_percent?: number | null; wallet_fee_amount?: number; shipping_cost: number; expected_collection_method?: string | null; total_amount: number;
+  discount_amount: number; discount_percent?: number | null; wallet_fee_amount?: number; shipping_cost: number; expected_collection_method?: string | null; next_due_date?: string | null; total_amount: number;
   items: { product_id: string; unit_id: string; price_level: string; quantity_requested: number; unit_price: number; total_price: number }[];
 }
 
-interface PrintedOrder { id: string; publicNumber: number; createdAt: string; employeeName: string; paymentMethod: string; receivedMethod?: string; expectedCollectionMethod?: string; subtotal: number; discount: number; discountPercent?: number | null; walletFee?: number; shippingCost?: number; totalAmount: number; isDelivery?: boolean; customerName?: string; customerPhone?: string; customerAddress?: string; amountReceived?: number; remainingAmount?: number }
+interface PrintedOrder { id: string; publicNumber: number; createdAt: string; employeeName: string; paymentMethod: string; receivedMethod?: string; expectedCollectionMethod?: string; nextDueDate?: string; subtotal: number; discount: number; discountPercent?: number | null; walletFee?: number; shippingCost?: number; totalAmount: number; isDelivery?: boolean; customerName?: string; customerPhone?: string; customerAddress?: string; amountReceived?: number; remainingAmount?: number }
 
 interface ProductUnit {
   id: string;
@@ -129,6 +137,7 @@ interface PosDraft {
   paymentMethod: string;
   cashReceived: string;
   expectedCollectionMethod?: string;
+  nextDueDate?: string;
   isCreditSale?: boolean;
   isDelivery?: boolean;
   deliveryFee?: string;
@@ -214,6 +223,7 @@ export default function POSPage() {
   const [referenceError, setReferenceError] = useState("");
   const [cashReceived, setCashReceived] = useState("");
   const [expectedCollectionMethod, setExpectedCollectionMethod] = useState("");
+  const [nextDueDate, setNextDueDate] = useState("");
   const [isCreditSale, setIsCreditSale] = useState(false);
   const [isDelivery, setIsDelivery] = useState(false);
   const [deliveryFee, setDeliveryFee] = useState("");
@@ -298,6 +308,7 @@ export default function POSPage() {
             setPaymentMethod(posPaymentMethods.some(method => method === saved.paymentMethod) ? saved.paymentMethod : "Cash");
             setCashReceived(saved.isCreditSale ? saved.cashReceived || "" : "");
             setExpectedCollectionMethod(saved.expectedCollectionMethod || "");
+            setNextDueDate(saved.nextDueDate || "");
             setIsCreditSale(Boolean(saved.isCreditSale));
             setIsDelivery(Boolean(saved.isDelivery));
             setDeliveryFee(saved.isDelivery ? saved.deliveryFee || "" : "");
@@ -327,6 +338,7 @@ export default function POSPage() {
               setPaymentMethod(attempt.draft.paymentMethod);
               setCashReceived(attempt.draft.cashReceived);
               setExpectedCollectionMethod(attempt.draft.expectedCollectionMethod || "");
+              setNextDueDate(attempt.draft.nextDueDate || "");
               setIsCreditSale(Boolean(attempt.draft.isCreditSale));
               setIsDelivery(Boolean(attempt.draft.isDelivery));
               setDeliveryFee(attempt.draft.isDelivery ? attempt.draft.deliveryFee || "" : "");
@@ -365,13 +377,13 @@ export default function POSPage() {
       return;
     }
     const saved: PosDraft = { savedAt: Date.now(), cart, warehouseId, selectedCustomer,
-      discountPercent, paymentMethod, cashReceived, expectedCollectionMethod, isCreditSale, isDelivery, deliveryFee, saleCustomerName,
+      discountPercent, paymentMethod, cashReceived, expectedCollectionMethod, nextDueDate, isCreditSale, isDelivery, deliveryFee, saleCustomerName,
       customerPhone, customerAddress, customerType, checkoutRequest: checkoutRequest.current };
     try { sessionStorage.setItem(key, JSON.stringify(saved)); } catch { /* Storage is optional; checkout still works. */ }
-  }, [draftReady, cart, warehouseId, selectedCustomer, discountPercent, paymentMethod, cashReceived, expectedCollectionMethod, isCreditSale, isDelivery, deliveryFee, saleCustomerName, customerPhone, customerAddress, customerType]);
+  }, [draftReady, cart, warehouseId, selectedCustomer, discountPercent, paymentMethod, cashReceived, expectedCollectionMethod, nextDueDate, isCreditSale, isDelivery, deliveryFee, saleCustomerName, customerPhone, customerAddress, customerType]);
 
   const currentDraft = (): PosDraft => ({ savedAt: timestamp(), cart, warehouseId, selectedCustomer,
-    discountPercent, paymentMethod, cashReceived, expectedCollectionMethod, isCreditSale, isDelivery, deliveryFee, saleCustomerName,
+    discountPercent, paymentMethod, cashReceived, expectedCollectionMethod, nextDueDate, isCreditSale, isDelivery, deliveryFee, saleCustomerName,
     customerPhone, customerAddress, customerType, checkoutRequest: checkoutRequest.current });
 
   const persistHeld = (next: HeldCart[]) => {
@@ -394,7 +406,7 @@ export default function POSPage() {
     setCart([]); cartRef.current = []; checkoutRequest.current = null;
     setSelectedCustomer(""); setSaleCustomerName(""); setCustomerName(""); setCustomerPhone("");
     setCustomerAddress(""); setCustomerType("Retail Customer"); setCustomerLookup("idle");
-    setDiscountPercent(0); setCashReceived(""); setExpectedCollectionMethod("");
+    setDiscountPercent(0); setCashReceived(""); setExpectedCollectionMethod(""); setNextDueDate("");
     setIsCreditSale(false); setIsDelivery(false); setDeliveryFee(""); setPaymentMethod("Cash"); setCheckoutError(""); setCartReviewError("");
     searchInput.current?.focus();
   };
@@ -443,6 +455,7 @@ export default function POSPage() {
       setSelectedCustomer(customerMissing ? "" : saved.selectedCustomer);
       setDiscountPercent(Number(saved.discountPercent) || 0); setPaymentMethod(saved.paymentMethod);
       setCashReceived(saved.cashReceived); setExpectedCollectionMethod(saved.expectedCollectionMethod || "");
+      setNextDueDate(saved.nextDueDate || "");
       setIsCreditSale(Boolean(saved.isCreditSale)); setIsDelivery(Boolean(saved.isDelivery));
       setDeliveryFee(saved.isDelivery ? saved.deliveryFee || "" : "");
       setSaleCustomerName(saved.saleCustomerName || ""); setCustomerName(saved.saleCustomerName || "");
@@ -842,6 +855,8 @@ export default function POSPage() {
     isCreditSale && !validReceivedAmount ? "اكتب المبلغ المستلم، واكتب 0 لو البيع كله آجل" :
     isCreditSale && receivedAmount > baseTotal ? "المبلغ المسدد لا يتجاوز صافي المشتريات" :
     isCreditSale && receivedCents < baseTotalCents && !expectedCollectionMethod ? "اختر وسيلة تحصيل الباقي لاحقًا" :
+    isCreditSale && receivedCents < baseTotalCents && !nextDueDate ? "حدد تاريخ استحقاق الدفعة القادمة" :
+    isCreditSale && receivedCents < baseTotalCents && nextDueDate < cairoToday() ? "تاريخ الاستحقاق لا يمكن أن يكون في الماضي" :
     !posPaymentMethods.some(method => method === paymentMethod) ? "اختر طريقة دفع متاحة" :
     ((paymentMethod === "Wallet" && (!isCreditSale || receivedAmount > 0)) || (isCreditSale && receivedCents < baseTotalCents && expectedCollectionMethod === "Wallet")) && !walletAvailable ? "المحفظة تحتاج تحديث السيرفر قبل البيع بها" :
     paymentMethod === "Cash" && (!isCreditSale || receivedAmount > 0) && shiftOpen !== true ? (shiftError || "افتح وردية الصندوق قبل البيع النقدي") : "");
@@ -857,6 +872,7 @@ export default function POSPage() {
       employeeName: cashierName, paymentMethod: sold.isCreditSale ? "آجل" : res.payment_method,
       receivedMethod: sold.isCreditSale && paid > 0 ? sold.paymentMethod : undefined,
       expectedCollectionMethod: res.expected_collection_method || undefined,
+      nextDueDate: res.next_due_date || undefined,
       subtotal: serverSubtotal,
       discount: Number(res.discount_amount), discountPercent: res.discount_percent,
       walletFee: walletFeeAmount, shippingCost: Number(res.shipping_cost || 0), totalAmount: Number(res.total_amount),
@@ -879,6 +895,7 @@ export default function POSPage() {
       payment_method: sold.isCreditSale ? "آجل" : res.payment_method,
       received_method: sold.isCreditSale && paid > 0 ? sold.paymentMethod : null,
       expected_collection_method: res.expected_collection_method || null,
+      next_due_date: res.next_due_date || null,
       amount_received: paid,
       remaining_amount: Math.max(0, Number(res.total_amount) - paid),
       subtotal: serverSubtotal, discount_amount: Number(res.discount_amount),
@@ -899,7 +916,7 @@ export default function POSPage() {
       } catch { /* The committed sale is still shown on screen. */ }
     }
     setPendingCheckout(null); setAttemptNotice(""); setCheckoutError(""); setCartReviewError("");
-    setDiscountPercent(0); setCashReceived(""); setExpectedCollectionMethod(""); setIsCreditSale(false); setIsDelivery(false); setDeliveryFee(""); setSaleCustomerName("");
+    setDiscountPercent(0); setCashReceived(""); setExpectedCollectionMethod(""); setNextDueDate(""); setIsCreditSale(false); setIsDelivery(false); setDeliveryFee(""); setSaleCustomerName("");
     setSelectedCustomer(""); setCustomerName(""); setCustomerPhone(""); setCustomerAddress("");
     setNewAddress(""); setAddingAddress(false);
     catalogCache.current = null; setCatalogRefresh(value => value + 1);
@@ -978,6 +995,7 @@ export default function POSPage() {
           payload.amount_received = receivedAmount;
           if (receivedAmount > 0) payload.received_method = paymentMethod;
           if (receivedCents < baseTotalCents) payload.expected_collection_method = expectedCollectionMethod;
+          if (receivedCents < baseTotalCents) payload.next_due_date = nextDueDate;
         }
         if (saleCustomerId) { payload.customer_id = saleCustomerId; payload.customer_address = customerAddress; }
         const fingerprint = JSON.stringify(payload);
@@ -1167,7 +1185,7 @@ export default function POSPage() {
               </div>
 
               <div className="grid grid-cols-2 gap-2" role="group" aria-label="نوع البيع">
-                <button type="button" aria-pressed={!isCreditSale} onClick={() => { setIsCreditSale(false); setCashReceived(""); }} className={!isCreditSale ? "app-primary-button justify-center" : "app-secondary-button justify-center"}>دفع كامل</button>
+                <button type="button" aria-pressed={!isCreditSale} onClick={() => { setIsCreditSale(false); setCashReceived(""); setNextDueDate(""); }} className={!isCreditSale ? "app-primary-button justify-center" : "app-secondary-button justify-center"}>دفع كامل</button>
                 <button type="button" aria-pressed={isCreditSale} onClick={() => { setIsCreditSale(true); setCashReceived(""); }} className={isCreditSale ? "app-primary-button justify-center" : "app-secondary-button justify-center"}>بيع آجل</button>
               </div>
               {isCreditSale && <label className="block text-sm">المبلغ المسدد من قيمة الفاتورة *
@@ -1183,6 +1201,9 @@ export default function POSPage() {
               {isCreditSale && validReceivedAmount && receivedCents < baseTotalCents && <><label className="block text-sm font-bold">طريقة تحصيل الباقي لاحقًا</label>
                 <ProductSelect label="طريقة تحصيل الباقي لاحقًا" value={expectedCollectionMethod} onChange={setExpectedCollectionMethod} disabled={isProcessing}
                   placeholder="اختر وسيلة التحصيل" options={[{ value: "Cash", label: "كاش" }, { value: "Instapay", label: "إنستا باي" }, { value: "Credit Card", label: "فيزا" }, ...(walletAvailable ? [{ value: "Wallet", label: "محفظة" }] : [])]} allowClear={false} />
+                <div className="text-sm font-bold">تاريخ استحقاق الدفعة القادمة *
+                  <div className="mt-2"><DatePicker label="تاريخ استحقاق الدفعة القادمة" value={nextDueDate} onChange={setNextDueDate} min={cairoToday()} disabled={isProcessing} /></div>
+                </div>
               </>}
               {paymentMethod === "Cash" && (!isCreditSale || receivedAmount > 0) && <>
                 {shiftOpen !== true && <p className="rounded-lg bg-amber-500/10 p-2 text-sm text-amber-300">
