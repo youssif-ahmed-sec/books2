@@ -7,12 +7,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 PaymentMethod = Literal["Cash", "Wallet", "Vodafone Cash", "Bank Transfer", "Instapay", "Credit Card", "Deferred Payment"]
-CollectedPaymentMethod = Literal["Cash", "Vodafone Cash", "Bank Transfer", "Instapay", "Credit Card"]
+CollectedPaymentMethod = Literal["Cash", "Wallet", "Vodafone Cash", "Bank Transfer", "Instapay", "Credit Card"]
 
 
 class CustomerPaymentCreate(BaseModel):
     request_id: UUID
-    amount: Decimal = Field(gt=0, allow_inf_nan=False)
+    amount: Decimal = Field(gt=0, max_digits=12, decimal_places=2, allow_inf_nan=False)
     method: CollectedPaymentMethod
 
 
@@ -22,6 +22,7 @@ class PaymentResponse(BaseModel):
     customer_id: UUID | None
     user_id: UUID
     amount: Decimal
+    wallet_fee_amount: Decimal = Decimal("0")
     method: str
     kind: str
     created_at: datetime

@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from uuid import UUID
 from typing import List
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 
@@ -53,6 +53,11 @@ def visible_customer(customer: Customer, role: RoleEnum) -> CustomerResponse:
     if role not in (RoleEnum.ADMIN, RoleEnum.CASHIER_ORDERS):
         response.balance = None
         response.credit_limit = None
+    if role != RoleEnum.ADMIN:
+        response.purchase_count = None
+        response.total_purchases = None
+        response.average_purchase = None
+        response.last_purchase_date = None
     return response
 
 
@@ -203,6 +208,7 @@ async def collect_customer_payment(
     if customer is None:
         raise HTTPException(status_code=404, detail="Customer not found")
     amount = Decimal(str(payment_in.amount))
+    wallet_fee = (amount / Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if payment_in.method == "Wallet" else Decimal("0")
     if amount > Decimal(str(customer.balance or 0)):
         raise HTTPException(status_code=400, detail="Payment exceeds the customer balance")
     customer.balance = Decimal(str(customer.balance)) - amount
@@ -213,10 +219,11 @@ async def collect_customer_payment(
     payment = Payment(
         id=payment_in.request_id,
         customer_id=customer_id, user_id=current_user.id,
-        shift_id=shift_id, amount=amount, method=payment_in.method, kind="COLLECTION",
+        shift_id=shift_id, amount=amount, wallet_fee_amount=wallet_fee,
+        method=payment_in.method, kind="COLLECTION",
     )
     db.add(payment)
-    db.add(AuditLog(user_id=current_user.id, action="COLLECT_CUSTOMER_DEBT", entity_type="Customer", entity_id=str(customer_id), new_value={"amount": str(amount), "method": payment_in.method}))
+    db.add(AuditLog(user_id=current_user.id, action="COLLECT_CUSTOMER_DEBT", entity_type="Customer", entity_id=str(customer_id), new_value={"amount": str(amount), "wallet_fee_amount": str(wallet_fee), "method": payment_in.method}))
     try:
         await db.commit()
     except IntegrityError:
@@ -233,9 +240,12 @@ async def collect_customer_payment(
 async def customer_payment_history(
     customer_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_pos_orders_access),
+    current_user: User = Depends(require_pos_orders_access),
 ):
-    return (await db.execute(select(Payment).where(Payment.customer_id == customer_id).order_by(Payment.created_at.desc()))).scalars().all()
+    query = select(Payment).where(Payment.customer_id == customer_id)
+    if current_user.role != RoleEnum.ADMIN:
+        query = query.where(Payment.kind == "COLLECTION")
+    return (await db.execute(query.order_by(Payment.created_at.desc()))).scalars().all()
 
 
 @router.get("/{customer_id}/interactions", response_model=List[InteractionResponse])
@@ -270,7 +280,7 @@ async def record_interaction(
 async def customer_order_history(
     customer_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_pos_orders_access),
+    _user: User = Depends(require_admin),
 ):
     rows = (await db.execute(select(Order).where(Order.customer_id == customer_id).order_by(Order.created_at.desc()))).scalars().all()
     return [{"id": order.id, "public_number": order.public_number, "status": order.status, "total_amount": float(order.total_amount),

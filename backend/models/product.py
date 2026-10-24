@@ -150,6 +150,9 @@ class Product(Base):
     subcategory = relationship("Subcategory")
     brand = relationship("Brand")
     supplier = relationship("Supplier")
+    supplier_prices = relationship("ProductSupplierPrice", back_populates="product")
+    supplier_links = relationship("ProductSupplierLink", back_populates="product")
+
 
 class GlobalUnit(Base):
     __tablename__ = "global_units"
@@ -179,6 +182,35 @@ class PriceLevelEnum(str, enum.Enum):
     WHOLESALE = "Wholesale"
     SUPER_WHOLESALE = "Super Wholesale"
     VIP = "VIP"
+
+
+class ProductSupplierLink(Base):
+    __tablename__ = "product_supplier_links"
+    __table_args__ = (UniqueConstraint("product_id", "supplier_id", name="uq_product_supplier_link"),)
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    product_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
+    supplier_id = Column(UUID(as_uuid=True), ForeignKey("suppliers.id"), nullable=False)
+    product = relationship("Product", back_populates="supplier_links")
+    supplier = relationship("Supplier")
+
+
+class ProductSupplierPrice(Base):
+    __tablename__ = "product_supplier_prices"
+    __table_args__ = (
+        UniqueConstraint("product_id", "supplier_id", "unit_id", "price_level", name="uq_product_supplier_unit_level"),
+        CheckConstraint("price >= 0", name="ck_product_supplier_price_nonnegative"),
+        Index("ix_product_supplier_prices_supplier", "supplier_id", "product_id"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    product_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
+    supplier_id = Column(UUID(as_uuid=True), ForeignKey("suppliers.id"), nullable=False)
+    unit_id = Column(UUID(as_uuid=True), ForeignKey("product_units.id"), nullable=False)
+    price_level = Column(Enum(PriceLevelEnum), nullable=False)
+    price = Column(Numeric(18, 2), nullable=False)
+    product = relationship("Product", back_populates="supplier_prices")
+    supplier = relationship("Supplier")
 
 class ProductPrice(Base):
     __tablename__ = "product_prices"

@@ -35,6 +35,7 @@ class Payment(Base):
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     shift_id = Column(UUID(as_uuid=True), ForeignKey("cash_shifts.id"), nullable=True)
     amount = Column(Numeric(12, 2), nullable=False)
+    wallet_fee_amount = Column(Numeric(12, 2), nullable=False, default=0)
     method = Column(String, nullable=False)
     kind = Column(String, nullable=False)  # SALE, COLLECTION, REFUND
     created_at = Column(DateTime(timezone=True), server_default=func.now())

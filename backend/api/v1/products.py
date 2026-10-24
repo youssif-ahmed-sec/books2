@@ -14,7 +14,7 @@ from schemas.product import (
     ProductCreate, ProductUpdate, ProductResponse, CategoryResponse, CategoryCreate, CategoryUpdate,
     SubcategoryResponse, SubcategoryCreate, SubcategoryUpdate,
     BrandResponse, BrandCreate, BrandUpdate,
-    SupplierResponse, PaginatedProductResponse
+    SupplierResponse, PaginatedProductResponse, ProductSupplierPricesCreate
 )
 from core.reference_cache import cached_reference, invalidate_reference
 from core.dependencies import get_current_user, require_admin, require_basic_staff_access, require_inventory_access
@@ -235,7 +235,8 @@ async def get_products(
         base_query = base_query.where(Product.is_bundle == is_bundle)
     
     if supplier_id:
-        base_query = base_query.where(Product.supplier_id == supplier_id)
+        base_query = base_query.where(Product.id.in_(select(ProductSupplierLink.product_id).where(
+            ProductSupplierLink.supplier_id == supplier_id)))
         
     if category_id:
         base_query = base_query.where(Product.category_id == category_id)
@@ -315,7 +316,52 @@ async def get_product(product_id: UUID, db: AsyncSession = Depends(get_db), curr
         
     return visible_product(product, current_user.role)
 
-from models.product import Product, ProductUnit, ProductPrice, Category, Subcategory, Brand, Supplier, ProductBundleComponent
+from models.product import Product, ProductUnit, ProductPrice, ProductSupplierPrice, ProductSupplierLink, Category, Subcategory, Brand, Supplier, ProductBundleComponent
+
+
+@router.get("/lookup/name-match")
+async def find_product_by_name(
+    name: str,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_inventory_access),
+):
+    if len(name.strip()) < 2:
+        return {"product": None}
+    match = await ProductService.name_match(db, name)
+    if match is None:
+        return {"product": None}
+    return {"product": {"id": match.id, "name_ar": match.name_ar}}
+
+
+@router.get("/{product_id}/supplier-prices")
+async def get_product_supplier_prices(
+    product_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_inventory_access),
+):
+    if (await db.execute(select(Product.id).where(Product.id == product_id,
+        Product.is_deleted == False))).scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Product not found")
+    rows = (await db.execute(select(ProductSupplierPrice, Supplier.name).join(
+        Supplier, Supplier.id == ProductSupplierPrice.supplier_id,
+    ).where(ProductSupplierPrice.product_id == product_id).order_by(Supplier.name))).all()
+    return [{"supplier_id": row.supplier_id, "supplier_name": name, "unit_id": row.unit_id,
+             "price_level": row.price_level, "price": row.price} for row, name in rows]
+
+
+@router.post("/{product_id}/supplier-prices")
+async def set_product_supplier_prices(
+    product_id: UUID,
+    payload: ProductSupplierPricesCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    try:
+        return await ProductService.link_supplier(db, product_id, payload.supplier_id,
+                                                  payload.prices, current_user.id)
+    except ValueError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 @router.post("", response_model=ProductResponse, status_code=status.HTTP_201_CREATED)
 async def create_product(

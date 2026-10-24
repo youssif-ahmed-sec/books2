@@ -76,7 +76,7 @@ class PrinterManager:
         # Match the filled book glyph in frontend/src/components/BrandMark.tsx.
         draw = ImageDraw.Draw(image)
         cx = image.width // 2
-        mark_scale = 3 * scale
+        mark_scale = 2 * scale
         left_edge = cx - 24 * mark_scale
         top = y + 4 * scale
         point = lambda x, yy: (left_edge + x * mark_scale, top + yy * mark_scale)
@@ -96,8 +96,8 @@ class PrinterManager:
         width = image.width
         margin = self.MARGIN * scale
         y = self._paste_store_logo(image, y, scale)
-        draw.text((width // 2, y), "مكتبة سعود الشافعي", fill="black", font=fonts["order"], anchor="ma", direction="rtl")
-        y += 44 * scale
+        draw.text((width // 2, y), "مكتبة سعود الشافعي", fill="black", font=fonts["brand"], anchor="ma", direction="rtl")
+        y += 50 * scale
         draw.text((width // 2, y), title, fill="black", font=fonts["order"], anchor="ma", direction="rtl")
         y += 48 * scale
         date_text, time_text = self._format_date_parts(created_at)
@@ -394,6 +394,7 @@ class PrinterManager:
             "customer": self._font("arial", size(22)),
             "footer": self._font("arialbd", size(28)),
             "order": self._font("arialbd", size(28)),
+            "brand": self._font("arialbd", size(36)),
             "grand": self._font("arialbd", size(28)),
         }
 
@@ -624,7 +625,8 @@ class PrinterManager:
 
         customer_name = self._value(order, "customer_name", "customerName", default="عميل نقدي") or "عميل نقدي"
         customer_phone = self._value(order, "customer_phone", "customerPhone", default="")
-        customer_address = self._address_to_text(self._value(order, "customer_address", "customerAddress", default=""))
+        source = self._value(order, "source", default="")
+        customer_address = self._address_to_text(self._value(order, "customer_address", "customerAddress", default="")) if source == "Delivery" else ""
         payment_method = self._value(order, "payment_method", default="")
         payment_names = {"Cash": "نقدي", "Instapay": "إنستاباي", "Wallet": "محفظة", "Credit Card": "فيزا", "Deferred Payment": "آجل"}
         payment_label = payment_names.get(payment_method, payment_method)
@@ -642,12 +644,14 @@ class PrinterManager:
             y += max(len(right_lines), len(left_lines), 1) * u(33)
 
         info_pair("العميل", customer_name, "الهاتف", customer_phone)
-        source = self._value(order, "source", default="")
-        info_pair("الموظف", cashier or "غير مسجل", "نوع العملية", "بيع دليفري" if source == "Delivery" else "بيع")
+        info_pair("الموظف", cashier or "غير مسجل", "نوع العملية", "بيع دليفري" if source == "Delivery" else "بيع من المكتبة")
         info_pair("الدفع", payment_label, "العنوان", customer_address)
         received_method = self._value(order, "received_method", default="")
         if received_method:
             info_pair("طريقة تحصيل المستلم", payment_names.get(received_method, received_method))
+        expected_method = self._value(order, "expected_collection_method", default="")
+        if expected_method:
+            info_pair("تحصيل الباقي لاحقًا", payment_names.get(expected_method, expected_method))
         line(y, dash=True)
         y += u(16)
 
@@ -731,8 +735,8 @@ class PrinterManager:
             y += u(34)
 
         shipping_cost = self._number(self._value(order, "shipping_cost", default=0))
-        if shipping_cost > 0:
-            draw_right("الشحن:", y, fonts["small"])
+        if source == "Delivery":
+            draw_right("رسوم التوصيل:", y, fonts["small"])
             draw_text(f"{shipping_cost:.2f}", margin, y, fonts["small"])
             y += u(34)
 
@@ -773,8 +777,25 @@ class PrinterManager:
         y += u(35)
         line(y, dash=True)
         y += u(14)
-        draw_center("الزقازيق - الشرقية", y, fonts["small"])
+        draw_center("مكتبة سعود الشافعي", y, fonts["small"])
+        y += u(32)
+        draw_center("ش المكاتب بجوار مسجد الشافعي - الزقازيق - الشرقية", y, fonts["small"])
         y += u(38)
+
+        whatsapp_number = "01016012012"
+        number_width = draw.textbbox((0, 0), whatsapp_number, font=fonts["small"])[2]
+        icon_size = u(25)
+        gap = u(6)
+        icon_x = (width - icon_size - gap - number_width) // 2
+        icon_y = y - u(3)
+        draw.ellipse((icon_x + u(3), icon_y, icon_x + u(23), icon_y + u(20)), fill="black")
+        draw.polygon(((icon_x + u(6), icon_y + u(16)), (icon_x, icon_y + u(25)),
+                      (icon_x + u(11), icon_y + u(20))), fill="black")
+        draw.line(((icon_x + u(9), icon_y + u(6)), (icon_x + u(11), icon_y + u(11)),
+                   (icon_x + u(16), icon_y + u(15)), (icon_x + u(20), icon_y + u(16))),
+                  fill="white", width=u(2), joint="curve")
+        draw_text(whatsapp_number, icon_x + icon_size + gap, y, fonts["small"])
+        y += u(40)
 
         return image.crop((0, 0, width, y)).convert("L").point(lambda pixel: 0 if pixel < 210 else 255).convert("RGB")
 
@@ -1036,6 +1057,7 @@ class PrinterManager:
                     continue
 
                 receipt_type = job.get("receipt_type", "customer")
+                copies = 1
                 if receipt_type == "barcode":
                     image = self._generate_barcode_image(order)
                     copies = int(order.get("quantity") or order.get("qty") or 1)

@@ -70,3 +70,23 @@ TypeError: CORSMiddleware.__init__() got an unexpected keyword argument 'allow_p
 2026-09-09 02:56:28,485 INFO topchef_print_agent: Native Python GDI print successful to OneNote (Desktop)
 2026-09-09 02:56:49,173 INFO topchef_print_agent: Native Python GDI print successful to OneNote (Desktop)
 2026-09-09 03:07:02,683 INFO topchef_print_agent: Native Python GDI print successful to OneNote (Desktop)
+2026-10-21 23:10:59,352 INFO uvicorn.error: Started server process [18044]
+2026-10-21 23:10:59,356 INFO uvicorn.error: Waiting for application startup.
+2026-10-21 23:10:59,359 INFO uvicorn.error: Application startup complete.
+2026-10-21 23:10:59,360 INFO uvicorn.error: Uvicorn running on http://127.0.0.1:8199 (Press CTRL+C to quit)
+2026-10-21 23:12:13,598 INFO topchef_print_agent: Native Python GDI print successful to XP-80C
+2026-10-21 23:14:40,905 INFO topchef_print_agent: Native Python GDI print successful to XP-80C
+2026-10-21 23:21:28,281 INFO topchef_print_agent: Native Python GDI print successful to XP-80C
+2026-10-21 23:37:31,153 INFO uvicorn.error: Started server process [7760]
+2026-10-21 23:37:31,156 INFO uvicorn.error: Waiting for application startup.
+2026-10-21 23:37:31,159 INFO uvicorn.error: Application startup complete.
+2026-10-21 23:37:31,162 INFO uvicorn.error: Uvicorn running on http://127.0.0.1:8199 (Press CTRL+C to quit)
+2026-10-21 23:40:24,885 INFO uvicorn.error: Started server process [19396]
+2026-10-21 23:40:24,888 INFO uvicorn.error: Waiting for application startup.
+2026-10-21 23:40:24,893 INFO uvicorn.error: Application startup complete.
+2026-10-21 23:40:24,897 INFO uvicorn.error: Uvicorn running on http://127.0.0.1:8199 (Press CTRL+C to quit)
+2026-10-21 23:55:23,050 INFO topchef_print_agent: Native Python GDI print successful to XP-80C
+2026-10-21 23:59:35,143 INFO uvicorn.error: Started server process [4908]
+2026-10-21 23:59:35,146 INFO uvicorn.error: Waiting for application startup.
+2026-10-21 23:59:35,149 INFO uvicorn.error: Application startup complete.
+2026-10-21 23:59:35,152 INFO uvicorn.error: Uvicorn running on http://127.0.0.1:8199 (Press CTRL+C to quit)

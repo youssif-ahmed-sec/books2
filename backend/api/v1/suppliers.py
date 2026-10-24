@@ -12,7 +12,7 @@ from models.financial import CashAdjustment
 from services.cash_register_service import expected_cash, open_shift
 from models.inventory import InventoryTransaction, TransactionTypeEnum
 from schemas.product import (
-    SupplierCreate, SupplierUpdate, SupplierResponse,
+    SupplierCreate, QuickSupplierCreate, SupplierUpdate, SupplierResponse,
     SupplierDetailResponse, SupplierPaymentCreate, SupplierPaymentResponse,
     SupplierDebtCreate, SupplierDebtReverse, SupplierDebtEntryResponse,
     PaginatedSupplierResponse
@@ -105,6 +105,30 @@ async def get_suppliers(
     result = await db.execute(base_query.offset(skip).limit(limit))
     suppliers = result.scalars().all()
     return {"data": [visible_supplier(supplier, current_user.role) for supplier in suppliers], "total": total}
+
+
+@router.post("/quick", response_model=SupplierResponse, status_code=status.HTTP_201_CREATED)
+async def create_quick_supplier(
+    payload: QuickSupplierCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_inventory_access),
+):
+    name = " ".join(payload.name.split())
+    if len(name) < 2:
+        raise HTTPException(status_code=422, detail="Supplier name is required")
+    match = (await db.execute(select(Supplier.id).where(
+        Supplier.is_deleted == False, func.lower(Supplier.name) == name.casefold(),
+    ).limit(1))).scalar_one_or_none()
+    if match:
+        raise HTTPException(status_code=409, detail="المورد مسجل بالفعل؛ اختره من القائمة.")
+    supplier = Supplier(name=name, phone=(payload.phone or "").strip() or None)
+    db.add(supplier)
+    await db.flush()
+    db.add(AuditLog(user_id=current_user.id, action="CREATE_SUPPLIER", entity_type="Supplier",
+                    entity_id=str(supplier.id), new_value={"source": "stock_receipt"}))
+    await db.commit()
+    await db.refresh(supplier)
+    return visible_supplier(supplier, current_user.role)
 
 
 @router.get("/{supplier_id}", response_model=SupplierDetailResponse)

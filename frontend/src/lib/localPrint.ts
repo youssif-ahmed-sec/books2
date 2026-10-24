@@ -14,6 +14,7 @@ interface OrderDocument {
   employee_name?: string | null;
   amount_received?: number;
   received_method?: string | null;
+  expected_collection_method?: string | null;
   source?: string | null;
   total_amount: number;
   discount_amount: number;
@@ -62,7 +63,7 @@ export async function printOrderInvoice(orderId: string): Promise<void> {
     created_at: order.created_at,
     customer_name: order.customer_name || "عميل نقدي",
     customer_phone: order.customer_phone,
-    customer_address: order.customer_address,
+    customer_address: order.source === "Delivery" ? order.customer_address : null,
     employee_name: order.employee_name,
     operation_type: "sale",
     source: order.source,
@@ -76,6 +77,7 @@ export async function printOrderInvoice(orderId: string): Promise<void> {
     payment_method: order.payment_method,
     amount_received: order.amount_received,
     received_method: order.received_method,
+    expected_collection_method: order.expected_collection_method,
     remaining_amount: Math.max(0, Number(order.total_amount) - Number(order.amount_received || 0)),
     cart: order.items.map(item => ({
       name: item.product_name,

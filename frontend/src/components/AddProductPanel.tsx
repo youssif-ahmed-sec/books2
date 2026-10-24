@@ -12,6 +12,8 @@ import UnitBarcodeField from "@/components/UnitBarcodeField";
 import { ZeroHintNumberInput } from "@/components/ZeroHintNumberInput";
 import BarcodePrintDialog, { type BarcodePrintUnit } from "@/components/BarcodePrintDialog";
 import { productFormErrors, productSaveError } from "@/lib/productFormErrors";
+import { getUserRole } from "@/utils/auth";
+import { useHydrated } from "@/lib/useHydrated";
 
 const unitSchema = z.object({
   id: z.string(),
@@ -69,6 +71,7 @@ interface GlobalUnit {
 
 interface CatalogOption { id: string; name_ar: string; name_en: string; category_id?: string }
 interface SupplierOption { id: string; name: string }
+interface ExistingProduct { id: string; name_ar: string; units: Array<{ id: string; unit_name: string; conversion_factor: number; prices: Array<{ price_level: string; price: number }> }> }
 
 interface AddProductPanelProps {
   onClose: () => void;
@@ -83,6 +86,10 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
     return () => document.body.classList.remove("product-panel-open");
   }, []);
   const [isSaving, setIsSaving] = useState(false);
+  const hydrated = useHydrated();
+  const isAdmin = hydrated && getUserRole() === "ADMIN";
+  const [matchedProduct, setMatchedProduct] = useState<{ id: string; name_ar: string } | null>(null);
+  const [linkProduct, setLinkProduct] = useState<ExistingProduct | null>(null);
   const [printProduct, setPrintProduct] = useState<{ name: string; units: BarcodePrintUnit[] } | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
   const [form, setForm] = useState({
@@ -130,6 +137,30 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
   const [subcategoriesList, setSubcategoriesList] = useState<CatalogOption[]>([]);
   const [brandsList, setBrandsList] = useState<CatalogOption[]>([]);
   const [suppliersList, setSuppliersList] = useState<SupplierOption[]>([]);
+
+  useEffect(() => {
+    if (linkProduct || form.nameAr.trim().length < 2) return;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      fetchApi(`/products/lookup/name-match?name=${encodeURIComponent(form.nameAr.trim())}`, { silentErrors: true })
+        .then(result => { if (active) setMatchedProduct(result.product || null); })
+        .catch(() => { if (active) setMatchedProduct(null); });
+    }, 350);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [form.nameAr, linkProduct]);
+
+  async function useExistingProduct() {
+    if (!matchedProduct) return;
+    try {
+      const existing = await fetchApi(`/products/${matchedProduct.id}`) as ExistingProduct;
+      setLinkProduct(existing);
+      setUnits(existing.units.map(unit => {
+        return { id: unit.id, name: unit.unit_name, conversionFactor: Number(unit.conversion_factor),
+          sku: "", stock: 0, isBase: false, retailPrice: "",
+          semiWholesalePrice: "", wholesalePrice: "", superWholesalePrice: "", vipPrice: "" };
+      }));
+    } catch { notifyError("تعذر تحميل وحدات الصنف الموجود."); }
+  }
 
   useEffect(() => {
     async function loadGlobalUnits() {
@@ -271,6 +302,28 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
 
   const handleSave = async (printBarcode = false) => {
     try {
+      if (linkProduct) {
+        if (!form.supplier_id) { notifyError("اختر المورد أولًا."); return; }
+        setIsSaving(true);
+        const levels = [
+          ["Retail", "retailPrice"], ["Semi Wholesale", "semiWholesalePrice"],
+          ["Wholesale", "wholesalePrice"], ["Super Wholesale", "superWholesalePrice"], ["VIP", "vipPrice"],
+        ] as const;
+        const prices = units.flatMap(unit => levels.filter(([, field]) => unit[field].trim() !== "")
+          .map(([price_level, field]) => ({ unit_id: unit.id, price_level, price: Number(unit[field]) })));
+        if (!prices.length || prices.some(item => !Number.isFinite(item.price) || item.price <= 0)) {
+          notifyError("اكتب سعر بيع موجبًا واحدًا على الأقل للمورد.");
+          return;
+        }
+        await fetchApi(`/products/${linkProduct.id}/supplier-prices`, { method: "POST", body: JSON.stringify({
+          supplier_id: form.supplier_id,
+          prices,
+        }) });
+        onSaved();
+        onClose();
+        return;
+      }
+      if (matchedProduct) { notifyError("الصنف موجود بالفعل؛ أضف المورد إلى الصنف المسجل."); return; }
       const validationResult = productFormSchema.safeParse({
         ...form,
         units
@@ -357,7 +410,7 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
       />
 
       {/* Slide-over Panel */}
-      <aside className="add-product-panel product-editor-panel fixed top-0 bottom-0 left-0 w-full max-w-[850px] bg-[#0e0e0e] z-[70] shadow-[0_0_80px_rgba(0,0,0,0.8)] flex flex-col animate-slide-in-left border-r border-white/10">
+      <aside className="add-product-panel product-editor-panel fixed top-0 bottom-0 left-0 w-full max-w-[1180px] bg-[#0e0e0e] z-[70] shadow-[0_0_80px_rgba(0,0,0,0.8)] flex flex-col animate-slide-in-left border-r border-white/10">
         {/* Header */}
         <header className="px-5 py-5 sm:px-8 xl:px-12 xl:py-6 flex justify-between items-center border-b border-white/5 bg-[#0e0e0e]/50 backdrop-blur-md sticky top-0 z-10">
           <div>
@@ -373,6 +426,11 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
 
         {/* Scrollable Form */}
         <div className="flex-1 overflow-y-auto px-5 py-6 sm:px-8 xl:px-10 space-y-9 custom-scrollbar">
+          {matchedProduct && !linkProduct && <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm"><span>الصنف «{matchedProduct.name_ar}» مسجل بالفعل. {isAdmin ? "اربط المورد بنفس الصنف." : "اختر المورد في استلام المخزون؛ تعديل أسعار البيع يحتاج المدير."}</span><button type="button" disabled={!isAdmin} onClick={useExistingProduct} className="font-bold text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-40">إضافة أسعار المورد للصنف الموجود</button></div>}
+          {linkProduct ? <section className="space-y-5"><div className="flex flex-wrap items-center justify-between gap-3"><h3 className="text-xl font-bold">{linkProduct.name_ar} · أسعار المورد</h3><button type="button" className="text-sm text-primary hover:underline" onClick={() => { setLinkProduct(null); setUnits([{ id: "1", name: "قطعة", conversionFactor: 1, sku: "", stock: 0, isBase: true, retailPrice: "0", semiWholesalePrice: "0", wholesalePrice: "0", superWholesalePrice: "0", vipPrice: "0" }]); }}>العودة لإضافة صنف</button></div><div className="max-w-md space-y-2"><label className="text-sm font-bold">المورد</label><ProductSelect label="المورد" value={form.supplier_id} placeholder="اختر المورد" options={suppliersList.map(supplier => ({ value: supplier.id, label: supplier.name }))} onChange={value => setForm(previous => ({ ...previous, supplier_id: value }))} /></div><p className="app-muted text-sm">اكتب أسعار البيع المعروفة لهذا المورد؛ اترك غير المعروف فارغًا. يُعتمد الأعلى لكل وحدة ومستوى.</p>{units.map(unit => <div key={unit.id} className="rounded-xl border border-white/10 p-4"><h4 className="mb-3 font-bold">{unit.name}</h4><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">{([
+            ["retailPrice", "المستهلك"], ["semiWholesalePrice", "نصف الجملة"], ["wholesalePrice", "الجملة"],
+            ["superWholesalePrice", "سوبر جملة"], ["vipPrice", "كبار العملاء"],
+          ] as const).map(([field, label]) => <label key={field} className="text-sm">{label}<ZeroHintNumberInput min="0" step="0.01" className="app-field mt-1 w-full" value={unit[field]} onChange={event => updateUnit(unit.id, field, event.target.value)} /></label>)}</div></div>)}</section> : <>
           {/* Section 1: Basic Info */}
           <section className="space-y-5">
             <div className="flex items-center gap-4">
@@ -382,9 +440,9 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
               <h3 className="text-xl font-bold">المعلومات الأساسية</h3>
             </div>
 
-            <div className="product-basic-grid grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-5">
+            <div className="product-basic-grid grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-x-5 gap-y-5">
               {/* Arabic Name */}
-              <div className="sm:col-span-2 space-y-5">
+              <div className="xl:col-span-2 space-y-5">
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">اسم المنتج باللغة العربية</label>
                 <input
                   type="text"
@@ -392,6 +450,7 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
                   value={form.nameAr}
                   onChange={(e) => {
                     setForm({ ...form, nameAr: e.target.value });
+                    setMatchedProduct(null);
                     if (errors.includes("nameAr")) setErrors(errors.filter(err => err !== "nameAr"));
                   }}
                   className={`w-full bg-[#201f1f] border rounded-full p-4 text-lg font-bold text-[#e5e2e1] focus:ring-2 focus:ring-primary/30 transition-all ${
@@ -401,7 +460,7 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
               </div>
 
               {/* English Name */}
-              <div className="sm:col-span-2 space-y-5">
+              <div className="space-y-5">
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">اسم المنتج بالإنجليزية · اختياري</label>
                 <input
                   dir="ltr"
@@ -483,7 +542,7 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
               </div>
 
               {/* Active Status */}
-              <div className="sm:col-span-2 space-y-5">
+              <div className="space-y-5">
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">حالة المنتج</label>
                 <div className="flex items-center gap-4 bg-[#201f1f] border border-white/5 rounded-full p-4">
                   <div
@@ -506,8 +565,8 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
               </div>
 
               {/* Description */}
-              <div className="sm:col-span-2 space-y-5"><label className="text-[#e2bfb0] text-sm font-semibold">مكان الصنف في المخزن / الرف · اختياري</label><input value={form.warehouseLocation} onChange={event => setForm({ ...form, warehouseLocation: event.target.value })} className="w-full bg-[#201f1f] border border-white/5 rounded-2xl p-4 text-white" /></div>
-              <div className="sm:col-span-2 space-y-5">
+              <div className="space-y-5"><label className="text-[#e2bfb0] text-sm font-semibold">مكان الصنف في المخزن / الرف · اختياري</label><input value={form.warehouseLocation} onChange={event => setForm({ ...form, warehouseLocation: event.target.value })} className="w-full bg-[#201f1f] border border-white/5 rounded-2xl p-4 text-white" /></div>
+              <div className="xl:col-span-2 space-y-5">
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">وصف تفصيلي · اختياري</label>
                 <textarea
                   placeholder="أدخل هنا مواصفات المنتج، المؤلف، أو أي تفاصيل فنية..."
@@ -518,7 +577,7 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
               </div>
 
               {/* Image Upload */}
-              <div className="sm:col-span-2 space-y-5">
+              <div className="space-y-5">
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">صورة المنتج التعريفية · اختيارية</label>
                 <div 
                   className="relative border-2 border-dashed border-white/10 rounded-2xl p-10 flex flex-col items-center justify-center gap-4 bg-white/[0.01] hover:bg-white/[0.03] hover:border-primary/40 transition-all cursor-pointer group overflow-hidden min-h-[200px]"
@@ -614,8 +673,8 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
               </div>
             </div>
 
-            <div className="product-units-scroll bg-[#1c1b1b] rounded-2xl border border-white/5 overflow-x-scroll custom-scrollbar">
-              <table className="product-units-table w-full min-w-[1040px]">
+            <div className="product-units-scroll bg-[#1c1b1b] rounded-2xl border border-white/5 overflow-hidden">
+              <table className="product-units-table w-full">
                 <thead>
                   <tr className="bg-white/5">
                     {["نوع الوحدة", "عامل التحويل", "باركود الوحدة (اختياري)", "كمية المخزون", "إجراءات"].map((h) => (
@@ -628,7 +687,7 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
                 <tbody className="divide-y divide-white/5">
                   {units.map((unit) => (
                     <tr key={unit.id} className="hover:bg-white/[0.02] transition-colors">
-                      <td className="px-6 py-4">
+                      <td data-label="نوع الوحدة" className="px-6 py-4">
                         {unit.isBase ? (
                           <>
                             <span className="font-bold text-[#e5e2e1]">{unit.name}</span>
@@ -660,7 +719,7 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
                           </div>
                         )}
                       </td>
-                      <td className="px-6 py-4">
+                      <td data-label="عامل التحويل" className="px-6 py-4">
                         {unit.isBase ? (
                           <span className="text-[#e2bfb0] font-mono">{Number(unit.conversionFactor || 0).toFixed(1)}</span>
                         ) : (
@@ -672,11 +731,11 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
                           />
                         )}
                       </td>
-                      <td className="px-4 py-4">
+                      <td data-label="باركود الوحدة (اختياري)" className="px-4 py-4">
                         <UnitBarcodeField unitName={unit.name || "الوحدة"} value={unit.sku}
                           onChange={value => updateUnit(unit.id, "sku", value)} />
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td data-label="كمية المخزون" className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center justify-center gap-3">
                           <ZeroHintNumberInput
 
@@ -692,7 +751,7 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
                           )}
                         </div>
                       </td>
-                      <td className="px-6 py-4 text-center whitespace-nowrap">
+                      <td data-label="إجراءات" className="px-6 py-4 text-center whitespace-nowrap">
                         {unit.isBase ? (
                           <span className="material-symbols-outlined text-white/10">lock</span>
                         ) : (
@@ -877,6 +936,7 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
               ))}
             </div>
           </section>
+          </>}
         </div>
 
         {/* Footer Actions */}
@@ -890,9 +950,9 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
             <span className="material-symbols-outlined font-bold">
               {isSaving ? "sync" : "check_circle"}
             </span>
-            {isSaving ? "جاري الحفظ..." : "حفظ فقط"}
+            {isSaving ? "جاري الحفظ..." : linkProduct ? "حفظ أسعار المورد" : "حفظ فقط"}
           </button>
-          <button
+          {!linkProduct && <button
             type="button"
             onClick={() => handleSave(true)}
             disabled={isSaving}
@@ -900,7 +960,7 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
           >
             <span className="material-symbols-outlined">barcode_scanner</span>
             حفظ وطباعة باركود
-          </button>
+          </button>}
           <button
             onClick={onClose}
             className="flex-1 py-5 rounded-full border border-white/10 font-bold text-[#e2bfb0] hover:bg-white/5 active:scale-[0.98] transition-all"

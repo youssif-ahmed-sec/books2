@@ -60,6 +60,11 @@ async def financial_summary(db: AsyncSession, start: datetime | None = None, end
 
     expenses = (await db.execute(_period(select(func.coalesce(func.sum(Expense.amount), 0)), Expense.expense_date, start, end))).scalar_one()
     other_income = (await db.execute(_period(select(func.coalesce(func.sum(Income.amount), 0)), Income.income_date, start, end))).scalar_one()
+    collected_wallet_fees = (await db.execute(_period(
+        select(func.coalesce(func.sum(Payment.wallet_fee_amount), 0)).where(Payment.kind == "COLLECTION"),
+        Payment.created_at, start, end,
+    ))).scalar_one()
+    other_income = Decimal(str(other_income)) + Decimal(str(collected_wallet_fees))
     cash_received, cash_refunded = (await db.execute(_period(select(
         func.coalesce(func.sum(case((
             (Payment.method == "Cash") & Payment.kind.in_(("SALE", "COLLECTION")), Payment.amount,
@@ -169,6 +174,56 @@ async def stock_alerts(db: AsyncSession) -> list[dict]:
              "minimum": float(threshold), "severity": "out" if quantity <= 0 else "low",
              "base_unit": unit, "image_url": image_url}
             for product_id, name, quantity, threshold, unit, image_url in rows]
+
+
+async def product_sales_activity(db: AsyncSession, start: datetime, end: datetime,
+                                 dormant_days: int = 90) -> list[dict]:
+    """One row per active physical product; quantities use the product's base unit."""
+    now = datetime.now(ZoneInfo("Africa/Cairo"))
+    last_sale = dict((await db.execute(select(
+        OrderItem.product_id, func.max(Order.created_at),
+    ).join(Order, Order.id == OrderItem.order_id).where(
+        Order.status.in_(COMPLETED), Order.created_at <= now,
+    ).group_by(OrderItem.product_id))).all())
+    returns = select(
+        SalesReturnLine.order_item_id.label("item_id"),
+        func.sum(SalesReturnLine.quantity * OrderItem.conversion_factor).label("quantity"),
+    ).join(OrderItem, OrderItem.id == SalesReturnLine.order_item_id).join(
+        SalesReturn, SalesReturn.id == SalesReturnLine.return_id,
+    ).where(SalesReturn.created_at < end).group_by(SalesReturnLine.order_item_id).subquery()
+    sold = (await db.execute(select(
+        OrderItem.product_id,
+        func.sum(func.greatest(0, OrderItem.quantity_actual - func.coalesce(returns.c.quantity, 0))),
+    ).join(Order, Order.id == OrderItem.order_id).outerjoin(
+        returns, returns.c.item_id == OrderItem.id,
+    ).where(Order.status.in_(COMPLETED), Order.created_at >= start,
+            Order.created_at < end).group_by(OrderItem.product_id))).all()
+    quantities = dict(sold)
+    balances = dict((await db.execute(select(
+        InventoryBalance.product_id, func.coalesce(func.sum(InventoryBalance.current_stock), 0),
+    ).group_by(InventoryBalance.product_id))).all())
+    products = (await db.execute(select(Product.id, Product.name_ar, Product.base_unit,
+                                        Product.min_stock_level, Product.created_at).where(
+        Product.is_deleted == False, Product.is_active == True, Product.is_bundle == False,
+    ))).all()
+    period_days = max(1, (end - start).total_seconds() / 86400)
+    rows = []
+    for product_id, name, unit, minimum, created_at in products:
+        last = last_sale.get(product_id)
+        days_since = max(0, (now - last).days) if last else None
+        age_days = max(0, (now - created_at).days) if created_at else None
+        dormant = days_since >= dormant_days if days_since is not None else age_days is not None and age_days >= dormant_days
+        stock = Decimal(str(balances.get(product_id, 0)))
+        sold_quantity = Decimal(str(quantities.get(product_id, 0)))
+        rows.append({"product_id": str(product_id), "name": name, "base_unit": unit,
+                     "stock": float(stock), "minimum": float(minimum or 0),
+                     "quantity_sold": float(sold_quantity), "daily_rate": round(float(sold_quantity) / period_days, 2),
+                     "last_sold_at": last, "days_since_sale": days_since, "never_sold": last is None,
+                     "dormant": dormant,
+                     "low_stock": stock <= Decimal(str(minimum or 0)) if minimum else stock < 5,
+                     "reorder_priority": bool(not dormant and sold_quantity > 0 and
+                                              (stock <= Decimal(str(minimum or 0)) if minimum else stock < 5))})
+    return rows
 
 
 async def management_details(db: AsyncSession, now: datetime) -> dict:

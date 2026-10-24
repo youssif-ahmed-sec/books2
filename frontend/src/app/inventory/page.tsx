@@ -75,7 +75,7 @@ export default function InventoryPage() {
 
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>(() => readSectionSnapshot<InventorySnapshot>("inventory")?.items || []);
   const [statCards, setStatCards] = useState<StatCard[]>(() => readSectionSnapshot<InventorySnapshot>("inventory")?.stats || [
-    { icon: "warning", iconColor: "text-primary", label: "منخفض المخزون", value: "0", valueColor: "text-primary", sub: "يحتاج إعادة طلب", subColor: "text-[#e2bfb0]/60" },
+    { icon: "warning", iconColor: "text-primary", label: "منخفض المخزون", value: "0", valueColor: "text-primary", sub: "راجع معدل البيع", subColor: "text-[#e2bfb0]/60" },
     { icon: "error", iconColor: "text-[#ffb4ab]", label: "مخزون حرج", value: "0", valueColor: "text-[#ffb4ab]", sub: "أصناف نفدت", subColor: "text-[#e2bfb0]/60" },
     { icon: "payments", iconColor: "text-primary", label: "قيمة المخزون", value: "0", valueExtra: "ج.م", sub: "تقدير القيمة الحالية", subColor: "text-[#e2bfb0]/60" },
   ]);
@@ -212,7 +212,7 @@ export default function InventoryPage() {
         // Map stats
         const mappedStats: StatCard[] = [
           ...(hasInventoryAccess ? [{ icon: "trending_up", iconColor: "text-primary", label: "حركات اليوم", value: String(statsRes.today_movements ?? 0), sub: "", subColor: "text-green-400" }] : []),
-          { icon: "warning", iconColor: "text-primary", label: "منخفض المخزون", value: statsRes.low_stock_count.toString(), valueColor: "text-primary", sub: "يحتاج إعادة طلب", subColor: "text-[#e2bfb0]/60" },
+          { icon: "warning", iconColor: "text-primary", label: "منخفض المخزون", value: statsRes.low_stock_count.toString(), valueColor: "text-primary", sub: "راجع معدل البيع", subColor: "text-[#e2bfb0]/60" },
           { icon: "error", iconColor: "text-[#ffb4ab]", label: "مخزون حرج", value: statsRes.critical_stock_count.toString(), valueColor: "text-[#ffb4ab]", sub: "أصناف نفدت", subColor: "text-[#e2bfb0]/60" },
           { icon: "payments", iconColor: "text-primary", label: "قيمة المخزون", value: parseFloat(statsRes.total_value).toLocaleString(), valueExtra: "ج.م", sub: "تقدير القيمة الحالية", subColor: "text-[#e2bfb0]/60" },
         ];

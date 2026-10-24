@@ -33,9 +33,11 @@ class OrderCreate(BaseModel):
     discount_amount: Decimal = Field(default=Decimal("0"), ge=0, allow_inf_nan=False)
     discount_percent: Optional[Decimal] = Field(default=None, ge=0, le=100, max_digits=5, decimal_places=2, allow_inf_nan=False)
     expected_total: Optional[Decimal] = Field(default=None, ge=0, allow_inf_nan=False)
+    shipping_cost: Decimal = Field(default=Decimal("0"), ge=0, max_digits=12, decimal_places=2, allow_inf_nan=False)
     payment_method:  PaymentMethod = "Cash"
     amount_received: Optional[Decimal] = Field(default=None, ge=0, allow_inf_nan=False, max_digits=12, decimal_places=2)
     received_method: Optional[Literal["Cash", "Instapay", "Wallet", "Credit Card"]] = None
+    expected_collection_method: Optional[Literal["Cash", "Instapay", "Wallet", "Credit Card"]] = None
     notes:           Optional[str] = None
     items:           List[OrderItemCreate]
     request_id:      UUID
@@ -56,6 +58,8 @@ class OrderCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_deferred_collection(self):
+        if self.source != "Delivery" and self.shipping_cost != 0:
+            raise ValueError("Delivery fees apply only to delivery sales")
         if self.payment_method == "Deferred Payment":
             if self.customer_id is None:
                 raise ValueError("Deferred payment requires a registered customer")
@@ -63,7 +67,7 @@ class OrderCreate(BaseModel):
                 raise ValueError("Enter the amount received, including zero for full credit")
             if self.amount_received > 0 and self.received_method is None:
                 raise ValueError("Choose how the received amount was paid")
-        elif self.amount_received is not None or self.received_method is not None:
+        elif self.amount_received is not None or self.received_method is not None or self.expected_collection_method is not None:
             raise ValueError("Partial collection applies only to deferred payment")
         return self
 
@@ -156,6 +160,7 @@ class OrderResponse(BaseModel):
     discount_percent: Optional[float] = None
     wallet_fee_amount: float = 0
     shipping_cost:   float
+    expected_collection_method: Optional[str] = None
     payment_method:  str
     notes:           Optional[str] = None
     created_at:      datetime

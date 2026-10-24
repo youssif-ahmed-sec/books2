@@ -174,6 +174,7 @@ class OrderService:
             "discount_percent": float(order.discount_percent) if order.discount_percent is not None else None,
             "wallet_fee_amount": float(order.wallet_fee_amount or 0),
             "shipping_cost":   float(order.shipping_cost),
+            "expected_collection_method": order.expected_collection_method,
             "payment_method":  order.payment_method,
             "notes":           order.notes,
             "created_at":      order.created_at,
@@ -241,7 +242,8 @@ class OrderService:
             discount_amount=Decimal(str(order_in.discount_amount)),
             discount_percent=order_in.discount_percent,
             wallet_fee_amount=Decimal("0"),
-            shipping_cost=Decimal("0"),
+            shipping_cost=order_in.shipping_cost,
+            expected_collection_method=order_in.expected_collection_method,
             payment_method=order_in.payment_method,
             notes=order_in.notes,
             request_id=order_in.request_id,
@@ -374,7 +376,7 @@ class OrderService:
             if discount_amount != percentage_discount:
                 await db.rollback()
                 raise ValueError("Discount percentage does not match the order subtotal.")
-        base_total = grand_total - discount_amount
+        base_total = grand_total - discount_amount + order_in.shipping_cost
         wallet_base = Decimal("0")
         if order_in.payment_method == "Wallet":
             wallet_base = base_total
@@ -383,6 +385,14 @@ class OrderService:
         wallet_fee = (wallet_base / Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         order.wallet_fee_amount = wallet_fee
         order.total_amount = base_total + wallet_fee
+        if order_in.payment_method == "Deferred Payment":
+            remaining = order.total_amount - (order_in.amount_received or Decimal("0")) - (
+                wallet_fee if order_in.received_method == "Wallet" else Decimal("0")
+            )
+            if remaining > 0 and order_in.expected_collection_method is None:
+                raise ValueError("Choose the expected collection method for the remaining balance.")
+            if remaining <= 0 and order_in.expected_collection_method is not None:
+                raise ValueError("No remaining balance needs a collection method.")
         if order_in.expected_total is not None and order.total_amount != order_in.expected_total:
             await db.rollback()
             raise ValueError("Prices changed. Refresh the cart before checkout.")

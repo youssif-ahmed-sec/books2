@@ -25,23 +25,25 @@ interface CheckoutPayload {
   source: string;
   discount_amount: number;
   discount_percent?: number;
+  shipping_cost: number;
   expected_total: number;
   payment_method: string;
   amount_received?: number;
   received_method?: string;
+  expected_collection_method?: string;
   items: { product_id: string; unit_id: string; quantity: number; price_level: string }[];
   customer_id?: string;
   customer_address?: string;
   request_id?: string;
 }
 interface CompletedCheckout {
-  id: string; public_number: number; created_at: string; payment_method: string;
+  id: string; public_number: number; created_at: string; payment_method: string; source: string;
   customer_address?: string | null;
-  discount_amount: number; discount_percent?: number | null; wallet_fee_amount?: number; total_amount: number;
+  discount_amount: number; discount_percent?: number | null; wallet_fee_amount?: number; shipping_cost: number; expected_collection_method?: string | null; total_amount: number;
   items: { product_id: string; unit_id: string; price_level: string; quantity_requested: number; unit_price: number; total_price: number }[];
 }
 
-interface PrintedOrder { id: string; publicNumber: number; createdAt: string; employeeName: string; paymentMethod: string; receivedMethod?: string; subtotal: number; discount: number; discountPercent?: number | null; walletFee?: number; totalAmount: number; isDelivery?: boolean; customerName?: string; customerPhone?: string; customerAddress?: string; amountReceived?: number; remainingAmount?: number }
+interface PrintedOrder { id: string; publicNumber: number; createdAt: string; employeeName: string; paymentMethod: string; receivedMethod?: string; expectedCollectionMethod?: string; subtotal: number; discount: number; discountPercent?: number | null; walletFee?: number; shippingCost?: number; totalAmount: number; isDelivery?: boolean; customerName?: string; customerPhone?: string; customerAddress?: string; amountReceived?: number; remainingAmount?: number }
 
 interface ProductUnit {
   id: string;
@@ -126,8 +128,10 @@ interface PosDraft {
   discount?: number;
   paymentMethod: string;
   cashReceived: string;
+  expectedCollectionMethod?: string;
   isCreditSale?: boolean;
   isDelivery?: boolean;
+  deliveryFee?: string;
   saleCustomerName?: string;
   customerPhone?: string;
   customerAddress?: string;
@@ -209,8 +213,10 @@ export default function POSPage() {
   const [shiftError, setShiftError] = useState("");
   const [referenceError, setReferenceError] = useState("");
   const [cashReceived, setCashReceived] = useState("");
+  const [expectedCollectionMethod, setExpectedCollectionMethod] = useState("");
   const [isCreditSale, setIsCreditSale] = useState(false);
   const [isDelivery, setIsDelivery] = useState(false);
+  const [deliveryFee, setDeliveryFee] = useState("");
   const [saleCustomerName, setSaleCustomerName] = useState("");
   const [checkoutError, setCheckoutError] = useState("");
   const [heldCarts, setHeldCarts] = useState<HeldCart[]>([]);
@@ -291,8 +297,10 @@ export default function POSPage() {
             if (saved.discount && saved.discountPercent == null) setCheckoutError("الخصم القديم كان بالجنيه؛ أدخله كنسبة قبل البيع.");
             setPaymentMethod(posPaymentMethods.some(method => method === saved.paymentMethod) ? saved.paymentMethod : "Cash");
             setCashReceived(saved.isCreditSale ? saved.cashReceived || "" : "");
+            setExpectedCollectionMethod(saved.expectedCollectionMethod || "");
             setIsCreditSale(Boolean(saved.isCreditSale));
             setIsDelivery(Boolean(saved.isDelivery));
+            setDeliveryFee(saved.isDelivery ? saved.deliveryFee || "" : "");
             setSaleCustomerName(saved.saleCustomerName || "");
             setCustomerName(saved.saleCustomerName || "");
             setCustomerPhone(saved.customerPhone || "");
@@ -318,8 +326,10 @@ export default function POSPage() {
               setDiscountPercent(Number(attempt.draft.discountPercent) || 0);
               setPaymentMethod(attempt.draft.paymentMethod);
               setCashReceived(attempt.draft.cashReceived);
+              setExpectedCollectionMethod(attempt.draft.expectedCollectionMethod || "");
               setIsCreditSale(Boolean(attempt.draft.isCreditSale));
               setIsDelivery(Boolean(attempt.draft.isDelivery));
+              setDeliveryFee(attempt.draft.isDelivery ? attempt.draft.deliveryFee || "" : "");
               setSaleCustomerName(attempt.draft.saleCustomerName || "");
               setCustomerName(attempt.draft.saleCustomerName || "");
               setCustomerPhone(attempt.draft.customerPhone || "");
@@ -355,13 +365,13 @@ export default function POSPage() {
       return;
     }
     const saved: PosDraft = { savedAt: Date.now(), cart, warehouseId, selectedCustomer,
-      discountPercent, paymentMethod, cashReceived, isCreditSale, isDelivery, saleCustomerName,
+      discountPercent, paymentMethod, cashReceived, expectedCollectionMethod, isCreditSale, isDelivery, deliveryFee, saleCustomerName,
       customerPhone, customerAddress, customerType, checkoutRequest: checkoutRequest.current };
     try { sessionStorage.setItem(key, JSON.stringify(saved)); } catch { /* Storage is optional; checkout still works. */ }
-  }, [draftReady, cart, warehouseId, selectedCustomer, discountPercent, paymentMethod, cashReceived, isCreditSale, isDelivery, saleCustomerName, customerPhone, customerAddress, customerType]);
+  }, [draftReady, cart, warehouseId, selectedCustomer, discountPercent, paymentMethod, cashReceived, expectedCollectionMethod, isCreditSale, isDelivery, deliveryFee, saleCustomerName, customerPhone, customerAddress, customerType]);
 
   const currentDraft = (): PosDraft => ({ savedAt: timestamp(), cart, warehouseId, selectedCustomer,
-    discountPercent, paymentMethod, cashReceived, isCreditSale, isDelivery, saleCustomerName,
+    discountPercent, paymentMethod, cashReceived, expectedCollectionMethod, isCreditSale, isDelivery, deliveryFee, saleCustomerName,
     customerPhone, customerAddress, customerType, checkoutRequest: checkoutRequest.current });
 
   const persistHeld = (next: HeldCart[]) => {
@@ -384,8 +394,8 @@ export default function POSPage() {
     setCart([]); cartRef.current = []; checkoutRequest.current = null;
     setSelectedCustomer(""); setSaleCustomerName(""); setCustomerName(""); setCustomerPhone("");
     setCustomerAddress(""); setCustomerType("Retail Customer"); setCustomerLookup("idle");
-    setDiscountPercent(0); setCashReceived("");
-    setIsCreditSale(false); setIsDelivery(false); setPaymentMethod("Cash"); setCheckoutError(""); setCartReviewError("");
+    setDiscountPercent(0); setCashReceived(""); setExpectedCollectionMethod("");
+    setIsCreditSale(false); setIsDelivery(false); setDeliveryFee(""); setPaymentMethod("Cash"); setCheckoutError(""); setCartReviewError("");
     searchInput.current?.focus();
   };
 
@@ -432,7 +442,9 @@ export default function POSPage() {
       const customerMissing = Boolean(saved.selectedCustomer && !customers.some(customer => customer.id === saved.selectedCustomer));
       setSelectedCustomer(customerMissing ? "" : saved.selectedCustomer);
       setDiscountPercent(Number(saved.discountPercent) || 0); setPaymentMethod(saved.paymentMethod);
-      setCashReceived(saved.cashReceived); setIsCreditSale(Boolean(saved.isCreditSale)); setIsDelivery(Boolean(saved.isDelivery));
+      setCashReceived(saved.cashReceived); setExpectedCollectionMethod(saved.expectedCollectionMethod || "");
+      setIsCreditSale(Boolean(saved.isCreditSale)); setIsDelivery(Boolean(saved.isDelivery));
+      setDeliveryFee(saved.isDelivery ? saved.deliveryFee || "" : "");
       setSaleCustomerName(saved.saleCustomerName || ""); setCustomerName(saved.saleCustomerName || "");
       setCustomerPhone(saved.customerPhone || ""); setCustomerAddress(saved.customerAddress || "");
       setCustomerType(saved.customerType || "Retail Customer"); setCustomerLookup("idle");
@@ -808,7 +820,9 @@ export default function POSPage() {
   const subtotal = subtotalCents / 100;
   const discountCents = Math.round(subtotalCents * discountPercent / 100);
   const discountAmount = discountCents / 100;
-  const baseTotalCents = Math.max(0, subtotalCents - discountCents);
+  const validDeliveryFee = /^\d+(?:\.\d{1,2})?$/.test(deliveryFee) && Number.isFinite(Number(deliveryFee)) && Number(deliveryFee) <= 9999999999.99;
+  const shippingCents = isDelivery && validDeliveryFee ? Math.round(Number(deliveryFee) * 100) : 0;
+  const baseTotalCents = Math.max(0, subtotalCents - discountCents) + shippingCents;
   const baseTotal = baseTotalCents / 100;
   const validReceivedAmount = /^\d+(?:\.\d{1,2})?$/.test(cashReceived);
   const receivedAmount = validReceivedAmount ? Number(cashReceived) : 0;
@@ -819,6 +833,7 @@ export default function POSPage() {
   const checkoutBlock = savingCustomer ? "جارٍ حفظ العميل" : !referenceReady || !draftReady ? "جارٍ تحميل بيانات البيع" : referenceError || (!warehouseId ? "اختر مخزن البيع" :
     cart.length === 0 ? "أضف صنفًا إلى السلة" :
     !Number.isFinite(discountPercent) || discountPercent < 0 || discountPercent > 100 || Math.abs(discountPercent * 100 - Math.round(discountPercent * 100)) > 1e-6 ? "راجع نسبة الخصم من 0 إلى 100 (رقمان بعد الفاصلة كحد أقصى)" :
+    isDelivery && !validDeliveryFee ? "اكتب رسوم التوصيل، واكتب 0 لو التوصيل مجاني" :
     customerPhone.length === 11 && (customerLookup === "idle" || customerLookup === "searching") ? "جارٍ البحث عن العميل" :
     customerPhone.length === 11 && customerLookup === "error" ? "تعذر البحث عن رقم العميل. حاول مجددًا" :
     customerPhone.length > 0 && !selectedCustomer && customerLookup !== "new" ? "أكمل رقم التليفون أو امسحه قبل البيع" :
@@ -826,8 +841,9 @@ export default function POSPage() {
     userRole !== "ADMIN" && selectedCustomer && cart.some(item => item.priceLevel !== (customers.find(customer => customer.id === selectedCustomer)?.price_level || "Retail")) ? "راجع مستوى سعر الأصناف مع العميل قبل البيع" :
     isCreditSale && !validReceivedAmount ? "اكتب المبلغ المستلم، واكتب 0 لو البيع كله آجل" :
     isCreditSale && receivedAmount > baseTotal ? "المبلغ المسدد لا يتجاوز صافي المشتريات" :
+    isCreditSale && receivedCents < baseTotalCents && !expectedCollectionMethod ? "اختر وسيلة تحصيل الباقي لاحقًا" :
     !posPaymentMethods.some(method => method === paymentMethod) ? "اختر طريقة دفع متاحة" :
-    paymentMethod === "Wallet" && (isCreditSale ? receivedAmount > 0 : true) && !walletAvailable ? "المحفظة تحتاج تحديث السيرفر قبل البيع بها" :
+    ((paymentMethod === "Wallet" && (!isCreditSale || receivedAmount > 0)) || (isCreditSale && receivedCents < baseTotalCents && expectedCollectionMethod === "Wallet")) && !walletAvailable ? "المحفظة تحتاج تحديث السيرفر قبل البيع بها" :
     paymentMethod === "Cash" && (!isCreditSale || receivedAmount > 0) && shiftOpen !== true ? (shiftError || "افتح وردية الصندوق قبل البيع النقدي") : "");
 
   const finishSale = (res: CompletedCheckout, sold: PosDraft, printNow: boolean) => {
@@ -839,14 +855,16 @@ export default function POSPage() {
     const customerName = customers.find(customer => customer.id === sold.selectedCustomer)?.name || sold.saleCustomerName || "عميل نقدي";
     setLastOrder({ id: res.id, publicNumber: Number(res.public_number), createdAt: res.created_at,
       employeeName: cashierName, paymentMethod: sold.isCreditSale ? "آجل" : res.payment_method,
-      receivedMethod: sold.isCreditSale && paid > 0 ? sold.paymentMethod : undefined, subtotal: serverSubtotal,
+      receivedMethod: sold.isCreditSale && paid > 0 ? sold.paymentMethod : undefined,
+      expectedCollectionMethod: res.expected_collection_method || undefined,
+      subtotal: serverSubtotal,
       discount: Number(res.discount_amount), discountPercent: res.discount_percent,
-      walletFee: walletFeeAmount, totalAmount: Number(res.total_amount),
+      walletFee: walletFeeAmount, shippingCost: Number(res.shipping_cost || 0), totalAmount: Number(res.total_amount),
       isDelivery: Boolean(sold.isDelivery),
       amountReceived: paid,
       remainingAmount: Math.max(0, Number(res.total_amount) - paid),
       customerName, customerPhone: sold.customerPhone,
-      customerAddress: res.customer_address ?? sold.customerAddress });
+      customerAddress: sold.isDelivery ? res.customer_address ?? sold.customerAddress : undefined });
     setReceiptItems(sold.cart.map(item => ({ ...item,
       quantity: Number(serverItemFor(item)?.quantity_requested ?? item.quantity),
       priceLevel: serverItemFor(item)?.price_level ?? item.priceLevel,
@@ -857,13 +875,15 @@ export default function POSPage() {
       source: sold.isDelivery ? "Delivery" : "Walk-In Customer",
       customer_name: customerName,
       customer_phone: customers.find(customer => customer.id === sold.selectedCustomer)?.phone || sold.customerPhone || null,
-      customer_address: res.customer_address ?? sold.customerAddress ?? null,
+      customer_address: sold.isDelivery ? res.customer_address ?? sold.customerAddress ?? null : null,
       payment_method: sold.isCreditSale ? "آجل" : res.payment_method,
       received_method: sold.isCreditSale && paid > 0 ? sold.paymentMethod : null,
+      expected_collection_method: res.expected_collection_method || null,
       amount_received: paid,
       remaining_amount: Math.max(0, Number(res.total_amount) - paid),
       subtotal: serverSubtotal, discount_amount: Number(res.discount_amount),
       discount_percent: res.discount_percent, wallet_fee_amount: walletFeeAmount,
+      shipping_cost: Number(res.shipping_cost || 0),
       total_amount: Number(res.total_amount),
       cart: sold.cart.map(item => ({ qty: Number(serverItemFor(item)?.quantity_requested ?? item.quantity),
         price: Number(serverItemFor(item)?.unit_price ?? item.unitPrice),
@@ -879,7 +899,7 @@ export default function POSPage() {
       } catch { /* The committed sale is still shown on screen. */ }
     }
     setPendingCheckout(null); setAttemptNotice(""); setCheckoutError(""); setCartReviewError("");
-    setDiscountPercent(0); setCashReceived(""); setIsCreditSale(false); setIsDelivery(false); setSaleCustomerName("");
+    setDiscountPercent(0); setCashReceived(""); setExpectedCollectionMethod(""); setIsCreditSale(false); setIsDelivery(false); setDeliveryFee(""); setSaleCustomerName("");
     setSelectedCustomer(""); setCustomerName(""); setCustomerPhone(""); setCustomerAddress("");
     setNewAddress(""); setAddingAddress(false);
     catalogCache.current = null; setCatalogRefresh(value => value + 1);
@@ -944,6 +964,7 @@ export default function POSPage() {
         status: "Delivered",
         source: isDelivery ? "Delivery" : "Walk-In Customer",
         discount_amount: discountAmount,
+        shipping_cost: isDelivery ? Number(deliveryFee) : 0,
         discount_percent: discountPercent,
         expected_total: totalAmount,
         payment_method: isCreditSale ? "Deferred Payment" : paymentMethod,
@@ -956,6 +977,7 @@ export default function POSPage() {
         if (isCreditSale) {
           payload.amount_received = receivedAmount;
           if (receivedAmount > 0) payload.received_method = paymentMethod;
+          if (receivedCents < baseTotalCents) payload.expected_collection_method = expectedCollectionMethod;
         }
         if (saleCustomerId) { payload.customer_id = saleCustomerId; payload.customer_address = customerAddress; }
         const fingerprint = JSON.stringify(payload);
@@ -1080,16 +1102,14 @@ export default function POSPage() {
                 placeholder="نوع العميل" options={customerTypes} allowClear={false} />
               {customerLookup === "found" && <>
                 <p className="text-sm">الاسم: <strong>{customerName}</strong></p>
-                <label className="block text-sm">العنوان المستخدم في الفاتورة
-                  <select className="app-field mt-1" value={customerAddress} onChange={event => setCustomerAddress(event.target.value)} disabled={savingAddress || isProcessing}>
-                    <option value="">بدون عنوان</option>
-                    {(customers.find(customer => customer.id === selectedCustomer)?.addresses || []).map(address => <option key={address} value={address}>{address}</option>)}
-                  </select>
-                </label>
-                {addingAddress ? <div className="flex flex-wrap gap-2">
-                  <input className="app-field min-w-0 flex-1" aria-label="عنوان جديد" value={newAddress} onChange={event => setNewAddress(event.target.value)} maxLength={300} autoComplete="street-address" placeholder="اكتب العنوان الجديد" disabled={savingAddress} />
-                  <button type="button" className="app-secondary-button" onClick={() => void saveNewAddress()} disabled={savingAddress || newAddress.trim().length < 5}>{savingAddress ? "جارٍ الحفظ..." : "حفظ العنوان"}</button>
-                  <button type="button" className="app-secondary-button" onClick={() => { setAddingAddress(false); setNewAddress(""); }} disabled={savingAddress}>إلغاء</button>
+                <div className="min-w-0 text-sm"><span className="mb-1 block">{isDelivery ? "عنوان التوصيل على الفاتورة" : "عنوان العميل المسجل"}</span>
+                  <ProductSelect label={isDelivery ? "عنوان التوصيل على الفاتورة" : "عنوان العميل المسجل"} value={customerAddress} onChange={setCustomerAddress} disabled={savingAddress || isProcessing}
+                    placeholder="بدون عنوان" options={(customers.find(customer => customer.id === selectedCustomer)?.addresses || []).map(address => ({ value: address, label: address }))} allowClear />
+                </div>
+                {addingAddress ? <div className="grid min-w-0 gap-2">
+                  <input className="app-field w-full min-w-0" aria-label="عنوان جديد" value={newAddress} onChange={event => setNewAddress(event.target.value)} maxLength={300} autoComplete="street-address" placeholder="اكتب العنوان الجديد" disabled={savingAddress} />
+                  <div className="flex flex-wrap gap-2"><button type="button" className="app-secondary-button" onClick={() => void saveNewAddress()} disabled={savingAddress || newAddress.trim().length < 5}>{savingAddress ? "جارٍ الحفظ..." : "حفظ العنوان"}</button>
+                  <button type="button" className="app-secondary-button" onClick={() => { setAddingAddress(false); setNewAddress(""); }} disabled={savingAddress}>إلغاء</button></div>
                 </div> : <button type="button" className="app-secondary-button" onClick={() => setAddingAddress(true)} disabled={isProcessing}>إضافة عنوان جديد</button>}
               </>}
               {customerLookup === "new" && <>
@@ -1110,6 +1130,10 @@ export default function POSPage() {
                 <button type="button" aria-pressed={isDelivery} onClick={() => setIsDelivery(true)} disabled={isProcessing}
                   className={isDelivery ? "app-primary-button justify-center" : "app-secondary-button justify-center"}>دليفري</button>
               </div>
+              {isDelivery && <label className="block text-sm">رسوم التوصيل *
+                <input className="app-field mt-1" type="number" inputMode="decimal" min="0" step="0.01" value={deliveryFee}
+                  onChange={event => setDeliveryFee(event.target.value)} disabled={isProcessing} placeholder="0 لو التوصيل مجاني" />
+              </label>}
               <div className="flex justify-between items-center text-sm">
                 <span className="text-[#e2bfb0]/60">الإجمالي:</span>
                 <span className="font-bold">{subtotal.toFixed(2)} ج.م</span>
@@ -1134,6 +1158,7 @@ export default function POSPage() {
                 </div>
               </div>
               {discountAmount > 0 && <div className="flex justify-between text-sm"><span>قيمة الخصم</span><span>-{discountAmount.toFixed(2)} ج.م</span></div>}
+              {isDelivery && validDeliveryFee && <div className="flex justify-between text-sm"><span>رسوم التوصيل</span><span>+{(shippingCents / 100).toFixed(2)} ج.م</span></div>}
               {walletFee > 0 && <div className="flex justify-between text-sm"><span>ضريبة المحفظة (١٪)</span><span>+{walletFee.toFixed(2)} ج.م</span></div>}
 
               <div className="flex justify-between items-center text-xl">
@@ -1151,39 +1176,26 @@ export default function POSPage() {
               </label>}
               {isCreditSale && validReceivedAmount && <p className="text-sm font-bold">المتبقي على العميل: {Math.max(0, baseTotal - receivedAmount).toFixed(2)} ج.م</p>}
               {isCreditSale && paymentMethod === "Wallet" && walletFee > 0 && <p className="text-sm">المبلغ المحصل بالمحفظة شامل الضريبة: {(receivedAmount + walletFee).toFixed(2)} ج.م</p>}
-              <label className="block text-sm font-bold">{isCreditSale ? "طريقة دفع المستلم" : "طريقة الدفع"}</label>
+              {(!isCreditSale || receivedAmount > 0) && <><label className="block text-sm font-bold">{isCreditSale ? "طريقة دفع المبلغ المستلم الآن" : "طريقة الدفع"}</label>
               <ProductSelect label="طريقة الدفع" value={paymentMethod} disabled={isProcessing}
                 onChange={setPaymentMethod}
-                placeholder="طريقة الدفع" options={[{ value: "Cash", label: "كاش" }, { value: "Instapay", label: "إنستا باي" }, { value: "Credit Card", label: "فيزا" }, ...(walletAvailable ? [{ value: "Wallet", label: "محفظة" }] : [])]} allowClear={false} />
+                placeholder="طريقة الدفع" options={[{ value: "Cash", label: "كاش" }, { value: "Instapay", label: "إنستا باي" }, { value: "Credit Card", label: "فيزا" }, ...(walletAvailable ? [{ value: "Wallet", label: "محفظة" }] : [])]} allowClear={false} /></>}
+              {isCreditSale && validReceivedAmount && receivedCents < baseTotalCents && <><label className="block text-sm font-bold">طريقة تحصيل الباقي لاحقًا</label>
+                <ProductSelect label="طريقة تحصيل الباقي لاحقًا" value={expectedCollectionMethod} onChange={setExpectedCollectionMethod} disabled={isProcessing}
+                  placeholder="اختر وسيلة التحصيل" options={[{ value: "Cash", label: "كاش" }, { value: "Instapay", label: "إنستا باي" }, { value: "Credit Card", label: "فيزا" }, ...(walletAvailable ? [{ value: "Wallet", label: "محفظة" }] : [])]} allowClear={false} />
+              </>}
               {paymentMethod === "Cash" && (!isCreditSale || receivedAmount > 0) && <>
                 {shiftOpen !== true && <p className="rounded-lg bg-amber-500/10 p-2 text-sm text-amber-300">
                   {shiftError || "افتح وردية الصندوق قبل البيع النقدي."} <Link href="/cash-register" className="font-bold underline">فتح الصندوق</Link>
                 </p>}
               </>}
 
-              {cartReviewError && <p role="alert" className="rounded-lg bg-amber-500/10 p-3 text-sm text-amber-300">{cartReviewError}</p>}
-              {checkoutError && <p role="alert" className="rounded-lg bg-red-500/10 p-3 text-sm text-[#ffb4ab]">{checkoutError}</p>}
-              <button
-                onClick={() => void handleCheckout()}
-                disabled={Boolean(checkoutBlock) || isProcessing || reviewingCart || Boolean(pendingCheckout)}
-                className="w-full mt-2 py-4 bg-primary text-white rounded-xl font-bold shadow-[0_0_15px_rgba(255,107,0,0.4)] hover:bg-primary/90 transition-all disabled:opacity-50 disabled:shadow-none flex justify-center items-center gap-2"
-              >
-                {isProcessing || reviewingCart ? (
-                  <span className="material-symbols-outlined animate-spin">sync</span>
-                ) : (
-                  <>
-                    <span className="material-symbols-outlined">point_of_sale</span>
-                    إتمام البيع · {totalAmount.toFixed(2)} ج.م
-                  </>
-                )}
-              </button>
-              {checkoutBlock && <p className="app-muted text-center text-xs">{checkoutBlock}</p>}
             </div>
             </div>
           </div>
 
           {/* Cart Panel */}
-          <div className="app-panel min-w-0 rounded-2xl flex flex-col overflow-hidden xl:col-start-3 xl:row-start-1 xl:h-[calc(100vh-180px)] xl:min-h-[420px]">
+          <div className="app-panel min-w-0 max-h-[75vh] min-h-[280px] rounded-2xl flex flex-col overflow-hidden xl:col-start-3 xl:row-start-1 xl:h-[calc(100vh-180px)] xl:max-h-none xl:min-h-[420px]">
             <div className="border-b border-white/5 flex flex-wrap items-center justify-between gap-2 p-4 shrink-0">
               <h3 className="font-bold text-lg flex items-center gap-2">
                 <span className="material-symbols-outlined text-primary">shopping_cart</span>
@@ -1235,6 +1247,18 @@ export default function POSPage() {
                   ))}
                 </div>
               )}
+            </div>
+
+            <div className="shrink-0 space-y-2 border-t border-white/10 p-4">
+              {cartReviewError && <p role="alert" className="rounded-lg bg-amber-500/10 p-3 text-sm text-amber-300">{cartReviewError}</p>}
+              {checkoutError && <p role="alert" className="rounded-lg bg-red-500/10 p-3 text-sm text-[#ffb4ab]">{checkoutError}</p>}
+              <button type="button" onClick={() => void handleCheckout()}
+                disabled={Boolean(checkoutBlock) || isProcessing || reviewingCart || Boolean(pendingCheckout)}
+                className="app-primary-button flex w-full justify-center gap-2 py-3.5 disabled:opacity-50">
+                {isProcessing || reviewingCart ? <span className="material-symbols-outlined animate-spin" aria-hidden="true">sync</span> : <span className="material-symbols-outlined" aria-hidden="true">point_of_sale</span>}
+                إتمام البيع · {totalAmount.toFixed(2)} ج.م
+              </button>
+              {checkoutBlock && <p className="app-muted text-center text-xs">{checkoutBlock}</p>}
             </div>
 
           </div>

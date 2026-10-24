@@ -1,7 +1,12 @@
 {
   "local_port": 8199,
+  "receipt_printer_names": [
+    "XP-80C"
+  ],
+  "barcode_printer_names": [],
+  "printer_width_mm": 80,
   "printer_names": [
     "OneNote (Desktop)"
   ],
-  "printer_width_mm": 80
+  "browser_opened_once": true
 }

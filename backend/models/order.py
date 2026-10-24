@@ -60,6 +60,7 @@ class Order(Base):
     discount_percent = Column(Numeric(5, 2), nullable=True)
     wallet_fee_amount = Column(Numeric(12, 2), nullable=False, default=0)
     shipping_cost   = Column(Numeric(12, 2), nullable=False, default=0)
+    expected_collection_method = Column(String(32), nullable=True)
 
     payment_method  = Column(String, default="Cash")
     notes           = Column(Text, nullable=True)

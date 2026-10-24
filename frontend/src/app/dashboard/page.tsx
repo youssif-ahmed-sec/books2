@@ -52,7 +52,7 @@ function Metric({ label, value, note, icon, href, tone = "orange" }: {
 }
 
 function DashboardLoading() {
-  const cards = (count: number) => <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{Array.from({ length: count }, (_, index) =>
+  const cards = (count: number) => <div className={count === 3 ? "grid gap-4 sm:grid-cols-2 xl:grid-cols-3" : "grid gap-4 sm:grid-cols-2 xl:grid-cols-4"}>{Array.from({ length: count }, (_, index) =>
     <div key={index} className="app-panel relative space-y-4 overflow-hidden rounded-2xl p-5" aria-hidden="true">
       <div className="flex items-start justify-between gap-4"><span className="app-skeleton h-4 w-28" /><span className="app-skeleton h-9 w-9 rounded-xl" /></div>
       <span className="app-skeleton h-8 w-36 max-w-full" /><span className="app-skeleton h-3 w-40 max-w-full" />
@@ -63,7 +63,7 @@ function DashboardLoading() {
   </div>;
   return <div className="space-y-6" role="status" aria-label="جاري تحميل اللوحة الرئيسية">
     <span className="sr-only">جاري تحميل اللوحة الرئيسية</span>
-    {cards(4)}
+    {cards(3)}
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(280px,1fr)]">{chart("w-full")}{chart("w-full")}</div>
     {cards(4)}
     <div className="grid gap-4 lg:grid-cols-2">{chart("w-full")}{chart("w-full")}</div>
@@ -232,10 +232,9 @@ function DashboardContent() {
       {loading && overview && <p role="status" className="app-muted text-xs">جاري تحديث الأرقام المعروضة...</p>}
       {loading && !overview ? <DashboardLoading /> : overview ? <>
         {overview.total_orders === 0 && overview.total_products === 0 && <section className="app-panel rounded-2xl border-primary/25 bg-gradient-to-l from-primary/10 to-transparent p-5 sm:p-6"><div className="flex flex-wrap items-center justify-between gap-4"><div><h2 className="text-lg font-bold">ابدأ بيانات التجربة</h2><p className="app-muted mt-1 text-sm">الرسومات تعرض العمليات الحقيقية فقط. أضف منتجًا ثم سجل عملية بيع لتظهر اتجاهات الأداء.</p></div><div className="flex flex-wrap gap-2"><Link className="app-secondary-button" href="/inventory">إضافة منتج</Link><Link className="app-secondary-button" href="/pos">فتح نقطة البيع</Link></div></div></section>}
-        <section aria-label="المؤشرات الأساسية" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <section aria-label="المؤشرات الأساسية" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           <Metric label="مبيعات اليوم" value={moneyLabel(overview.today_sales)} note="صافي البيع بعد المرتجعات" icon="point_of_sale" href="/reports" />
           <Metric label="مبيعات الشهر" value={moneyLabel(overview.monthly_sales)} note="من بداية الشهر الحالي" icon="trending_up" href="/reports" tone="teal" />
-          <Metric label="طلبات تحتاج متابعة" value={String(overview.pending_orders)} note={`من ${overview.total_orders} طلب إجمالًا`} icon="pending_actions" href="/orders" tone="blue" />
           <Metric label="نقدية الورديات المفتوحة" value={moneyLabel(overview.open_drawer_cash)} note="للإدارة فقط" icon="payments" href="/cash-register" tone="rose" />
         </section>
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(280px,1fr)]">
@@ -253,12 +252,12 @@ function DashboardContent() {
           <section className="app-panel rounded-2xl p-5 sm:p-6"><div className="mb-5"><h2 className="text-lg font-bold">قنوات البيع · 30 يومًا</h2></div>{details ? <SourceDonut rows={sourceRows} /> : <p className="app-muted py-10 text-center text-sm">{detailsError ? "تعذر تحميل تفاصيل القنوات. حاول التحديث." : "جاري تحميل التفاصيل..."}</p>}</section>
         </div>
         <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
-          <section className="app-panel rounded-2xl p-5 sm:p-6"><h2 className="mb-5 text-lg font-bold">أعلى المنتجات · 30 يومًا</h2>{details ? <RankedBars rows={details.top_products} /> : <p className="app-muted py-8 text-center text-sm">جاري تحميل التفاصيل...</p>}</section>
+          <section className="app-panel rounded-2xl p-5 sm:p-6"><div className="mb-5 flex items-center justify-between gap-3"><h2 className="text-lg font-bold">أعلى المنتجات · 30 يومًا</h2><Link href="/reports/product-activity" className="text-sm text-primary hover:underline">حركة كل الأصناف</Link></div>{details ? <RankedBars rows={details.top_products} /> : <p className="app-muted py-8 text-center text-sm">جاري تحميل التفاصيل...</p>}</section>
           <section className="app-panel rounded-2xl p-5 sm:p-6"><h2 className="mb-5 text-lg font-bold">أعلى التصنيفات · 30 يومًا</h2>{details ? <RankedBars rows={details.top_categories} /> : <p className="app-muted py-8 text-center text-sm">جاري تحميل التفاصيل...</p>}</section>
           <section className="app-panel rounded-2xl p-5 sm:p-6"><h2 className="mb-5 text-lg font-bold">أعلى العملاء · 30 يومًا</h2>{details ? <RankedBars rows={details.top_customers} /> : <p className="app-muted py-8 text-center text-sm">جاري تحميل التفاصيل...</p>}</section>
         </div>
         <div className="grid gap-4 lg:grid-cols-2">
-          <section className="app-panel rounded-2xl p-5 sm:p-6"><h2 className="text-lg font-bold">أولويات التشغيل</h2><div className="space-y-2 text-sm"><Link href="/orders" className="flex justify-between gap-3 rounded-xl bg-white/5 p-3 hover:bg-primary/10"><span>تجهيز متأخر</span><strong>{details?.delayed_orders_count ?? "…"}</strong></Link><Link href="/inventory" className="flex justify-between gap-3 rounded-xl bg-white/5 p-3 hover:bg-primary/10"><span>أصناف منخفضة أو نافدة</span><strong>{overview.low_stock_count + overview.out_of_stock_count}</strong></Link><Link href="/cash-register" className="flex justify-between gap-3 rounded-xl bg-white/5 p-3 hover:bg-primary/10"><span>حركة النقدية المسجلة</span><strong>{moneyLabel(overview.cash_movement)}</strong></Link></div>{overview.stock_alerts.length > 0 && <div className="mt-4 border-t border-white/10 pt-4"><p className="app-muted mb-2 text-xs">أولوية إعادة الطلب</p>{overview.stock_alerts.slice(0, 3).map(alert => <div key={alert.product_id} className="flex justify-between gap-3 py-1 text-sm"><span className="truncate">{alert.name}</span><span className="shrink-0 tabular-nums">{alert.stock} / {alert.minimum}</span></div>)}</div>}</section>
+          <section className="app-panel rounded-2xl p-5 sm:p-6"><h2 className="text-lg font-bold">أولويات التشغيل</h2><div className="space-y-2 text-sm"><Link href="/reports/product-activity" className="flex justify-between gap-3 rounded-xl bg-white/5 p-3 hover:bg-primary/10"><span>راجع حركة الأصناف المنخفضة</span><strong>{overview.low_stock_count + overview.out_of_stock_count}</strong></Link><Link href="/cash-register" className="flex justify-between gap-3 rounded-xl bg-white/5 p-3 hover:bg-primary/10"><span>حركة النقدية المسجلة</span><strong>{moneyLabel(overview.cash_movement)}</strong></Link></div>{overview.stock_alerts.length > 0 && <div className="mt-4 border-t border-white/10 pt-4"><p className="app-muted mb-2 text-xs">مخزون منخفض</p>{overview.stock_alerts.slice(0, 3).map(alert => <div key={alert.product_id} className="flex justify-between gap-3 py-1 text-sm"><span className="truncate">{alert.name}</span><span className="shrink-0 tabular-nums">{alert.stock} / {alert.minimum}</span></div>)}</div>}</section>
           <section className="app-panel rounded-2xl p-5 sm:p-6"><h2 className="text-lg font-bold">العملاء والموردون</h2>{details ? <div className="space-y-4 text-sm"><div className="grid grid-cols-2 gap-3"><div className="rounded-xl bg-white/5 p-4"><span className="app-muted text-xs">عملاء جدد اليوم</span><strong className="mt-2 block text-2xl">{details.new_customers}</strong></div><div className="rounded-xl bg-white/5 p-4"><span className="app-muted text-xs">عملاء متكررون</span><strong className="mt-2 block text-2xl">{details.returning_customers}</strong></div></div><div className="border-t border-white/10 pt-3"><p className="app-muted mb-2 text-xs">أرصدة الموردين</p>{details.suppliers.slice(0, 4).map(supplier => <div key={supplier.id} className="flex justify-between gap-3 py-1.5"><span className="truncate">{supplier.name}</span><strong className="shrink-0">{moneyLabel(supplier.balance)}</strong></div>)}{!details.suppliers.length && <p className="app-muted">لا يوجد موردون بعد.</p>}</div></div> : <p className="app-muted py-8 text-center text-sm">{detailsError ? "تعذر تحميل التفاصيل. حاول التحديث." : "جاري تحميل التفاصيل..."}</p>}</section>
         </div>
       </> : <div className="app-panel p-8 text-center">تعذر تحميل اللوحة. <button type="button" className="text-primary underline" onClick={refresh}>إعادة المحاولة</button></div>}

@@ -23,7 +23,7 @@ interface StockReceipt {
   id: string; created_at: string; supplier_name: string; warehouse_name: string;
   employee_name?: string;
   supplier_document?: string | null;
-  lines: Array<{ product_id: string; product_name: string; unit_name: string; quantity: number }>;
+  lines: Array<{ product_id: string; product_name: string; unit_name: string; quantity: number; unit_cost: number | null }>;
 }
 
 interface MovementRow {
@@ -253,8 +253,8 @@ export default function InventoryMovementsModal({ onClose }: InventoryMovementsM
           <div className="grid gap-2 sm:grid-cols-2 text-sm"><p>المورد: {receipt.supplier_name}</p><p>المخزن: {receipt.warehouse_name}</p>
             <p>التاريخ: {new Date(receipt.created_at).toLocaleString("ar-EG")}</p>
             {receipt.supplier_document && <p>مستند المورد: {receipt.supplier_document}</p>}</div>
-          <div className="overflow-x-auto"><table className="w-full text-sm text-right"><thead><tr className="bg-white/5"><th className="p-2">الصنف</th><th className="p-2">الوحدة</th><th className="p-2">الكمية</th></tr></thead>
-            <tbody>{receipt.lines.map(line => <tr key={line.product_id} className="border-t border-white/10"><td className="p-2">{line.product_name}</td><td className="p-2">{line.unit_name}</td><td className="p-2">{line.quantity}</td></tr>)}</tbody></table></div>
+          <div className="overflow-x-auto"><table className="w-full text-sm text-right"><thead><tr className="bg-white/5"><th className="p-2">الصنف</th><th className="p-2">الوحدة</th><th className="p-2">الكمية</th><th className="p-2">سعر شراء القطعة</th></tr></thead>
+            <tbody>{receipt.lines.map(line => <tr key={line.product_id} className="border-t border-white/10"><td className="p-2">{line.product_name}</td><td className="p-2">{line.unit_name}</td><td className="p-2">{line.quantity}</td><td className="p-2 whitespace-nowrap">{line.unit_cost == null ? "—" : `${Number(line.unit_cost).toFixed(2)} ج.م`}</td></tr>)}</tbody></table></div>
           <button type="button" disabled={printing} onClick={printReceipt} className="app-primary-button w-full">{printing ? "جارٍ الإرسال..." : "طباعة عبر التطبيق المحلي"}</button>
         </div>
       </div>}

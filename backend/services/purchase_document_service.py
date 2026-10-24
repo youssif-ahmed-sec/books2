@@ -9,7 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from core.idempotency import request_fingerprint
 from models.inventory import InventoryBalance, TransactionTypeEnum, Warehouse
-from models.product import Product, ProductUnit, Supplier
+from models.product import Product, ProductUnit, ProductSupplierLink, Supplier
 from models.purchase_document import PurchaseDocument, PurchaseDocumentLine, PurchaseReceipt, PurchaseReceiptLine
 from models.user import AuditLog, RoleEnum
 from schemas.purchase_document import PurchaseDocumentCreate, PurchaseDocumentInput, PurchaseReceiptInput
@@ -199,6 +199,11 @@ class PurchaseDocumentService:
             ))).scalar_one_or_none()
             if product is None:
                 raise ValueError("Product is no longer available for receiving")
+            if (await db.execute(select(ProductSupplierLink.id).where(
+                ProductSupplierLink.product_id == line.product_id,
+                ProductSupplierLink.supplier_id == document.supplier_id,
+            ))).scalar_one_or_none() is None:
+                db.add(ProductSupplierLink(product_id=line.product_id, supplier_id=document.supplier_id))
             balance = (await db.execute(select(InventoryBalance).where(
                 InventoryBalance.product_id == line.product_id,
                 InventoryBalance.warehouse_id == payload.warehouse_id,

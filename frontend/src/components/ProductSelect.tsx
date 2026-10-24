@@ -23,19 +23,26 @@ interface ProductSelectProps {
 
 export function ProductSelect({ label, value, options, placeholder, onChange, invalid = false, compact = false, filter = false, allowClear = true, disabled = false }: ProductSelectProps) {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const [position, setPosition] = useState({ top: 0, left: 0, width: 0 });
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const menuId = useId();
   const allOptions = allowClear ? [{ value: "", label: placeholder }, ...options] : options;
+  const searchable = allOptions.length > 7;
+  const specialOption = !search.trim() && allOptions.find(option => option.value.startsWith("__ADD_"));
+  const visibleOptions = searchable
+    ? [...allOptions.filter(option => option.label.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()) && option !== specialOption).slice(0, specialOption ? 6 : 7), ...(specialOption ? [specialOption] : [])]
+    : allOptions;
   const selected = allOptions.find(option => option.value === value);
 
   const showMenu = () => {
     const rect = triggerRef.current?.getBoundingClientRect();
     if (!rect) return;
-    const estimatedHeight = Math.min(288, allOptions.length * 48 + 16);
+    const estimatedHeight = Math.min(400, allOptions.length * 48 + (searchable ? 64 : 16));
     const roomBelow = window.innerHeight - rect.bottom;
     const top = roomBelow >= estimatedHeight + 12 || roomBelow >= rect.top
       ? rect.bottom + 8
@@ -43,14 +50,16 @@ export function ProductSelect({ label, value, options, placeholder, onChange, in
     const width = Math.min(rect.width, window.innerWidth - 16);
     const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
     setPosition({ top, left, width });
-    setActiveIndex(Math.max(0, allOptions.findIndex(option => option.value === value)));
+    setSearch("");
+    setActiveIndex(0);
     setOpen(true);
   };
 
   useEffect(() => {
     if (!open) return;
-    optionRefs.current[activeIndex]?.focus();
-  }, [open, activeIndex]);
+    if (searchable) searchRef.current?.focus();
+    else optionRefs.current[activeIndex]?.focus();
+  }, [open, activeIndex, searchable]);
 
   useEffect(() => {
     if (!open) return;
@@ -80,13 +89,13 @@ export function ProductSelect({ label, value, options, placeholder, onChange, in
   const onMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
-      setActiveIndex(current => (current + (event.key === "ArrowDown" ? 1 : -1) + allOptions.length) % allOptions.length);
+      if (visibleOptions.length) setActiveIndex(current => (current + (event.key === "ArrowDown" ? 1 : -1) + visibleOptions.length) % visibleOptions.length);
     } else if (event.key === "Home" || event.key === "End") {
       event.preventDefault();
-      setActiveIndex(event.key === "Home" ? 0 : allOptions.length - 1);
+      setActiveIndex(event.key === "Home" ? 0 : visibleOptions.length - 1);
     } else if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      choose(allOptions[activeIndex]);
+      if (visibleOptions[activeIndex]) choose(visibleOptions[activeIndex]);
     } else if (event.key === "Escape" || event.key === "Tab") {
       setOpen(false);
       if (event.key === "Escape") {
@@ -101,6 +110,7 @@ export function ProductSelect({ label, value, options, placeholder, onChange, in
       <button
         ref={triggerRef}
         type="button"
+        role="combobox"
         aria-label={label}
         aria-invalid={invalid}
         aria-haspopup="listbox"
@@ -129,7 +139,10 @@ export function ProductSelect({ label, value, options, placeholder, onChange, in
           style={{ top: position.top, left: position.left, width: position.width }}
           onKeyDown={onMenuKeyDown}
         >
-          {allOptions.map((option, index) => (
+          {searchable && <input ref={searchRef} type="search" className="product-select-search" value={search}
+            placeholder={`ابحث في ${label}`} aria-label={`ابحث في ${label}`}
+            onChange={event => { setSearch(event.target.value); setActiveIndex(0); }} />}
+          {visibleOptions.map((option, index) => (
             <button
               key={`${option.value}-${index}`}
               ref={element => { optionRefs.current[index] = element; }}
@@ -145,6 +158,7 @@ export function ProductSelect({ label, value, options, placeholder, onChange, in
               {option.value === value && <span className="material-symbols-outlined" aria-hidden="true">check</span>}
             </button>
           ))}
+          {!visibleOptions.length && <p className="app-muted px-3 py-3 text-sm">لا توجد نتيجة</p>}
         </div>,
         document.body,
       )}

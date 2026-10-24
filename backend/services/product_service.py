@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql import func
 from sqlalchemy.orm import selectinload
 
-from models.product import Product, ProductUnit, ProductPrice, ProductBundleComponent, Category, Subcategory, Brand, Supplier
+from models.product import Product, ProductUnit, ProductPrice, ProductSupplierPrice, ProductSupplierLink, ProductBundleComponent, Category, Subcategory, Brand, Supplier
 from models.user import AuditLog
 from schemas.product import ProductCreate, ProductUpdate
 from models.inventory import Warehouse, InventoryBalance, TransactionTypeEnum
@@ -17,6 +17,81 @@ from services.notification_service import notify_stock_alert_after_product_edit
 
 
 class ProductService:
+    @staticmethod
+    async def name_match(db: AsyncSession, name: str, exclude_id: uuid.UUID | None = None) -> Product | None:
+        normalized = " ".join(name.split()).casefold()
+        if not normalized:
+            return None
+        expression = func.lower(func.regexp_replace(func.btrim(Product.name_ar), "[[:space:]]+", " ", "g"))
+        query = select(Product).where(Product.is_deleted == False, Product.is_bundle == False,
+                                      expression == normalized)
+        if exclude_id:
+            query = query.where(Product.id != exclude_id)
+        return (await db.execute(query.limit(1))).scalar_one_or_none()
+
+    @staticmethod
+    async def set_supplier_prices(db: AsyncSession, product: Product, supplier_id: uuid.UUID,
+                                  entries: list[tuple[uuid.UUID, Any, Decimal]]) -> None:
+        existing = {(row.unit_id, row.price_level): row for row in (await db.execute(
+            select(ProductSupplierPrice).where(ProductSupplierPrice.product_id == product.id,
+                                               ProductSupplierPrice.supplier_id == supplier_id)
+            .with_for_update()
+        )).scalars().all()}
+        changed = set()
+        for unit_id, level, price in entries:
+            key = (unit_id, level)
+            if key in changed:
+                raise ValueError("Repeated unit and price level")
+            changed.add(key)
+            if key in existing:
+                existing[key].price = price
+            else:
+                db.add(ProductSupplierPrice(product_id=product.id, supplier_id=supplier_id,
+                                            unit_id=unit_id, price_level=level, price=price))
+        await db.flush()
+        for unit_id, level in changed:
+            highest = (await db.execute(select(func.max(ProductSupplierPrice.price)).where(
+                ProductSupplierPrice.product_id == product.id, ProductSupplierPrice.unit_id == unit_id,
+                ProductSupplierPrice.price_level == level,
+            ))).scalar_one()
+            effective = (await db.execute(select(ProductPrice).where(
+                ProductPrice.product_id == product.id, ProductPrice.unit_id == unit_id,
+                ProductPrice.price_level == level,
+            ).with_for_update())).scalar_one_or_none()
+            if effective is None:
+                db.add(ProductPrice(product_id=product.id, unit_id=unit_id, price_level=level, price=highest))
+            else:
+                effective.price = highest
+                effective.is_deleted = False
+
+    @staticmethod
+    async def link_supplier(db: AsyncSession, product_id: uuid.UUID, supplier_id: uuid.UUID,
+                            prices, user_id: uuid.UUID) -> dict:
+        product = (await db.execute(select(Product).where(Product.id == product_id,
+            Product.is_deleted == False, Product.is_bundle == False).with_for_update())).scalar_one_or_none()
+        if product is None:
+            raise ValueError("Product not found")
+        supplier = (await db.execute(select(Supplier).where(Supplier.id == supplier_id,
+            Supplier.is_deleted == False))).scalar_one_or_none()
+        if supplier is None:
+            raise ValueError("Supplier not found")
+        units = set((await db.execute(select(ProductUnit.id).where(ProductUnit.product_id == product_id,
+            ProductUnit.is_deleted == False))).scalars().all())
+        if any(item.unit_id not in units for item in prices):
+            raise ValueError("A selected unit does not belong to this product")
+        await ProductService.set_supplier_prices(db, product, supplier_id,
+            [(item.unit_id, item.price_level, item.price) for item in prices])
+        linked = (await db.execute(select(ProductSupplierLink.id).where(
+            ProductSupplierLink.product_id == product_id, ProductSupplierLink.supplier_id == supplier_id,
+        ))).scalar_one_or_none()
+        if linked is None:
+            db.add(ProductSupplierLink(product_id=product_id, supplier_id=supplier_id))
+        db.add(AuditLog(user_id=user_id, action="SET_PRODUCT_SUPPLIER_PRICES", entity_type="Product",
+            entity_id=str(product_id), new_value={"supplier_id": str(supplier_id),
+            "prices": [item.model_dump(mode="json") for item in prices]}))
+        await db.commit()
+        return {"product_id": product_id, "supplier_id": supplier_id, "supplier_name": supplier.name}
+
     @staticmethod
     async def validate_catalog_links(db: AsyncSession, category_id, subcategory_id, brand_id, supplier_id) -> None:
         if not all((category_id, subcategory_id, brand_id, supplier_id)):
@@ -94,11 +169,14 @@ class ProductService:
     @staticmethod
     async def create_product(db: AsyncSession, product_in: ProductCreate, user_id: uuid.UUID) -> Dict[str, Any]:
         await ProductService.validate_catalog_links(db, product_in.category_id, product_in.subcategory_id, product_in.brand_id, product_in.supplier_id)
+        if not product_in.is_bundle and await ProductService.name_match(db, product_in.name_ar):
+            raise ValueError("يوجد صنف بنفس الاسم. افتحه وأضف المورد إليه بدل إنشاء صنف مكرر.")
         if product_in.is_bundle and product_in.initial_stock > 0:
             raise ValueError("An offer uses component stock and cannot have its own initial stock")
         try:
             product_dict = product_in.model_dump(exclude={"units", "initial_stock", "bundle_components"})
             product_dict["name_en"] = (product_dict.get("name_en") or "").strip()
+            product_dict["name_ar"] = " ".join(product_dict["name_ar"].split())
             
             if not product_dict.get("barcode"):
                 product_dict["barcode"] = None
@@ -109,6 +187,7 @@ class ProductService:
             new_product = Product(**product_dict)
             db.add(new_product)
             await db.flush() 
+            db.add(ProductSupplierLink(product_id=new_product.id, supplier_id=product_in.supplier_id))
             
             units_response = []
             bundle_comps_response = []
@@ -132,6 +211,8 @@ class ProductService:
                     )
                     db.add(new_price)
                     await db.flush()
+                    db.add(ProductSupplierPrice(product_id=new_product.id, supplier_id=product_in.supplier_id,
+                        unit_id=new_unit.id, price_level=price_in.price_level, price=price_in.price))
                     prices_response.append(new_price.__dict__.copy())
                     
                 unit_res = new_unit.__dict__.copy()
@@ -181,6 +262,8 @@ class ProductService:
             await db.commit()
         except IntegrityError as e:
             await db.rollback()
+            if "uq_products_active_normalized_ar_name" in str(e.orig):
+                raise ValueError("يوجد صنف بنفس الاسم. افتحه وأضف المورد إليه بدل إنشاء صنف مكرر.")
             raise ValueError("Duplicate value error: A product or unit with this barcode/sku already exists.")
         except Exception:
             await db.rollback()
@@ -200,6 +283,8 @@ class ProductService:
         
         if not product:
             return None
+        if product_in.name_ar is not None and await ProductService.name_match(db, product_in.name_ar, product_id):
+            raise ValueError("يوجد صنف آخر بنفس الاسم.")
         previous_minimum = Decimal(str(product.min_stock_level or 0))
         previous_active = bool(product.is_active)
         await ProductService.validate_catalog_links(
@@ -223,6 +308,8 @@ class ProductService:
         }
             
         update_data = product_in.model_dump(exclude_unset=True, exclude={"units", "bundle_components"})
+        if "name_ar" in update_data:
+            update_data["name_ar"] = " ".join((update_data["name_ar"] or "").split())
         if "name_en" in update_data:
             update_data["name_en"] = (update_data["name_en"] or "").strip()
         if "barcode" in update_data:
@@ -232,6 +319,13 @@ class ProductService:
         
         for key, value in update_data.items():
             setattr(product, key, value)
+        if "supplier_id" in update_data:
+            linked = (await db.execute(select(ProductSupplierLink.id).where(
+                ProductSupplierLink.product_id == product_id,
+                ProductSupplierLink.supplier_id == product.supplier_id,
+            ))).scalar_one_or_none()
+            if linked is None:
+                db.add(ProductSupplierLink(product_id=product_id, supplier_id=product.supplier_id))
 
         if (previous_minimum != Decimal(str(product.min_stock_level or 0))
                 or previous_active != bool(product.is_active)):
@@ -244,6 +338,7 @@ class ProductService:
                 previous_active=previous_active, current_stock=current_stock,
             )
             
+        supplier_price_updates = []
         if product_in.units is not None:
             existing_query = select(ProductUnit).where(
                 ProductUnit.product_id == product_id,
@@ -286,11 +381,17 @@ class ProductService:
                 for price_in in unit_in.prices:
                     price_dict = price_in.model_dump()
                     existing_price = prices_by_key.get((new_unit.id, price_in.price_level))
+                    supplier_price_changed = existing_price is None or Decimal(str(existing_price.price)) != price_in.price
                     if existing_price is None:
                         db.add(ProductPrice(product_id=product_id, unit_id=new_unit.id, **price_dict))
                     else:
                         existing_price.price = price_in.price
                         existing_price.is_deleted = False
+                    if supplier_price_changed:
+                        supplier_price_updates.append((new_unit.id, price_in.price_level, price_in.price))
+
+            if supplier_price_updates:
+                await ProductService.set_supplier_prices(db, product, product.supplier_id, supplier_price_updates)
 
         if product_in.bundle_components is not None or product_in.is_bundle is False:
             existing_components = (await db.execute(select(ProductBundleComponent).where(

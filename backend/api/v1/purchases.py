@@ -11,7 +11,7 @@ from core.dependencies import require_admin, require_inventory_access
 from core.idempotency import request_fingerprint
 from database import get_db
 from models.inventory import InventoryBalance, InventoryTransaction, TransactionTypeEnum, Warehouse
-from models.product import Product, Supplier
+from models.product import Product, ProductSupplierLink, Supplier
 from models.purchase import PurchaseOrder
 from models.user import AuditLog, RoleEnum, User
 from schemas.purchase import PurchaseOrderResponse, PurchaseReceive, PurchaseRequestCreate
@@ -144,6 +144,11 @@ async def receive_purchase(
     ).with_for_update())).scalar_one_or_none()
     if product is None:
         raise HTTPException(status_code=409, detail="Product is no longer active for receiving")
+    if (await db.execute(select(ProductSupplierLink.id).where(
+        ProductSupplierLink.product_id == order.product_id,
+        ProductSupplierLink.supplier_id == order.supplier_id,
+    ))).scalar_one_or_none() is None:
+        db.add(ProductSupplierLink(product_id=order.product_id, supplier_id=order.supplier_id))
     warehouse = (await db.execute(select(Warehouse).where(
         Warehouse.id == payload.warehouse_id, Warehouse.is_active == True,
     ).with_for_update())).scalar_one_or_none()

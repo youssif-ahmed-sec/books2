@@ -7,7 +7,7 @@ from uuid import UUID, uuid5
 from typing import List
 
 from models.inventory import InventoryTransaction, InventoryBalance, Warehouse, TransactionTypeEnum as MovementType
-from models.product import Product, ProductUnit, ProductPrice, Supplier
+from models.product import Product, ProductUnit, ProductPrice, ProductSupplierLink, Supplier
 from models.user import User, RoleEnum, AuditLog
 from schemas.inventory import InventoryTransactionCreate, InventoryTransactionResponse, InventoryBalanceResponse, InventoryStatsResponse, InventoryTransactionRecentResponse, PaginatedInventoryTransactionResponse, StockReceiptCreate
 from sqlalchemy import func, desc
@@ -44,7 +44,8 @@ async def _receipt_document(db: AsyncSession, receipt_id: UUID):
         "warehouse_id": str(first.warehouse_id), "warehouse_name": rows[0][4],
         "supplier_document": first.notes,
         "lines": [{"product_id": str(tx.product_id), "product_name": product_name,
-                   "unit_name": unit_name, "quantity": tx.quantity_changed}
+                   "unit_name": unit_name, "quantity": tx.quantity_changed,
+                   "unit_cost": tx.unit_cost}
                   for tx, product_name, unit_name, _, _ in rows],
     }
 
@@ -99,6 +100,11 @@ async def create_stock_receipt(
         raise HTTPException(status_code=404, detail="Supplier not found")
 
     for line in payload.lines:
+        if (await db.execute(select(ProductSupplierLink.id).where(
+            ProductSupplierLink.product_id == line.product_id,
+            ProductSupplierLink.supplier_id == payload.supplier_id,
+        ))).scalar_one_or_none() is None:
+            db.add(ProductSupplierLink(product_id=line.product_id, supplier_id=payload.supplier_id))
         balance = (await db.execute(select(InventoryBalance).where(
             InventoryBalance.product_id == line.product_id,
             InventoryBalance.warehouse_id == payload.warehouse_id,
@@ -109,7 +115,7 @@ async def create_stock_receipt(
             await db.flush()
         InventoryService.record_movement(
             db, balance, line.quantity, current_user.id, MovementType.RECEIVING,
-            supplier_id=payload.supplier_id, reference_document=reference,
+            supplier_id=payload.supplier_id, unit_cost=line.unit_cost, reference_document=reference,
             notes=payload.supplier_document, request_id=uuid5(payload.request_id, str(line.product_id)),
             request_fingerprint=fingerprint,
         )

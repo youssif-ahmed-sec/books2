@@ -34,9 +34,9 @@ class CustomerResponse(CustomerBase):
     addresses: List[str] = Field(default_factory=list)
     balance: Optional[float] = None
     credit_limit: Optional[float] = None
-    purchase_count: int
-    total_purchases: float
-    average_purchase: float
+    purchase_count: Optional[int] = None
+    total_purchases: Optional[float] = None
+    average_purchase: Optional[float] = None
     last_purchase_date: Optional[datetime] = None
     is_active: bool
     created_at: datetime

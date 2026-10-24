@@ -450,7 +450,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete, appr
       />
 
       {/* Slide-over Panel */}
-      <aside className="product-editor-panel fixed top-0 bottom-0 left-0 w-full max-w-[850px] bg-[#0e0e0e] z-[70] shadow-[0_0_80px_rgba(0,0,0,0.8)] flex flex-col animate-slide-in-left border-r border-white/10">
+      <aside className="product-editor-panel fixed top-0 bottom-0 left-0 w-full max-w-[1180px] bg-[#0e0e0e] z-[70] shadow-[0_0_80px_rgba(0,0,0,0.8)] flex flex-col animate-slide-in-left border-r border-white/10">
         {/* Header */}
         <header className="px-5 py-5 sm:px-8 xl:px-12 xl:py-6 flex justify-between items-center border-b border-white/5 bg-[#0e0e0e]/50 backdrop-blur-md sticky top-0 z-10">
           <div>
@@ -475,9 +475,9 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete, appr
               <h3 className="text-2xl font-bold">المعلومات الأساسية</h3>
             </div>
 
-            <div className="product-basic-grid grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-5">
+            <div className="product-basic-grid grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-x-5 gap-y-5">
               {/* Arabic Name */}
-              <div className="sm:col-span-2 space-y-5">
+              <div className="xl:col-span-2 space-y-5">
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">اسم المنتج باللغة العربية</label>
                 <input
                   type="text"
@@ -494,7 +494,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete, appr
               </div>
 
               {/* English Name */}
-              <div className="sm:col-span-2 space-y-5">
+              <div className="space-y-5">
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">اسم المنتج بالإنجليزية · اختياري</label>
                 <input
                   dir="ltr"
@@ -560,7 +560,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete, appr
               </div>
 
               {/* Active Status */}
-              <div className="sm:col-span-2 space-y-5">
+              <div className="space-y-5">
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">حالة المنتج</label>
                 <div className="flex items-center gap-4 bg-[#201f1f] border border-white/5 rounded-full p-4">
                   <div
@@ -583,8 +583,8 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete, appr
               </div>
 
               {/* Description */}
-              <div className="sm:col-span-2 space-y-2"><label className="text-[#e2bfb0] text-sm font-semibold">مكان الصنف في المخزن / الرف · اختياري</label><input value={form.warehouseLocation} onChange={event => setForm({ ...form, warehouseLocation: event.target.value })} className="w-full bg-[#201f1f] border border-white/5 rounded-2xl p-4 text-white" /></div>
-              <div className="sm:col-span-2 space-y-5">
+              <div className="space-y-5"><label className="text-[#e2bfb0] text-sm font-semibold">مكان الصنف في المخزن / الرف · اختياري</label><input value={form.warehouseLocation} onChange={event => setForm({ ...form, warehouseLocation: event.target.value })} className="w-full bg-[#201f1f] border border-white/5 rounded-2xl p-4 text-white" /></div>
+              <div className="xl:col-span-2 space-y-5">
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">وصف تفصيلي</label>
                 <textarea
                   placeholder="أدخل هنا مواصفات المنتج، المؤلف، أو أي تفاصيل فنية..."
@@ -595,7 +595,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete, appr
               </div>
 
               {/* Image Upload */}
-              <div className="sm:col-span-2 space-y-5">
+              <div className="space-y-5">
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">صورة المنتج التعريفية</label>
                 <div 
                   className="relative border-2 border-dashed border-white/10 rounded-2xl p-10 flex flex-col items-center justify-center gap-4 bg-white/[0.01] hover:bg-white/[0.03] hover:border-primary/40 transition-all cursor-pointer group overflow-hidden min-h-[200px]"
@@ -692,8 +692,8 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete, appr
               </div>
             </div>
 
-            <div className="product-units-scroll bg-[#1c1b1b] rounded-2xl border border-white/5 overflow-x-scroll custom-scrollbar">
-              <table className="product-units-table w-full min-w-[1040px]">
+            <div className="product-units-scroll bg-[#1c1b1b] rounded-2xl border border-white/5 overflow-hidden">
+              <table className="product-units-table w-full">
                 <thead>
                   <tr className="bg-white/5">
                     {["نوع الوحدة", "عامل التحويل", "باركود الوحدة (اختياري)", "كمية المخزون", "إجراءات"].map((h) => (
@@ -706,7 +706,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete, appr
                 <tbody className="divide-y divide-white/5">
                   {units.map((unit) => (
                     <tr key={unit.id} className="hover:bg-white/[0.02] transition-colors">
-                      <td className="px-6 py-4">
+                      <td data-label="نوع الوحدة" className="px-6 py-4">
                         {unit.isBase ? (
                           <>
                             <span className="font-bold text-[#e5e2e1]">{unit.name}</span>
@@ -734,7 +734,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete, appr
                           </div>
                         )}
                       </td>
-                      <td className="px-6 py-4">
+                      <td data-label="عامل التحويل" className="px-6 py-4">
                         {unit.isBase ? (
                           <span className="text-[#e2bfb0] font-mono">{Number(unit.conversionFactor || 0).toFixed(1)}</span>
                         ) : (
@@ -746,15 +746,15 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete, appr
                           />
                         )}
                       </td>
-                      <td className="px-4 py-4">
+                      <td data-label="باركود الوحدة (اختياري)" className="px-4 py-4">
                         <UnitBarcodeField unitName={unit.name || "الوحدة"} value={unit.sku}
                           readOnly={savedBarcodeIds.includes(unit.id)}
                           onChange={value => updateUnit(unit.id, "sku", value)} />
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td data-label="كمية المخزون" className="px-6 py-4 whitespace-nowrap">
                         <span className="text-xs text-[#e2bfb0]">{unit.isBase ? `${totalBaseStock} ${unit.name}` : "يُعرض الرصيد بالوحدة الأساسية"}</span>
                       </td>
-                      <td className="px-6 py-4 text-center whitespace-nowrap">
+                      <td data-label="إجراءات" className="px-6 py-4 text-center whitespace-nowrap">
                         {unit.isBase ? (
                           <span className="material-symbols-outlined text-white/10">lock</span>
                         ) : (

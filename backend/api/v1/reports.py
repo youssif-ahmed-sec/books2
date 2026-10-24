@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from typing import Annotated, Optional
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 from sqlalchemy import func
 
 from database import get_db
@@ -11,9 +12,32 @@ from models.inventory import InventoryTransaction
 from models.customer import Customer
 from models.user import User
 from core.dependencies import require_admin, require_sales_reporting_access, require_inventory_access
-from services.analytics_service import financial_summary, stock_alerts, daily_sales_trend, daily_inventory_activity, COMPLETED
+from services.analytics_service import financial_summary, stock_alerts, daily_sales_trend, daily_inventory_activity, product_sales_activity, COMPLETED
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
+
+
+@router.get("/product-activity", summary="Product sales movement and reorder context")
+async def get_product_activity(
+    start_day: date | None = None,
+    end_day: date | None = None,
+    dormant_days: Annotated[int, Query(ge=30, le=365)] = 90,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_admin),
+):
+    today = datetime.now(ZoneInfo("Africa/Cairo")).date()
+    first = start_day or today.replace(day=1)
+    last = end_day or today
+    if last < first or (last - first).days > 366:
+        raise HTTPException(status_code=422, detail="Choose a valid period of at most one year")
+    start = datetime.combine(first, time.min, tzinfo=ZoneInfo("Africa/Cairo"))
+    end = datetime.combine(last + timedelta(days=1), time.min,
+                           tzinfo=ZoneInfo("Africa/Cairo"))
+    rows = await product_sales_activity(db, start, end, dormant_days)
+    return {"start_day": first, "end_day": last, "dormant_days": dormant_days,
+            "dormant_count": sum(row["dormant"] for row in rows),
+            "reorder_count": sum(row["reorder_priority"] for row in rows),
+            "products": sorted(rows, key=lambda row: (-row["quantity_sold"], row["name"]))}
 
 @router.get("/sales", summary="Get sales report")
 async def get_sales_report(

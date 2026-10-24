@@ -12,6 +12,16 @@ class ProductPriceBase(BaseModel):
 class ProductPriceCreate(ProductPriceBase):
     pass
 
+
+class SupplierSalePrice(ProductPriceBase):
+    unit_id: UUID
+    price: Decimal = Field(gt=0, allow_inf_nan=False)
+
+
+class ProductSupplierPricesCreate(BaseModel):
+    supplier_id: UUID
+    prices: List[SupplierSalePrice] = Field(min_length=1)
+
 class ProductPriceResponse(ProductPriceBase):
     id: UUID
     product_id: UUID
@@ -180,6 +190,11 @@ class SupplierBase(BaseModel):
 
 class SupplierCreate(SupplierBase):
     pass
+
+
+class QuickSupplierCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=200)
+    phone: Optional[str] = Field(default=None, max_length=30)
 
 class SupplierUpdate(BaseModel):
     name: Optional[str] = None
