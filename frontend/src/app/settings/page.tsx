@@ -3,8 +3,6 @@
 import { notifyError, notifySuccess } from "@/lib/notifications";
 
 import { useState, useEffect } from "react";
-import SideNav from "@/components/SideNav";
-import TopNav from "@/components/TopNav";
 import AdminGate from "@/components/AdminGate";
 import { fetchApi } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
@@ -193,8 +191,8 @@ function SettingsContent() {
 
   return (
     <div className="min-h-screen" dir="rtl">
-      <SideNav />
-      <TopNav title="الإعدادات" />
+
+
       <main className="app-main">
         <div className="space-y-6">
           <div>
@@ -227,7 +225,7 @@ function SettingsContent() {
                     </div>
                     <div>
                       <label htmlFor="staff-username" className="block text-sm font-semibold mb-2">اسم المستخدم</label>
-                      <input 
+                      <input
                         id="staff-username"
                         type="text"
                         required
@@ -246,9 +244,9 @@ function SettingsContent() {
                     </div>
                     <div>
                       <label htmlFor="staff-password" className="block text-sm font-semibold mb-2">كلمة المرور {editing && <span className="app-muted font-normal">(اتركها فارغة للاحتفاظ بها)</span>}</label>
-                      <input 
+                      <input
                         id="staff-password"
-                        type="password" 
+                        type="password"
                         required={!editing}
                         minLength={12}
                         value={password}

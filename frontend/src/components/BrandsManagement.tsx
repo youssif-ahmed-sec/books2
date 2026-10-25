@@ -105,7 +105,7 @@ export default function BrandsManagement() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-[#1c1b1b] border border-white/5 flex items-center justify-center text-primary">
+          <div className="w-10 h-10 rounded-full bg-surface-container-low border border-white/5 flex items-center justify-center text-primary">
             <span className="material-symbols-outlined text-xl">branding_watermark</span>
           </div>
           <h2 className="text-xl font-bold text-[#e5e2e1]">إدارة العلامات التجارية</h2>
@@ -123,7 +123,7 @@ export default function BrandsManagement() {
         <div className="w-full overflow-x-auto pb-4 [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-track]:bg-white/5 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/10 hover:[&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb]:rounded-full">
           <table className="w-full text-right border-collapse min-w-[600px]">
             <thead>
-              <tr className="bg-[#1a1918]/50 border-b border-white/5">
+              <tr className="bg-surface-container-low/50 border-b border-white/5">
                 <th className="px-8 py-5 text-sm font-bold text-[#e2bfb0]/80 text-right w-[40%]">
                   الاسم (عربي)
                 </th>
@@ -140,7 +140,7 @@ export default function BrandsManagement() {
                 [0, 1, 2].map(index => <tr key={index} aria-hidden={index !== 0}><td className="px-8 py-5"><span className="app-skeleton h-4 w-32" />{index === 0 && <span className="sr-only">جاري تحميل العلامات التجارية</span>}</td><td className="px-8 py-5"><span className="app-skeleton h-4 w-28" /></td><td className="px-8 py-5"><span className="app-skeleton mx-auto h-8 w-16" /></td></tr>)
               ) : brands.length === 0 ? (
                 <tr>
-                  <td colSpan={3} className="text-center py-10 text-[#e2bfb0]/60 text-sm">
+                  <td colSpan={3} className="text-center py-10 text-on-surface-variant text-sm">
                     لا يوجد علامات تجارية مضافة حتى الآن
                   </td>
                 </tr>
@@ -157,14 +157,14 @@ export default function BrandsManagement() {
                       <div className="flex items-center justify-center gap-2">
                         <button
                           onClick={() => openEdit(b)}
-                          className="w-9 h-9 rounded-full glass flex items-center justify-center text-[#e2bfb0]/60 hover:text-primary transition-all border border-white/5"
+                          className="w-9 h-9 rounded-full glass flex items-center justify-center text-on-surface-variant hover:text-primary transition-all border border-white/5"
                           title="تعديل"
                         >
                           <span className="material-symbols-outlined text-[18px]">edit</span>
                         </button>
                         <button
                           onClick={() => handleDelete(b.id)}
-                          className="w-9 h-9 rounded-full glass flex items-center justify-center text-[#e2bfb0]/60 hover:text-[#ffb4ab] transition-all border border-white/5"
+                          className="w-9 h-9 rounded-full glass flex items-center justify-center text-on-surface-variant hover:text-[#ffb4ab] transition-all border border-white/5"
                           title="حذف"
                         >
                           <span className="material-symbols-outlined text-[18px]">delete</span>
@@ -183,7 +183,7 @@ export default function BrandsManagement() {
       {showForm && (
         <div className="motion-overlay fixed inset-0 z-50 flex items-center justify-center" dir="rtl">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={closeForm} />
-          <div className="relative w-full max-w-md bg-[#1a1918] border border-white/10 rounded-3xl shadow-2xl overflow-hidden animate-slide-up">
+          <div className="relative w-full max-w-md bg-surface-container-low border border-white/10 rounded-3xl shadow-2xl overflow-hidden animate-slide-up">
             <div className="flex items-center justify-between p-6 border-b border-white/10">
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
                 <span className="material-symbols-outlined text-primary">
@@ -193,15 +193,15 @@ export default function BrandsManagement() {
               </h3>
               <button
                 onClick={closeForm}
-                className="w-8 h-8 rounded-full glass flex items-center justify-center text-[#e2bfb0]/60 hover:text-white transition-all"
+                className="w-8 h-8 rounded-full glass flex items-center justify-center text-on-surface-variant hover:text-white transition-all"
               >
                 <span className="material-symbols-outlined text-[20px]">close</span>
               </button>
             </div>
-            
+
             <form onSubmit={handleSubmit} className="p-6 flex flex-col gap-5">
               {error && <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm text-center">{error}</div>}
-              
+
               <div>
                 <label className="text-sm font-bold text-[#e2bfb0]/80 mb-2 block text-right">
                   الاسم بالعربية *
@@ -234,7 +234,7 @@ export default function BrandsManagement() {
                 <button
                   type="button"
                   onClick={closeForm}
-                  className="px-5 py-2.5 rounded-full text-sm font-bold text-[#e2bfb0]/60 hover:text-white transition-all"
+                  className="px-5 py-2.5 rounded-full text-sm font-bold text-on-surface-variant hover:text-white transition-all"
                   disabled={submitting}
                 >
                   إلغاء

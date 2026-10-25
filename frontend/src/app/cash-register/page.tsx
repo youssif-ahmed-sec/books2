@@ -1,8 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import SideNav from "@/components/SideNav";
-import TopNav from "@/components/TopNav";
 import { fetchApi } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
 import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
@@ -97,7 +95,7 @@ export default function CashRegisterPage() {
   }
 
   return <div className="min-h-screen" dir="rtl">
-    <SideNav /><TopNav title="الصندوق النقدي" />
+
     <main className="app-main space-y-5">
       <header><h1 className="app-heading">وردية الصندوق</h1></header>
       {error && <p role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm">{error}</p>}

@@ -3,8 +3,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
-import SideNav from "@/components/SideNav";
-import TopNav from "@/components/TopNav";
 import { fetchApi } from "@/lib/api";
 import { getCurrentUser } from "@/lib/currentUser";
 import { notifyError, notifySuccess } from "@/lib/notifications";
@@ -132,8 +130,8 @@ function ProductApprovalsContent() {
   const displayField = (key: string, value: unknown) =>
     key.endsWith("_id") && value ? catalogNames[String(value)] || "الاسم غير متاح" : valueText(value);
 
-  return <div className="min-h-screen bg-[#131313] text-[#e5e2e1]" dir="rtl">
-    <SideNav /><TopNav title="طلبات المنتجات" />
+  return <div className="min-h-screen bg-surface text-[#e5e2e1]" dir="rtl">
+
     <main className="app-main space-y-6">
       <h1 className="app-heading">{isAdmin ? "مراجعة طلبات المنتجات" : "طلباتي على المنتجات"}</h1>
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">

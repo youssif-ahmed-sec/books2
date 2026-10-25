@@ -2,8 +2,6 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import SideNav from "@/components/SideNav";
-import TopNav from "@/components/TopNav";
 import { ProductSelect } from "@/components/ProductSelect";
 import { fetchApi } from "@/lib/api";
 import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
@@ -92,8 +90,8 @@ export default function PurchasesPage() {
 
   return (
     <div className="min-h-screen" dir="rtl">
-      <SideNav />
-      <TopNav title="أوامر الشراء القديمة" />
+
+
       <main className="app-main space-y-6">
         <div className="flex flex-wrap items-end justify-between gap-3"><div><h1 className="app-heading">أوامر الشراء القديمة</h1></div><Link href="/purchases" className="app-secondary-button">العودة للمشتريات</Link></div>
         {error && <div className="app-panel p-4 text-red-300" role="alert">{error}</div>}

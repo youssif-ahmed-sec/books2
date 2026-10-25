@@ -35,7 +35,7 @@ export function ProductSelect({ label, value, options, placeholder, onChange, in
   const searchable = allOptions.length > 7;
   const specialOption = !search.trim() && allOptions.find(option => option.value.startsWith("__ADD_"));
   const visibleOptions = searchable
-    ? [...allOptions.filter(option => option.label.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()) && option !== specialOption).slice(0, specialOption ? 6 : 7), ...(specialOption ? [specialOption] : [])]
+    ? [...allOptions.filter(option => option.label.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()) && option !== specialOption), ...(specialOption ? [specialOption] : [])]
     : allOptions;
   const selected = allOptions.find(option => option.value === value);
 

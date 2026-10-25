@@ -3,8 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import AdminGate from "@/components/AdminGate";
-import SideNav from "@/components/SideNav";
-import TopNav from "@/components/TopNav";
 import { fetchApi } from "@/lib/api";
 
 type Row = { product_id: string; name: string; base_unit: string; stock: number; minimum: number;
@@ -52,7 +50,7 @@ export default function ProductActivityPage() {
     setLoading(true);
   };
 
-  return <AdminGate><div className="min-h-screen" dir="rtl"><SideNav /><TopNav title="حركة الأصناف" />
+  return <AdminGate><div className="min-h-screen" dir="rtl">
     <main className="app-main space-y-5">
       <header className="flex flex-wrap items-center justify-between gap-3"><div><Link href="/reports" className="app-muted text-sm hover:text-primary">التقارير ←</Link><h1 className="app-heading">حركة الأصناف</h1></div><button type="button" className="app-secondary-button" onClick={() => { setLoading(true); setRevision(value => value + 1); }}>تحديث</button></header>
       <section className="app-panel flex flex-wrap items-end gap-3 rounded-2xl p-4" aria-label="فترة التقرير">

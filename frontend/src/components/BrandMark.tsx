@@ -7,7 +7,7 @@ export default function BrandMark({ size = "small" }: BrandMarkProps) {
     <div
       aria-label="مكتبة سعود الشافعي"
       role="img"
-      className={`flex items-center justify-center rounded-2xl border border-primary/20 bg-[#353534] text-primary shadow-[0_8px_24px_rgba(0,0,0,.2)] ${
+      className={`flex items-center justify-center rounded-2xl border border-primary/20 bg-surface-container-highest text-primary shadow-[0_8px_24px_rgba(0,0,0,.2)] ${
         size === "large" ? "h-24 w-24" : "h-20 w-20"
       }`}
     >

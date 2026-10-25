@@ -7,8 +7,6 @@ import { createPortal } from "react-dom";
 import { Controller, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import SideNav from "@/components/SideNav";
-import TopNav from "@/components/TopNav";
 import { ProductSelect } from "@/components/ProductSelect";
 import { useConfirmAction } from "@/components/ConfirmationProvider";
 import { fetchApi } from "@/lib/api";
@@ -157,7 +155,7 @@ function AddSupplierPanel({ onClose, onSuccess, isAdmin }: { onClose: () => void
           <div>
             <h2 className="text-xl font-bold text-white">إضافة مورد جديد</h2>
           </div>
-          <button onClick={onClose} className="w-9 h-9 rounded-full glass flex items-center justify-center text-[#e2bfb0]/60 hover:text-white">
+          <button onClick={onClose} className="w-9 h-9 rounded-full glass flex items-center justify-center text-on-surface-variant hover:text-white">
             <span className="material-symbols-outlined text-[20px]">close</span>
           </button>
         </div>
@@ -168,23 +166,23 @@ function AddSupplierPanel({ onClose, onSuccess, isAdmin }: { onClose: () => void
             <p className="text-sm font-bold text-primary mb-4 text-right">البيانات الأساسية</p>
             <div className="flex flex-col gap-4">
               <div>
-                <label className="text-xs text-[#e2bfb0]/60 mb-1 block">اسم المورد *</label>
+                <label className="text-xs text-on-surface-variant mb-1 block">اسم المورد *</label>
                 <input {...register("name")} placeholder="اسم الشركة أو المورد" className={`w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border ${errors.name ? "border-red-500/50" : "border-white/10"} focus:outline-none focus:border-primary/50`} />
                 {errors.name && <p className="text-red-400 text-xs mt-1">{errors.name.message}</p>}
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs text-[#e2bfb0]/60 mb-1 block">رقم الهاتف</label>
+                  <label className="text-xs text-on-surface-variant mb-1 block">رقم الهاتف</label>
                   <input {...register("phone")} placeholder="01xxxxxxxxx" className="w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border border-white/10 focus:outline-none focus:border-primary/50" />
                 </div>
                 <div>
-                  <label className="text-xs text-[#e2bfb0]/60 mb-1 block">البريد الإلكتروني</label>
+                  <label className="text-xs text-on-surface-variant mb-1 block">البريد الإلكتروني</label>
                   <input {...register("email")} type="email" placeholder="info@supplier.com" className={`w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border ${errors.email ? "border-red-500/50" : "border-white/10"} focus:outline-none focus:border-primary/50`} />
                   {errors.email && <p className="text-red-400 text-xs mt-1">{errors.email.message}</p>}
                 </div>
               </div>
               <div>
-                <label className="text-xs text-[#e2bfb0]/60 mb-1 block">العنوان</label>
+                <label className="text-xs text-on-surface-variant mb-1 block">العنوان</label>
                 <input {...register("address")} placeholder="عنوان المورد" className="w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border border-white/10 focus:outline-none focus:border-primary/50" />
               </div>
             </div>
@@ -196,11 +194,11 @@ function AddSupplierPanel({ onClose, onSuccess, isAdmin }: { onClose: () => void
             <div className="flex flex-col gap-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs text-[#e2bfb0]/60 mb-1 block">الرقم الضريبي</label>
+                  <label className="text-xs text-on-surface-variant mb-1 block">الرقم الضريبي</label>
                   <input {...register("tax_number")} placeholder="الرقم الضريبي" className="w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border border-white/10 focus:outline-none focus:border-primary/50" />
                 </div>
                 <div>
-                  <label className="text-xs text-[#e2bfb0]/60 mb-1 block">شروط الدفع</label>
+                  <label className="text-xs text-on-surface-variant mb-1 block">شروط الدفع</label>
                   <Controller control={control} name="payment_terms_days" render={({ field }) =>
                     <ProductSelect label="شروط الدفع" value={field.value || "COD"} onChange={field.onChange}
                       placeholder="اختر شروط الدفع" options={[{ value: "COD", label: "نقداً عند الاستلام" }, ...[7, 15, 30, 60, 90].map(days => ({ value: String(days), label: `${days} يوم` }))]} />
@@ -209,11 +207,11 @@ function AddSupplierPanel({ onClose, onSuccess, isAdmin }: { onClose: () => void
               </div>
               {isAdmin && <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs text-[#e2bfb0]/60 mb-1 block">المديونية السابقة عند إضافة المورد (ج.م)</label>
+                  <label className="text-xs text-on-surface-variant mb-1 block">المديونية السابقة عند إضافة المورد (ج.م)</label>
                   <input {...register("opening_balance")} type="number" step="0.01" placeholder="0" className={`w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border ${errors.opening_balance ? "border-red-500/50" : "border-white/10"} focus:outline-none focus:border-primary/50`} />
                 </div>
                 <div>
-                  <label className="text-xs text-[#e2bfb0]/60 mb-1 block">حد الائتمان (ج.م)</label>
+                  <label className="text-xs text-on-surface-variant mb-1 block">حد الائتمان (ج.م)</label>
                   <input {...register("credit_limit")} type="number" step="0.01" placeholder="بدون حد" className="w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border border-white/10 focus:outline-none focus:border-primary/50" />
                 </div>
               </div>}
@@ -449,7 +447,7 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess, isAdmin, initialTab
           <div>
             <h2 className="text-xl font-bold text-white">{loading ? <span className="app-skeleton h-6 w-40" role="status" aria-label="جاري تحميل تفاصيل المورد" /> : detail?.name}</h2>
           </div>
-          <button onClick={onClose} className="w-9 h-9 rounded-full glass flex items-center justify-center text-[#e2bfb0]/60 hover:text-white">
+          <button onClick={onClose} className="w-9 h-9 rounded-full glass flex items-center justify-center text-on-surface-variant hover:text-white">
             <span className="material-symbols-outlined text-[20px]">close</span>
           </button>
         </div>
@@ -490,31 +488,31 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess, isAdmin, initialTab
           {activeTab === "info" && (
             <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
               <div>
-                <label className="text-xs text-[#e2bfb0]/60 mb-1 block">اسم المورد *</label>
+                <label className="text-xs text-on-surface-variant mb-1 block">اسم المورد *</label>
                 <input {...register("name")} className={`w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border ${errors.name ? "border-red-500/50" : "border-white/10"} focus:outline-none focus:border-primary/50`} />
                 {errors.name && <p className="text-red-400 text-xs mt-1">{errors.name.message}</p>}
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs text-[#e2bfb0]/60 mb-1 block">الهاتف</label>
+                  <label className="text-xs text-on-surface-variant mb-1 block">الهاتف</label>
                   <input {...register("phone")} className="w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border border-white/10 focus:outline-none focus:border-primary/50" />
                 </div>
                 <div>
-                  <label className="text-xs text-[#e2bfb0]/60 mb-1 block">البريد الإلكتروني</label>
+                  <label className="text-xs text-on-surface-variant mb-1 block">البريد الإلكتروني</label>
                   <input {...register("email")} type="email" className={`w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border ${errors.email ? "border-red-500/50" : "border-white/10"} focus:outline-none focus:border-primary/50`} />
                 </div>
               </div>
               <div>
-                <label className="text-xs text-[#e2bfb0]/60 mb-1 block">العنوان</label>
+                <label className="text-xs text-on-surface-variant mb-1 block">العنوان</label>
                 <input {...register("address")} className="w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border border-white/10 focus:outline-none focus:border-primary/50" />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs text-[#e2bfb0]/60 mb-1 block">الرقم الضريبي</label>
+                  <label className="text-xs text-on-surface-variant mb-1 block">الرقم الضريبي</label>
                   <input {...register("tax_number")} className="w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border border-white/10 focus:outline-none focus:border-primary/50" />
                 </div>
                 <div>
-                  <label className="text-xs text-[#e2bfb0]/60 mb-1 block">شروط الدفع</label>
+                  <label className="text-xs text-on-surface-variant mb-1 block">شروط الدفع</label>
                   <Controller control={control} name="payment_terms_days" render={({ field }) =>
                     <ProductSelect label="شروط الدفع" value={field.value || "COD"} onChange={field.onChange}
                       placeholder="اختر شروط الدفع" options={[{ value: "COD", label: "نقداً عند الاستلام" }, ...[7, 15, 30, 60, 90].map(days => ({ value: String(days), label: `${days} يوم` }))]} />
@@ -523,16 +521,16 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess, isAdmin, initialTab
               </div>
               {isAdmin && <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs text-[#e2bfb0]/60 mb-1 block">المديونية السابقة عند الإضافة (ثابتة)</label>
+                  <label className="text-xs text-on-surface-variant mb-1 block">المديونية السابقة عند الإضافة (ثابتة)</label>
                   <p className="glass rounded-xl px-4 py-3 text-sm text-white border border-white/10">{Number(detail?.opening_balance || 0).toLocaleString()} ج.م</p>
                 </div>
                 <div>
-                  <label className="text-xs text-[#e2bfb0]/60 mb-1 block">حد الائتمان (ج.م)</label>
+                  <label className="text-xs text-on-surface-variant mb-1 block">حد الائتمان (ج.م)</label>
                   <input {...register("credit_limit")} type="number" step="0.01" placeholder="بدون حد" className="w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border border-white/10 focus:outline-none focus:border-primary/50" />
                 </div>
               </div>}
               <div>
-                <label className="text-xs text-[#e2bfb0]/60 mb-1 block">ملاحظات</label>
+                <label className="text-xs text-on-surface-variant mb-1 block">ملاحظات</label>
                 <textarea {...register("notes")} rows={3} className="w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border border-white/10 focus:outline-none focus:border-primary/50 resize-none" />
               </div>
               <button type="submit" disabled={isSubmitting} className="w-full bg-primary text-white font-bold py-4 rounded-xl hover:brightness-110 active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-50">
@@ -634,7 +632,7 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess, isAdmin, initialTab
           {activeTab === "payment" && (
             <form onSubmit={event => { void handlePaySubmit(onPaySubmit)(event); }} className="flex flex-col gap-4">
               <div>
-                <label className="text-xs text-[#e2bfb0]/60 mb-1 block">المبلغ (ج.م) *</label>
+                <label className="text-xs text-on-surface-variant mb-1 block">المبلغ (ج.م) *</label>
                 <input {...regPay("amount")} type="number" step="0.01" placeholder="0.00" className={`w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border ${payErrors.amount ? "border-red-500/50" : "border-white/10"} focus:outline-none focus:border-primary/50`} />
                 {payErrors.amount && <p className="text-red-400 text-xs mt-1">{payErrors.amount.message}</p>}
               </div>
@@ -655,7 +653,7 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess, isAdmin, initialTab
                 </div>}
               </section>
               <div>
-                <label className="text-xs text-[#e2bfb0]/60 mb-1 block">طريقة الدفع</label>
+                <label className="text-xs text-on-surface-variant mb-1 block">طريقة الدفع</label>
                 <Controller control={payControl} name="payment_method" render={({ field }) =>
                   <ProductSelect label="طريقة الدفع" value={field.value} onChange={field.onChange} placeholder="اختر طريقة الدفع"
                     options={[{ value: "Cash", label: "نقداً" }, { value: "Instapay", label: "إنستا باي" }, { value: "Wallet", label: "محفظة" }]} allowClear={false} />
@@ -663,15 +661,15 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess, isAdmin, initialTab
                 {paymentMethod === "Cash" && <div className="mt-3">
                   <ProductSelect label="مصدر المبلغ النقدي" value={cashSource} onChange={value => setCashSource(value as "" | "SHIFT" | "OUTSIDE_SHIFT")}
                     placeholder="حدد مصدر الدفعة" options={[{ value: "OUTSIDE_SHIFT", label: "خارج الوردية" }, { value: "SHIFT", label: "من درج الوردية" }]} />
-                  <p className="mt-2 text-xs text-[#e2bfb0]/60">الدفعة من درج الوردية تتطلب وردية مفتوحة ورصيدًا كافيًا. الدفعة خارج الوردية تُسجل في كشف المورد فقط.</p>
+                  <p className="mt-2 text-xs text-on-surface-variant">الدفعة من درج الوردية تتطلب وردية مفتوحة ورصيدًا كافيًا. الدفعة خارج الوردية تُسجل في كشف المورد فقط.</p>
                 </div>}
               </div>
               <div>
-                <label className="text-xs text-[#e2bfb0]/60 mb-1 block">رقم المرجع</label>
+                <label className="text-xs text-on-surface-variant mb-1 block">رقم المرجع</label>
                 <input {...regPay("reference_number")} placeholder="اختياري" className="w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border border-white/10 focus:outline-none focus:border-primary/50" />
               </div>
               <div>
-                <label className="text-xs text-[#e2bfb0]/60 mb-1 block">ملاحظات</label>
+                <label className="text-xs text-on-surface-variant mb-1 block">ملاحظات</label>
                 <textarea {...regPay("notes")} rows={3} className="w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border border-white/10 focus:outline-none focus:border-primary/50 resize-none" />
               </div>
               <button type="submit" disabled={paySubmitting} className="w-full bg-green-600 text-white font-bold py-4 rounded-xl hover:brightness-110 active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-50">
@@ -735,8 +733,8 @@ export default function SuppliersPage() {
 
   return (
     <div className="min-h-screen" dir="rtl">
-      <SideNav />
-      <TopNav title="إدارة الموردين" />
+
+
       <main className="app-main">
         {/* Header */}
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
@@ -763,7 +761,7 @@ export default function SuppliersPage() {
                 {loading ? (
                   [0, 1, 2, 3].map(index => <tr key={index} aria-hidden={index !== 0} className="border-b border-white/5"><td className="px-8 py-5"><span className="app-skeleton h-5 w-36" />{index === 0 && <span className="sr-only">جاري تحميل الموردين</span>}</td><td className="px-8 py-5"><span className="app-skeleton h-4 w-28" /></td><td className="px-8 py-5"><span className="app-skeleton h-5 w-20" /></td><td className="px-8 py-5"><span className="app-skeleton mx-auto h-8 w-20" /></td></tr>)
                 ) : suppliers.length === 0 ? (
-                  <tr><td colSpan={4} className="px-8 py-16 text-center text-[#e2bfb0]/40">
+                  <tr><td colSpan={4} className="px-8 py-16 text-center text-on-surface-variant">
                     <span className="material-symbols-outlined text-5xl block mb-3">local_shipping</span>
                     لا يوجد موردين مسجلين
                   </td></tr>
@@ -781,7 +779,7 @@ export default function SuppliersPage() {
                       <div className="text-sm">
                         {s.phone && <p className="text-[#e2bfb0]/80 text-xs">{s.phone}</p>}
                          {s.email && <p className="text-[#e2bfb0]/75 text-xs">{s.email}</p>}
-                        {!s.phone && !s.email && <p className="text-[#e2bfb0]/30 text-xs">-</p>}
+                        {!s.phone && !s.email && <p className="text-on-surface-variant text-xs">-</p>}
                       </div>
                     </td>
                     <td className="px-4 py-3">
@@ -793,7 +791,7 @@ export default function SuppliersPage() {
                       <div className="flex items-center justify-center gap-2">
                         <button onClick={() => openSupplier(s.id, role === "ADMIN" ? "statement" : "info")} className="app-secondary-button text-xs">{role === "ADMIN" ? "كشف الحساب" : "التفاصيل"}</button>
                         {role === "ADMIN" && <button onClick={() => openSupplier(s.id, "debt")} className="app-secondary-button text-xs">مديونية</button>}
-                        <button onClick={() => handleDelete(s.id)} className="w-9 h-9 rounded-full glass flex items-center justify-center text-[#e2bfb0]/60 hover:text-[#ffb4ab] transition-all" title="حذف">
+                        <button onClick={() => handleDelete(s.id)} className="w-9 h-9 rounded-full glass flex items-center justify-center text-on-surface-variant hover:text-[#ffb4ab] transition-all" title="حذف">
                           <span className="material-symbols-outlined text-[18px]">delete</span>
                         </button>
                       </div>

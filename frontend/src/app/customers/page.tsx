@@ -7,8 +7,6 @@ import { fetchApi } from "@/lib/api";
 import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import SideNav from "@/components/SideNav";
-import TopNav from "@/components/TopNav";
 import { ProductSelect } from "@/components/ProductSelect";
 import { DatePicker } from "@/components/DatePicker";
 import InvoiceDetailsDialog from "@/components/InvoiceDetailsDialog";
@@ -341,8 +339,8 @@ export default function CustomersPage() {
 
   return (
     <div className="min-h-screen" dir="rtl">
-      <SideNav />
-      <TopNav title="العملاء" />
+
+
       <main className="app-main">
         <div className="space-y-6">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -410,7 +408,7 @@ export default function CustomersPage() {
           {loading && <p role="status" className="app-muted p-5 text-sm">جاري تحميل العملاء...</p>}
           {!loading && filteredCustomers.map(c => <article key={c.id} data-search-id={c.id} className="space-y-3 p-4">
             <div className="flex items-start justify-between gap-3"><div className="min-w-0"><h2 className="truncate font-semibold" title={c.name}>{c.name}</h2><p className="app-muted mt-0.5 text-sm" dir="ltr">{c.phone}</p></div><span className="app-muted shrink-0 text-xs">{customerTypeLabels[c.customer_type] || c.customer_type}</span></div>
-            <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm"><span><span className="app-muted">المدينة: </span>{c.city || "—"}</span>{userRole === "ADMIN" && <span><span className="app-muted">المشتريات: </span>{Number(c.total_purchases || 0).toLocaleString("ar-EG")} ج.م</span>}{(userRole === "ADMIN" || userRole === "CASHIER_ORDERS") && <span><span className="app-muted">المديونية: </span>{Number(c.balance || 0).toFixed(2)} ج.م</span>}</div>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm"><span><span className="app-muted">المدينة: </span>{c.city || "—"}</span>{userRole === "ADMIN" && <span><span className="app-muted">المشتريات: </span>{Number(c.total_purchases || 0).toFixed(2)} ج.م</span>}{(userRole === "ADMIN" || userRole === "CASHIER_ORDERS") && <span><span className="app-muted">المديونية: </span>{Number(c.balance || 0).toFixed(2)} ج.م</span>}</div>
             <button onClick={() => openProfile(c)} className="app-secondary-button !rounded-lg !px-3 !py-2">فتح الملف</button>
           </article>)}
           {!loading && !loadError && filteredCustomers.length === 0 && <p className="app-muted p-6 text-center text-sm">{customers.length ? "لا يوجد عملاء مطابقون للفلاتر" : "لا يوجد عملاء مضافين بعد"}</p>}
@@ -440,7 +438,7 @@ export default function CustomersPage() {
                     </span>
                   </td>
                   <td className="px-4 py-3">{c.city || "-"}</td>
-                  {userRole === "ADMIN" && <td className="px-4 py-3">{Number(c.total_purchases || 0).toLocaleString("ar-EG")} ج.م</td>}
+                  {userRole === "ADMIN" && <td className="px-4 py-3">{Number(c.total_purchases || 0).toFixed(2)} ج.م</td>}
                   {(userRole === "ADMIN" || userRole === "CASHIER_ORDERS") && <td className="px-4 py-3">{Number(c.balance || 0).toFixed(2)} / {Number(c.credit_limit || 0).toFixed(2)} ج.م</td>}
                   <td className="px-4 py-3">
                     <button onClick={() => openProfile(c)} className="app-secondary-button !rounded-lg !px-3 !py-2">فتح الملف</button>

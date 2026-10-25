@@ -3,8 +3,6 @@
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import SideNav from "@/components/SideNav";
-import TopNav from "@/components/TopNav";
 import { fetchApi } from "@/lib/api";
 
 type Price = { price_level: string; price: string };
@@ -71,9 +69,9 @@ function ProductDetails() {
       title: actionNames[item.action] || item.action, detail: "" })),
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-  return <div className="min-h-screen bg-[#131313] text-[#e5e2e1]" dir="rtl">
-    <SideNav />
-    <TopNav title="تفاصيل المنتج" />
+  return <div className="min-h-screen bg-surface text-[#e5e2e1]" dir="rtl">
+
+
     <main className="app-main space-y-6">
       <Link href="/inventory" className="inline-flex items-center gap-2 text-primary font-bold hover:underline">
         <span className="material-symbols-outlined">arrow_forward</span> قائمة المنتجات

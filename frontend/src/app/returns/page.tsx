@@ -2,8 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import SideNav from "@/components/SideNav";
-import TopNav from "@/components/TopNav";
 import { ZeroHintNumberInput } from "@/components/ZeroHintNumberInput";
 import { useSectionSearchSelection } from "@/lib/useSectionSearchSelection";
 import { fetchApi } from "@/lib/api";
@@ -272,7 +270,7 @@ export default function ReturnsPage() {
   }
 
   return <div className="min-h-screen" dir="rtl">
-    <SideNav /><TopNav title="الاسترجاع والاستبدال" />
+
     <main className="app-main space-y-4">
       <h1 className="sr-only">الاسترجاع والاستبدال</h1>
       {message && <p role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm">{message}</p>}

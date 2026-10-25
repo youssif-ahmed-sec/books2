@@ -2,8 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import SideNav from "@/components/SideNav";
-import TopNav from "@/components/TopNav";
 import { useSectionSearchSelection } from "@/lib/useSectionSearchSelection";
 import { ProductSelect } from "@/components/ProductSelect";
 import { ZeroHintNumberInput } from "@/components/ZeroHintNumberInput";
@@ -201,7 +199,7 @@ export default function PurchasesPage() {
     .sort((left, right) => Number(activeStatuses.has(right.status)) - Number(activeStatuses.has(left.status)) || right.created_at.localeCompare(left.created_at));
   const supplierName = (id: string, savedName: string) => suppliers.find(item => item.id === id)?.name || savedName;
 
-  return <div className="min-h-screen" dir="rtl"><SideNav /><TopNav title="المشتريات" /><main className="app-main space-y-6"><header className="flex flex-wrap items-end justify-between gap-4"><div><h1 className="app-heading">المشتريات</h1></div><div className="flex flex-wrap gap-2"><Link href="/purchases/legacy" className="app-secondary-button">الأوامر القديمة</Link><button type="button" className="app-primary-button" onClick={() => setEditing("new")}>طلب شراء جديد</button></div></header>
+  return <div className="min-h-screen" dir="rtl"><main className="app-main space-y-6"><header className="flex flex-wrap items-end justify-between gap-4"><div><h1 className="app-heading">المشتريات</h1></div><div className="flex flex-wrap gap-2"><Link href="/purchases/legacy" className="app-secondary-button">الأوامر القديمة</Link><button type="button" className="app-primary-button" onClick={() => setEditing("new")}>طلب شراء جديد</button></div></header>
     {error && <p role="alert" className="app-panel p-4 text-red-300">{error}</p>}
     <div className="flex flex-wrap gap-2" role="group" aria-label="فلترة أوامر الشراء">{(["open", "all", "done"] as const).map(key => <button type="button" key={key} onClick={() => setFilter(key)} className={filter === key ? "app-primary-button !px-4 !py-2" : "app-secondary-button !px-4 !py-2"}>{key === "open" ? "المطلوب متابعته" : key === "done" ? "المكتمل والمغلق" : "كل الأوامر"}</button>)}</div>
     {loading ? <div className="grid gap-4 lg:grid-cols-2">{[0, 1, 2].map(index => <div key={index} className="app-panel space-y-4 p-5"><span className="app-skeleton h-5 w-32" /><span className="app-skeleton h-4 w-64 max-w-full" /><span className="app-skeleton h-4 w-40" /></div>)}</div> : visible.length === 0 ? <div className="app-panel p-10 text-center app-muted">لا توجد أوامر في هذه الحالة.</div> : <div className="grid max-h-[42rem] min-w-0 items-start gap-4 overflow-y-auto overscroll-contain pe-1 custom-scrollbar xl:grid-cols-2">{visible.map(document => {

@@ -4,8 +4,6 @@ import { notifyError, notifySuccess } from "@/lib/notifications";
 
 import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
-import SideNav from "@/components/SideNav";
-import TopNav from "@/components/TopNav";
 import { InventoryTableRow } from "@/components/InventoryTableRow";
 import { ProductSelect } from "@/components/ProductSelect";
 import { AddProductPanel } from "@/components/AddProductPanel";
@@ -75,9 +73,9 @@ export default function InventoryPage() {
 
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>(() => readSectionSnapshot<InventorySnapshot>("inventory")?.items || []);
   const [statCards, setStatCards] = useState<StatCard[]>(() => readSectionSnapshot<InventorySnapshot>("inventory")?.stats || [
-    { icon: "warning", iconColor: "text-primary", label: "منخفض المخزون", value: "0", valueColor: "text-primary", sub: "راجع معدل البيع", subColor: "text-[#e2bfb0]/60" },
-    { icon: "error", iconColor: "text-[#ffb4ab]", label: "مخزون حرج", value: "0", valueColor: "text-[#ffb4ab]", sub: "أصناف نفدت", subColor: "text-[#e2bfb0]/60" },
-    { icon: "payments", iconColor: "text-primary", label: "قيمة المخزون", value: "0", valueExtra: "ج.م", sub: "تقدير القيمة الحالية", subColor: "text-[#e2bfb0]/60" },
+    { icon: "warning", iconColor: "text-primary", label: "منخفض المخزون", value: "0", valueColor: "text-primary", sub: "راجع معدل البيع", subColor: "text-on-surface-variant" },
+    { icon: "error", iconColor: "text-[#ffb4ab]", label: "مخزون حرج", value: "0", valueColor: "text-[#ffb4ab]", sub: "أصناف نفدت", subColor: "text-on-surface-variant" },
+    { icon: "payments", iconColor: "text-primary", label: "قيمة المخزون", value: "0", valueExtra: "ج.م", sub: "تقدير القيمة الحالية", subColor: "text-on-surface-variant" },
   ]);
   const [stockMovements, setStockMovements] = useState<StockMovement[]>(() => readSectionSnapshot<InventorySnapshot>("inventory")?.movements || []);
   const [purchaseNeeded, setPurchaseNeeded] = useState<PurchaseNeeded[]>(() => readSectionSnapshot<InventorySnapshot>("inventory")?.purchaseNeeded || []);
@@ -89,11 +87,11 @@ export default function InventoryPage() {
 
   const [suppliers, setSuppliers] = useState<SupplierOption[]>([]);
   const [categories, setCategories] = useState<CategoryOption[]>([]);
-  
+
   const [selectedSupplier, setSelectedSupplier] = useState(() => readSectionSnapshot<InventorySnapshot>("inventory")?.supplier || "");
   const [selectedCategory, setSelectedCategory] = useState(() => readSectionSnapshot<InventorySnapshot>("inventory")?.category || "");
   const [selectedStockStatus, setSelectedStockStatus] = useState(() => readSectionSnapshot<InventorySnapshot>("inventory")?.status || "");
-  
+
   const [page, setPage] = useState(() => readSectionSnapshot<InventorySnapshot>("inventory")?.page || 1);
   const [totalItems, setTotalItems] = useState(() => readSectionSnapshot<InventorySnapshot>("inventory")?.total || 0);
   const limit = 10;
@@ -114,7 +112,7 @@ export default function InventoryPage() {
     if (!userRole) return;
       try {
         if (showLoading && !readSectionSnapshot<InventorySnapshot>("inventory")) setLoading(true);
-        
+
         const params = new URLSearchParams({ skip: ((page - 1) * limit).toString(), limit: limit.toString(), is_bundle: "false" });
         if (selectedSupplier) params.append("supplier_id", selectedSupplier);
         if (selectedCategory) params.append("category_id", selectedCategory);
@@ -136,11 +134,11 @@ export default function InventoryPage() {
         const mappedItems: InventoryItem[] = productsList.map((product) => {
           const productBalances = balances.filter((b) => b.product_id === product.id);
           const currentStock = productBalances.reduce((sum, b) => sum + Number(parseFloat(b.current_stock) || 0), 0);
-          
+
           let retailPrice = "0.00";
           let wholesalePrice = "0.00";
           let unitName = product.base_unit || "قطعة";
-          
+
           if (product.units && product.units.length > 0) {
              const baseUnit = product.units.find(unit => unit.unit_name === product.base_unit) || product.units[0];
              if (baseUnit.unit_name) {
@@ -156,10 +154,10 @@ export default function InventoryPage() {
 
           let stockStatus: InventoryItem["stockStatus"] = "normal";
           let stockPercent = 100;
-          
+
           const maxStock = Number(parseFloat(product.max_stock_level) || 0);
           const minStock = Number(parseFloat(product.min_stock_level) || 0);
-          
+
           if (maxStock > 0) {
             stockPercent = Math.round(Math.min(100, Math.max(0, (currentStock / maxStock) * 100)));
           } else {
@@ -208,13 +206,13 @@ export default function InventoryPage() {
         });
 
         setInventoryItems(mappedItems);
-        
+
         // Map stats
         const mappedStats: StatCard[] = [
           ...(hasInventoryAccess ? [{ icon: "trending_up", iconColor: "text-primary", label: "حركات اليوم", value: String(statsRes.today_movements ?? 0), sub: "", subColor: "text-green-400" }] : []),
-          { icon: "warning", iconColor: "text-primary", label: "منخفض المخزون", value: statsRes.low_stock_count.toString(), valueColor: "text-primary", sub: "راجع معدل البيع", subColor: "text-[#e2bfb0]/60" },
-          { icon: "error", iconColor: "text-[#ffb4ab]", label: "مخزون حرج", value: statsRes.critical_stock_count.toString(), valueColor: "text-[#ffb4ab]", sub: "أصناف نفدت", subColor: "text-[#e2bfb0]/60" },
-          { icon: "payments", iconColor: "text-primary", label: "قيمة المخزون", value: parseFloat(statsRes.total_value).toLocaleString(), valueExtra: "ج.م", sub: "تقدير القيمة الحالية", subColor: "text-[#e2bfb0]/60" },
+          { icon: "warning", iconColor: "text-primary", label: "منخفض المخزون", value: statsRes.low_stock_count.toString(), valueColor: "text-primary", sub: "راجع معدل البيع", subColor: "text-on-surface-variant" },
+          { icon: "error", iconColor: "text-[#ffb4ab]", label: "مخزون حرج", value: statsRes.critical_stock_count.toString(), valueColor: "text-[#ffb4ab]", sub: "أصناف نفدت", subColor: "text-on-surface-variant" },
+          { icon: "payments", iconColor: "text-primary", label: "قيمة المخزون", value: parseFloat(statsRes.total_value).toLocaleString(), valueExtra: "ج.م", sub: "تقدير القيمة الحالية", subColor: "text-on-surface-variant" },
         ];
         setStatCards(mappedStats);
 
@@ -222,7 +220,7 @@ export default function InventoryPage() {
         const mappedMovements = (transactionsRes as RecentTransaction[]).map((tx) => {
           let typeLabel = "غير معروف";
           let style = "bg-gray-500/10 text-gray-400 border-gray-500/20";
-          
+
           if (tx.transaction_type === "Receiving") {
             typeLabel = "وارد";
             style = "bg-green-500/10 text-green-400 border-green-500/20";
@@ -233,7 +231,7 @@ export default function InventoryPage() {
             typeLabel = tx.notes === "Initial stock from product creation" ? "رصيد افتتاحي" : "تسوية";
             style = "bg-[#ffb4ab]/10 text-[#ffb4ab] border-[#ffb4ab]/20";
           }
-          
+
           const d = new Date(tx.created_at);
           return {
              product: tx.product_name || "منتج غير معروف",
@@ -248,7 +246,7 @@ export default function InventoryPage() {
           purchaseNeeded: readSectionSnapshot<InventorySnapshot>("inventory")?.purchaseNeeded || [],
           total: productsRes.total || 0, page, supplier: selectedSupplier, category: selectedCategory, status: selectedStockStatus,
         });
-        
+
       } catch (error) {
         console.error("Failed to load inventory data:", error);
         notifyError(error instanceof Error ? error.message : "تعذر تحميل بيانات المخزون");
@@ -319,12 +317,12 @@ export default function InventoryPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#131313] text-[#e5e2e1] overflow-x-hidden selection:bg-primary/30">
+    <div className="min-h-screen bg-surface text-[#e5e2e1] overflow-x-hidden selection:bg-primary/30">
       {/* Side Nav */}
-      <SideNav />
+
 
       {/* Top Nav */}
-      <TopNav title="إدارة المخزون" />
+
 
       {/* Main Content */}
       <main className="app-main space-y-6">
@@ -465,7 +463,7 @@ export default function InventoryPage() {
                       </tr>)
                     ) : inventoryItems.length === 0 ? (
                       <tr>
-                        <td colSpan={canViewCost(userRole) ? 6 : 5} className="text-center py-10 text-[#e2bfb0]/60">لا يوجد منتجات متاحة</td>
+                        <td colSpan={canViewCost(userRole) ? 6 : 5} className="text-center py-10 text-on-surface-variant">لا يوجد منتجات متاحة</td>
                       </tr>
                     ) : (
                       inventoryItems.map((item) => (
@@ -487,11 +485,11 @@ export default function InventoryPage() {
 
               {/* Pagination */}
               <div className="px-4 sm:px-8 py-5 border-t border-white/5 flex flex-wrap items-center justify-between gap-4">
-                <span className="shrink-0 whitespace-nowrap text-xs font-medium text-[#e2bfb0]/60">
+                <span className="shrink-0 whitespace-nowrap text-xs font-medium text-on-surface-variant">
                   عرض {totalItems ? Math.min((page - 1) * limit + 1, totalItems) : 0} إلى {Math.min(page * limit, totalItems)} من أصل {totalItems} منتج
                 </span>
                 <nav aria-label="صفحات المنتجات" className="flex max-w-full items-center gap-2 overflow-x-auto pb-1">
-                  <button 
+                  <button
                     type="button"
                     aria-label="الصفحة التالية"
                     disabled={page >= totalPages}
@@ -502,14 +500,14 @@ export default function InventoryPage() {
                   </button>
                   {pageNumbers.map((number, index) => (
                     <div key={number} className="flex shrink-0 items-center gap-2">
-                    {index > 0 && number - pageNumbers[index - 1] > 1 && <span aria-hidden="true" className="px-1 text-[#e2bfb0]/60">…</span>}
+                    {index > 0 && number - pageNumbers[index - 1] > 1 && <span aria-hidden="true" className="px-1 text-on-surface-variant">…</span>}
                     <button
                       type="button"
                       aria-label={`الصفحة ${number}`}
                       aria-current={page === number ? "page" : undefined}
                       onClick={() => setPage(number)}
                       className={`w-10 h-10 flex items-center justify-center rounded-full font-bold text-sm transition-all ${
-                        page === number 
+                        page === number
                           ? "bg-primary text-white shadow-[0_0_10px_rgba(255,107,0,0.3)]"
                           : "glass hover:bg-white/10"
                       }`}
@@ -518,7 +516,7 @@ export default function InventoryPage() {
                     </button>
                     </div>
                   ))}
-                  <button 
+                  <button
                     type="button"
                     aria-label="الصفحة السابقة"
                     disabled={page <= 1}
@@ -545,7 +543,7 @@ export default function InventoryPage() {
               </div>
               <div className="max-h-80 overflow-auto custom-scrollbar">
                 <table className="min-w-[320px] w-full text-right text-sm">
-                  <thead className="sticky top-0 z-10 bg-[#1c1b1a] text-[#e2bfb0]/60 border-b border-white/5">
+                  <thead className="sticky top-0 z-10 bg-surface-container-low text-on-surface-variant border-b border-white/5">
                     <tr>
                       <th className="pb-3 font-bold text-xs px-2">المنتج</th>
                       <th className="pb-3 font-bold text-center text-xs">النوع</th>
@@ -561,7 +559,7 @@ export default function InventoryPage() {
                       </tr>)
                     ) : stockMovements.length === 0 ? (
                       <tr>
-                        <td colSpan={3} className="text-center py-4 text-[#e2bfb0]/60">لا يوجد حركات قريبة</td>
+                        <td colSpan={3} className="text-center py-4 text-on-surface-variant">لا يوجد حركات قريبة</td>
                       </tr>
                     ) : (
                       stockMovements.map((move, i) => (
@@ -597,7 +595,7 @@ export default function InventoryPage() {
                     {[0, 1, 2].map((index) => <div key={index} className="flex items-center gap-3"><span className="app-skeleton h-10 w-10 shrink-0 rounded-xl" /><span className="app-skeleton h-4 w-32" /><span className="app-skeleton mr-auto h-5 w-12" /></div>)}
                   </div>
                 ) : purchaseNeeded.length === 0 ? (
-                  <div className="text-center py-4 text-[#e2bfb0]/60">جميع المنتجات متوفرة بمخزون كافٍ</div>
+                  <div className="text-center py-4 text-on-surface-variant">جميع المنتجات متوفرة بمخزون كافٍ</div>
                 ) : (
                   purchaseNeeded.map((item) => (
                     <div
@@ -605,11 +603,11 @@ export default function InventoryPage() {
                       className="flex min-w-0 items-center justify-between p-4 rounded-2xl bg-white/5 border border-white/5"
                     >
                       <div className="flex min-w-0 items-center gap-4">
-                        <div className="w-12 h-12 shrink-0 rounded-2xl bg-[#131313] flex items-center justify-center border border-white/5 overflow-hidden">
+                        <div className="w-12 h-12 shrink-0 rounded-2xl bg-surface flex items-center justify-center border border-white/5 overflow-hidden">
                           {item.image ? (
                             <Image src={item.image} alt={item.name} width={32} height={32} className="w-8 h-8 object-contain" unoptimized />
                           ) : (
-                            <span className="material-symbols-outlined text-[#e2bfb0]/60">inventory</span>
+                            <span className="material-symbols-outlined text-on-surface-variant">inventory</span>
                           )}
                         </div>
                         <div className="min-w-0">

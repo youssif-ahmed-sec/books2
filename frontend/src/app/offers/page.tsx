@@ -1,8 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import SideNav from "@/components/SideNav";
-import TopNav from "@/components/TopNav";
 import { ProductSelect } from "@/components/ProductSelect";
 import { ZeroHintNumberInput } from "@/components/ZeroHintNumberInput";
 import { fetchApi } from "@/lib/api";
@@ -172,7 +170,7 @@ export default function OffersPage() {
     catch (cause) { setError(errorMessage(cause, "تعذر حذف العرض")); }
     finally { setBusyId(null); }
   };
-  return <div className="min-h-screen" dir="rtl"><SideNav /><TopNav title="العروض" />
+  return <div className="min-h-screen" dir="rtl">
     <main className="app-main space-y-6"><div className="flex flex-wrap items-end justify-between gap-4"><div><h1 className="app-heading">العروض</h1></div>{canCreate && <button type="button" onClick={() => setEditing("new")} className="app-primary-button"><span className="material-symbols-outlined text-lg">add</span>إنشاء عرض</button>}</div>
       {error && <p role="alert" className="app-panel p-4 text-red-300">{error}</p>}
       {loading ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3" aria-label="جاري تحميل العروض">{[0, 1, 2].map(index => <div key={index} className="app-panel space-y-4 p-5"><span className="app-skeleton h-5 w-36" /><span className="app-skeleton h-4 w-52 max-w-full" /><span className="app-skeleton h-4 w-28" /></div>)}</div> : offers.length === 0 ?

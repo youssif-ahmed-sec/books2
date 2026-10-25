@@ -4,8 +4,6 @@ import { notifyError } from "@/lib/notifications";
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import Link from "next/link";
-import SideNav from "@/components/SideNav";
-import TopNav from "@/components/TopNav";
 import { fetchApi } from "@/lib/api";
 import { ReceiptPrint } from "@/components/pos/ReceiptPrint";
 import { sendLocalPrint } from "@/lib/localPrint";
@@ -411,6 +409,21 @@ export default function POSPage() {
     searchInput.current?.focus();
   };
 
+  useEffect(() => {
+    const onShortcut = (event: globalThis.KeyboardEvent) => {
+      if (event.repeat || event.altKey || event.ctrlKey || event.metaKey || pendingProduct || heldOpen || pendingCheckout || receiptOpen) return;
+      if (event.key === "F1") {
+        event.preventDefault();
+        searchInput.current?.focus();
+      } else if (event.key === "F4" && cart.length && !isProcessing && !reviewingCart) {
+        event.preventDefault();
+        holdCart();
+      }
+    };
+    window.addEventListener("keydown", onShortcut);
+    return () => window.removeEventListener("keydown", onShortcut);
+  });
+
   const reviewCartItems = async (items: CartItem[], targetWarehouseId: string) => {
     const productIds = [...new Set(items.map(item => item.productId))];
     const found = await Promise.all(productIds.map(async id => {
@@ -762,7 +775,11 @@ export default function POSPage() {
       const exactUnitMatches = dataArr.flatMap(product => product.units.filter(unit => unit.barcode === matchedCode).map(unit => ({ product, unit })));
       const exactProductMatches = dataArr.filter(product => product.barcode === matchedCode || product.sku === matchedCode);
       if (exactUnitMatches.length === 1 && exactProductMatches.every(product => product.id === exactUnitMatches[0].product.id)) {
-        const added = openProductSelection(exactUnitMatches[0].product, exactUnitMatches[0].unit.id);
+        const { product, unit } = exactUnitMatches[0];
+        const customerLevel = customers.find(customer => customer.id === selectedCustomer)?.price_level || "Retail";
+        const priceLevel = unit.prices.some(price => price.price_level === customerLevel && Number(price.price) > 0)
+          ? customerLevel : userRole === "ADMIN" ? unit.prices.find(price => Number(price.price) > 0)?.price_level || "" : customerLevel;
+        const added = addToCart(product, unit.id, priceLevel);
         playUiSound(added ? "scanSuccess" : "scanFailure");
       } else if (exactUnitMatches.length === 0 && exactProductMatches.length === 1) {
         const added = openProductSelection(exactProductMatches[0]);
@@ -788,7 +805,7 @@ export default function POSPage() {
         else setLoading(false);
       }
     }
-  }, [openProductSelection, userRole, warehouseId, categoryId, subcategoryId, brandId, productKind, catalogRefresh]);
+  }, [openProductSelection, addToCart, customers, selectedCustomer, userRole, warehouseId, categoryId, subcategoryId, brandId, productKind, catalogRefresh]);
 
   useEffect(() => {
     const delayDebounceFn = setTimeout(() => {
@@ -1059,8 +1076,8 @@ export default function POSPage() {
 
   return (
     <div className="min-h-screen overflow-x-hidden">
-      <SideNav />
-      <TopNav title="نقطة البيع" />
+
+
 
       <main className="app-main flex min-w-0 flex-col gap-5" inert={Boolean(pendingCheckout)}>
         {lastOrder && <div role="status" className="app-panel flex flex-wrap items-center justify-between gap-3 rounded-2xl border-primary/30 p-4">
@@ -1153,12 +1170,12 @@ export default function POSPage() {
                   onChange={event => setDeliveryFee(event.target.value)} disabled={isProcessing} placeholder="0 لو التوصيل مجاني" />
               </label>}
               <div className="flex justify-between items-center text-sm">
-                <span className="text-[#e2bfb0]/60">الإجمالي:</span>
+                <span className="app-muted">الإجمالي:</span>
                 <span className="font-bold">{subtotal.toFixed(2)} ج.م</span>
               </div>
 
               <div className="flex items-center justify-between gap-4">
-                <span className="text-[#e2bfb0]/60 text-sm">الخصم (%):</span>
+                <span className="app-muted text-sm">الخصم (٪):</span>
                 <div className="relative w-24">
                   <input
                     type="number"
@@ -1169,10 +1186,10 @@ export default function POSPage() {
                     value={discountPercent || ""}
                     onChange={(e) => setDiscountPercent(Number(e.target.value))}
                     disabled={userRole !== "ADMIN"}
-                    className="w-full bg-[#131313] border border-white/10 rounded-lg py-1 px-3 text-sm text-center focus:ring-1 focus:ring-primary focus:outline-none"
+                    className="w-full bg-surface border border-white/10 rounded-lg py-1 px-3 text-sm text-center focus:ring-1 focus:ring-primary focus:outline-none"
                     placeholder="0"
                   />
-                  <span className="absolute left-2 top-1.5 text-xs text-[#e2bfb0]/40">٪</span>
+                  <span className="app-muted absolute left-2 top-1.5 text-xs">٪</span>
                 </div>
               </div>
               {discountAmount > 0 && <div className="flex justify-between text-sm"><span>قيمة الخصم</span><span>-{discountAmount.toFixed(2)} ج.م</span></div>}
@@ -1224,7 +1241,7 @@ export default function POSPage() {
               </h3>
               <div className="flex items-center gap-2">
                 <button type="button" className="app-secondary-button !px-3 !py-2 text-xs" onClick={holdCart}
-                  disabled={!cart.length || isProcessing || reviewingCart || Boolean(pendingCheckout)}>تعليق السلة</button>
+                  disabled={!cart.length || isProcessing || reviewingCart || Boolean(pendingCheckout)} title="F4">تعليق السلة · F4</button>
                 <button type="button" className="app-secondary-button !px-3 !py-2 text-xs" onClick={() => setHeldOpen(true)}
                   disabled={!heldCarts.length || isProcessing || Boolean(pendingCheckout)}>المعلّقة {heldCarts.length ? `(${heldCarts.length})` : ""}</button>
               </div>
@@ -1232,7 +1249,7 @@ export default function POSPage() {
 
             <div className="min-h-0 flex-1 overflow-y-auto p-2 custom-scrollbar">
               {cart.length === 0 ? (
-                <div className="flex min-h-24 flex-col items-center justify-center gap-2 text-[#e2bfb0]/40">
+                <div className="flex min-h-24 flex-col items-center justify-center gap-2 text-on-surface-variant">
                   <span className="material-symbols-outlined text-6xl">production_quantity_limits</span>
                   <p>السلة فارغة</p>
                 </div>
@@ -1250,14 +1267,14 @@ export default function POSPage() {
 
                       {/* Bottom Row: Quantity & Total */}
                       <div className="flex items-center justify-between mt-1 pt-3 border-t border-white/5">
-                        <div className="flex items-center gap-2 bg-[#131313] p-1.5 rounded-lg border border-white/10 shadow-inner">
+                        <div className="flex items-center gap-2 bg-surface p-1.5 rounded-lg border border-white/10 shadow-inner">
                           <button type="button" aria-label={`تقليل كمية ${item.nameAr}`} onClick={() => updateCartItemQuantity(item.id, item.quantity - 1)} className="w-10 h-10 flex items-center justify-center hover:bg-white/10 text-white rounded-md transition-colors">
                             <span className="material-symbols-outlined text-lg">remove</span>
                           </button>
                           <input type="number" inputMode="numeric" min="1" step="1" aria-label={`كمية ${item.nameAr} بال${item.unitName}`} value={item.quantity} onFocus={event => event.currentTarget.select()} onBlur={event => { event.currentTarget.value = String(item.quantity); }} onChange={event => {
                             const quantity = Number(event.target.value);
                             if (Number.isInteger(quantity) && quantity > 0) updateCartItemQuantity(item.id, quantity);
-                          }} className="w-16 h-10 rounded-md border border-white/20 bg-[#201f1f] text-center text-lg font-bold text-primary focus:ring-2 focus:ring-primary/50" />
+                          }} className="w-16 h-10 rounded-md border border-white/20 bg-surface-container text-center text-lg font-bold text-primary focus:ring-2 focus:ring-primary/50" />
                           <button type="button" aria-label={`زيادة كمية ${item.nameAr}`} onClick={() => updateCartItemQuantity(item.id, item.quantity + 1)} className="w-10 h-10 flex items-center justify-center hover:bg-white/10 text-white rounded-md transition-colors">
                             <span className="material-symbols-outlined text-lg">add</span>
                           </button>
@@ -1275,11 +1292,12 @@ export default function POSPage() {
               {checkoutError && <p role="alert" className="rounded-lg bg-red-500/10 p-3 text-sm text-[#ffb4ab]">{checkoutError}</p>}
               <button type="button" onClick={() => void handleCheckout()}
                 disabled={Boolean(checkoutBlock) || isProcessing || reviewingCart || Boolean(pendingCheckout)}
+                aria-describedby={checkoutBlock ? "pos-checkout-block" : undefined}
                 className="app-primary-button flex w-full justify-center gap-2 py-3.5 disabled:opacity-50">
                 {isProcessing || reviewingCart ? <span className="material-symbols-outlined animate-spin" aria-hidden="true">sync</span> : <span className="material-symbols-outlined" aria-hidden="true">point_of_sale</span>}
                 إتمام البيع · {totalAmount.toFixed(2)} ج.م
               </button>
-              {checkoutBlock && <p className="app-muted text-center text-xs">{checkoutBlock}</p>}
+              {checkoutBlock && <p id="pos-checkout-block" role="status" className="app-checkout-block rounded-xl border px-3 py-2 text-center text-sm font-semibold">{checkoutBlock}</p>}
             </div>
 
           </div>
@@ -1322,8 +1340,8 @@ export default function POSPage() {
                     void searchProducts(code, true, alternateCode);
                   }
                 }}
-                placeholder={warehouseId ? "امسح باركود أو ابحث عن صنف" : "اختر المخزن أولًا"}
-                className="min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-[#e2bfb0]/55"
+                placeholder={warehouseId ? "امسح باركود أو ابحث عن صنف · F1" : "اختر المخزن أولًا"}
+                className="min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-on-surface-variant"
               />
               {searchQuery && <button type="button" aria-label="مسح البحث" title="مسح البحث" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-current/65 hover:bg-primary/10 hover:text-primary focus-visible:outline-2 focus-visible:outline-primary" onClick={() => { ++searchSequence.current; scanInFlight.current = null; setSearchQuery(""); setSearchError(""); setProducts([]); setLoading(false); searchInput.current?.focus(); }}>
                 <span className="material-symbols-outlined text-xl" aria-hidden="true">close</span>
@@ -1398,11 +1416,11 @@ export default function POSPage() {
                 </button>}
               </div>
             ) : searchError ? null : searchQuery ? (
-              <div className="h-full flex flex-col items-center justify-center text-[#e2bfb0]/40">
+              <div className="h-full flex flex-col items-center justify-center text-on-surface-variant">
                 <p>لم يتم العثور على نتائج</p>
               </div>
             ) : (
-              <div className="h-full flex flex-col items-center justify-center text-[#e2bfb0]/40">
+              <div className="h-full flex flex-col items-center justify-center text-on-surface-variant">
                 <p>{warehouseId ? "لا توجد أصناف مطابقة للفلاتر" : "اختر مخزن البيع لعرض الأصناف"}</p>
               </div>
             )}
@@ -1470,7 +1488,7 @@ export default function POSPage() {
 
       {receiptOpen && lastOrder && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-4" role="dialog" aria-modal="true" aria-label="فاتورة البيع">
-          <div className="flex max-h-[90vh] w-full max-w-md flex-col rounded-2xl bg-[#1c1b1b] p-5 text-white shadow-2xl">
+          <div className="flex max-h-[90vh] w-full max-w-md flex-col rounded-2xl bg-surface-container-low p-5 text-white shadow-2xl">
             <div className="mb-3 flex items-center justify-between gap-3">
               <h2 className="text-lg font-bold">فاتورة البيع</h2>
               <button type="button" onClick={() => setReceiptOpen(false)} aria-label="إغلاق الفاتورة" className="rounded-lg p-2 hover:bg-white/10">✕</button>

@@ -53,7 +53,7 @@ export default function InventoryMovementsModal({ onClose }: InventoryMovementsM
         let typeLabel = "غير معروف";
         let style = "bg-gray-500/10 text-gray-400 border-gray-500/20";
         let qtyPrefix = "";
-        
+
         if (tx.transaction_type === "Receiving") {
           typeLabel = "وارد";
           style = "bg-green-500/10 text-green-400 border-green-500/20";
@@ -67,7 +67,7 @@ export default function InventoryMovementsModal({ onClose }: InventoryMovementsM
           style = "bg-[#ffb4ab]/10 text-[#ffb4ab] border-[#ffb4ab]/20";
           qtyPrefix = tx.quantity_changed > 0 ? "+" : "";
         }
-        
+
         const d = new Date(tx.created_at);
         return {
            id: tx.id,
@@ -118,10 +118,10 @@ export default function InventoryMovementsModal({ onClose }: InventoryMovementsM
   return (
     <div className="motion-overlay fixed inset-0 z-50 flex items-center justify-center" dir="rtl">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-4xl max-h-[85vh] bg-[#1a1918] border border-white/10 rounded-3xl shadow-2xl flex flex-col animate-slide-up">
-        
+      <div className="relative w-full max-w-4xl max-h-[85vh] bg-surface-container-low border border-white/10 rounded-3xl shadow-2xl flex flex-col animate-slide-up">
+
         {/* Header */}
-        <div className="flex items-center justify-between p-8 border-b border-white/10 flex-shrink-0 bg-[#0e0e0e]/50 backdrop-blur-md rounded-t-3xl">
+        <div className="flex items-center justify-between p-8 border-b border-white/10 flex-shrink-0 bg-surface-container-lowest/50 backdrop-blur-md rounded-t-3xl">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
               <span className="material-symbols-outlined text-xl">history</span>
@@ -132,7 +132,7 @@ export default function InventoryMovementsModal({ onClose }: InventoryMovementsM
           </div>
           <button
             onClick={onClose}
-            className="w-10 h-10 rounded-full glass flex items-center justify-center text-[#e2bfb0]/60 hover:text-white transition-all hover:bg-white/5"
+            className="w-10 h-10 rounded-full glass flex items-center justify-center text-on-surface-variant hover:text-white transition-all hover:bg-white/5"
           >
             <span className="material-symbols-outlined text-[22px]">close</span>
           </button>
@@ -144,7 +144,7 @@ export default function InventoryMovementsModal({ onClose }: InventoryMovementsM
             <div className="w-full overflow-x-auto pb-4 [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-track]:bg-white/5 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/10 hover:[&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb]:rounded-full">
               <table className="w-full text-right border-collapse min-w-[700px]">
                 <thead>
-                  <tr className="bg-[#1a1918]/50 border-b border-white/5">
+                  <tr className="bg-surface-container-low/50 border-b border-white/5">
                     <th className="px-8 py-5 text-sm font-bold text-[#e2bfb0]/80 text-right">
                       المنتج
                     </th>
@@ -164,7 +164,7 @@ export default function InventoryMovementsModal({ onClose }: InventoryMovementsM
                     [0, 1, 2].map(index => <tr key={index} aria-hidden={index !== 0}><td className="px-8 py-4"><span className="app-skeleton h-4 w-32" />{index === 0 && <span className="sr-only">جاري تحميل سجل الحركات</span>}</td><td className="px-8 py-4"><span className="app-skeleton h-4 w-24" /></td><td className="px-8 py-4"><span className="app-skeleton h-4 w-16" /></td><td className="px-8 py-4"><span className="app-skeleton h-4 w-28" /></td></tr>)
                   ) : movements.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="text-center py-10 text-[#e2bfb0]/60 text-sm">
+                      <td colSpan={4} className="text-center py-10 text-on-surface-variant text-sm">
                         لا يوجد حركات مسجلة
                       </td>
                     </tr>
@@ -198,19 +198,19 @@ export default function InventoryMovementsModal({ onClose }: InventoryMovementsM
         </div>
 
         {/* Pagination Footer */}
-        <div className="px-8 py-6 border-t border-white/10 bg-[#0e0e0e]/50 backdrop-blur-md rounded-b-3xl flex items-center justify-between flex-shrink-0">
-          <span className="text-xs font-medium text-[#e2bfb0]/60">
+        <div className="px-8 py-6 border-t border-white/10 bg-surface-container-lowest/50 backdrop-blur-md rounded-b-3xl flex items-center justify-between flex-shrink-0">
+          <span className="text-xs font-medium text-on-surface-variant">
             عرض {Math.min((page - 1) * limit + 1, totalItems)} إلى {Math.min(page * limit, totalItems)} من أصل {totalItems} حركة
           </span>
           <div className="flex gap-2">
-            <button 
+            <button
               disabled={page >= Math.ceil(totalItems / limit) || loading}
               onClick={() => { setLoading(true); setPage(page + 1); }}
               className="w-10 h-10 flex items-center justify-center glass rounded-full hover:bg-white/10 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <span className="material-symbols-outlined text-[20px]">chevron_right</span>
             </button>
-            
+
             {/* Show only max 5 page buttons */}
             {[...Array(Math.ceil(totalItems / limit) || 1)].map((_, i) => {
                if (i + 1 < page - 2 || i + 1 > page + 2) {
@@ -225,7 +225,7 @@ export default function InventoryMovementsModal({ onClose }: InventoryMovementsM
                   key={i}
                   onClick={() => { setLoading(true); setPage(i + 1); }}
                   className={`w-10 h-10 flex items-center justify-center rounded-full font-bold text-sm transition-all ${
-                    page === i + 1 
+                    page === i + 1
                       ? "bg-primary text-white shadow-[0_0_10px_rgba(255,107,0,0.3)]"
                       : "glass hover:bg-white/10"
                   }`}
@@ -234,8 +234,8 @@ export default function InventoryMovementsModal({ onClose }: InventoryMovementsM
                 </button>
                );
             })}
-            
-            <button 
+
+            <button
               disabled={page <= 1 || loading}
               onClick={() => { setLoading(true); setPage(page - 1); }}
               className="w-10 h-10 flex items-center justify-center glass rounded-full hover:bg-white/10 transition-all disabled:opacity-50 disabled:cursor-not-allowed"

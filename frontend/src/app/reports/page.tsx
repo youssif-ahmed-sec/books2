@@ -1,8 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import SideNav from "@/components/SideNav";
-import TopNav from "@/components/TopNav";
 import { LoadingTableRows } from "@/components/LoadingState";
 import { SalesTrendChart, ActivityBars, type SalesPoint, type ActivityPoint } from "@/components/analytics/Charts";
 import { fetchApi } from "@/lib/api";
@@ -119,7 +117,7 @@ export default function ReportsPage() {
   const shownInventoryTrend = trendKey === key ? inventoryTrend : [];
   if (!role) return null;
 
-  return <div className="min-h-screen" dir="rtl"><SideNav /><TopNav title="التقارير" /><main className="app-main"><div className="space-y-6">
+  return <div className="min-h-screen" dir="rtl"><main className="app-main"><div className="space-y-6">
     <header className="flex flex-wrap items-end justify-between gap-4"><div><h1 className="app-heading">التقارير</h1></div><div className="flex flex-wrap gap-2"><a className="app-secondary-button" href="/reports/product-activity">حركة الأصناف</a><button type="button" className="app-secondary-button" onClick={() => { setLoading(true); setTrendLoading(true); setError(""); setRevision(value => value + 1); }}>تحديث التقرير</button></div></header>
     <section className="app-panel flex flex-wrap items-end gap-3 rounded-2xl p-4 sm:p-5" aria-label="خيارات التقرير">
       <div className="flex flex-wrap gap-2">{role === "ADMIN" && <button type="button" onClick={() => switchTab("sales")} aria-pressed={tab === "sales"} className={`rounded-xl px-4 py-2 text-sm font-bold ${tab === "sales" ? "bg-primary text-white" : "bg-white/5 hover:bg-white/10"}`}>المبيعات والمالية</button>}<button type="button" onClick={() => switchTab("inventory")} aria-pressed={tab === "inventory"} className={`rounded-xl px-4 py-2 text-sm font-bold ${tab === "inventory" ? "bg-primary text-white" : "bg-white/5 hover:bg-white/10"}`}>حركة المخزون</button></div>

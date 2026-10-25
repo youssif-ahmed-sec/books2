@@ -3,8 +3,6 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import SideNav from "@/components/SideNav";
-import TopNav from "@/components/TopNav";
 import { ProductSelect } from "@/components/ProductSelect";
 import { fetchApi } from "@/lib/api";
 import { getCurrentUser } from "@/lib/currentUser";
@@ -62,6 +60,7 @@ export default function StockOperationsPage() {
   const pendingSession = useRef<Pending | null>(null);
   const pendingTransfer = useRef<Pending | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const reasonRef = useRef<HTMLTextAreaElement>(null);
 
   const sourceId = warehouses.length === 1 ? warehouses[0].id : warehouseId;
   const productBalances = balances.filter(row => row.product_id === selectedProduct?.id);
@@ -161,10 +160,9 @@ export default function StockOperationsPage() {
     if (!selectedProduct || !sourceId) { setError("حدد المنتج والمخزن"); return; }
     if (inactiveStock > 0) { setError("رصيد المنتج في مخزن غير نشط؛ صحح المخزن قبل الجرد"); return; }
     if (!validObserved) { setError("أدخل كمية فعلية صحيحة حتى خانتين عشريتين"); return; }
-    if (reasonNeeded && reason.trim().length < 3) { setError("اكتب سبب أي فرق جرد من ٣ أحرف على الأقل"); return; }
-    if (reason.trim() && reason.trim().length < 3) { setError("سبب الجرد يجب أن يكون ٣ أحرف على الأقل"); return; }
+    if (reasonNeeded && reason.trim().length < 3) { setError("اكتب سبب أي فرق جرد من ٣ أحرف على الأقل"); reasonRef.current?.focus(); return; }
     if (draft.some(line => line.product.id === selectedProduct.id)) { setError("المنتج موجود في الجلسة؛ استخدم تعديل لتغيير عدّه"); return; }
-    setDraft(previous => [...previous, { product: selectedProduct, expected: current, observed: Number(observed), reason: reason.trim() }]);
+    setDraft(previous => [...previous, { product: selectedProduct, expected: current, observed: Number(observed), reason: reasonNeeded ? reason.trim() : "" }]);
     setSelectedProduct(null); setSearch(""); setProducts([]); setObserved(""); setReason("");
     searchRef.current?.focus();
   };
@@ -235,7 +233,7 @@ export default function StockOperationsPage() {
   };
 
   return <div className="min-h-screen" dir="rtl">
-    <SideNav /><TopNav title={warehouseOnlyMode ? "الجرد" : "النقل والجرد"} />
+
     <main className="app-main space-y-7">
       <div><h1 className="app-heading">جلسة الجرد</h1></div>
       {error && <p role="alert" className="stock-ops-warning app-panel p-4 text-sm">{error}</p>}
@@ -253,8 +251,8 @@ export default function StockOperationsPage() {
           {inactiveStock > 0 && <p role="alert" className="stock-ops-warning text-sm">للمنتج رصيد في مخزن غير نشط. يلزم تصحيح المخزن قبل جرده.</p>}
           <div><label className="mb-2 block text-sm" htmlFor="count-observed">الكمية الفعلية{selectedProduct ? ` (${selectedProduct.base_unit})` : ""}</label><input id="count-observed" className="app-field" type="number" min="0" step="0.01" value={observed} onChange={event => setObserved(event.target.value)} placeholder="أدخل العدد الفعلي" /></div>
           {selectedProduct && difference !== null && <div className="flex flex-wrap items-center justify-between gap-3 text-sm"><span className="app-muted">فرق الجرد المتوقع</span><strong dir="auto">{signedQuantity(difference)} {selectedProduct.base_unit}</strong></div>}
-          {reasonNeeded && <div><label className="mb-2 block text-sm" htmlFor="count-reason">سبب فرق الجرد <span className="text-primary">إجباري</span></label><textarea id="count-reason" className="app-field min-h-24" value={reason} maxLength={500} onChange={event => setReason(event.target.value)} placeholder={isAdmin ? "اكتب سبب الفرق لتوثيق تعديل الرصيد" : "اشرح سبب الفرق ليقدر المدير يراجعه"} /></div>}
-          <button type="button" className="app-primary-button w-full" disabled={!countFeatureReady || loading || !selectedProduct || !sourceId || inactiveStock > 0 || !validObserved || (reasonNeeded && reason.trim().length < 3)} onClick={addLine}>إضافة للجلسة</button>
+          {reasonNeeded && <div><label className="mb-2 block text-sm" htmlFor="count-reason">سبب فرق الجرد <span className="text-primary">إجباري</span></label><textarea ref={reasonRef} id="count-reason" className="app-field min-h-24" value={reason} maxLength={500} aria-invalid={reason.trim().length < 3} aria-describedby="count-reason-hint" onChange={event => setReason(event.target.value)} placeholder={isAdmin ? "اكتب سبب الفرق لتوثيق تعديل الرصيد" : "اشرح سبب الفرق ليقدر المدير يراجعه"} /><p id="count-reason-hint" className="app-muted mt-1 text-xs">٣ أحرف على الأقل</p></div>}
+          <button type="button" className="app-primary-button w-full" disabled={!countFeatureReady || loading || !selectedProduct || !sourceId || inactiveStock > 0 || !validObserved} onClick={addLine}>إضافة للجلسة</button>
         </section>
         <section className="app-panel min-w-0 overflow-hidden">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-6 py-5"><div><h2 className="text-lg font-bold">مراجعة الجلسة</h2><p className="app-muted mt-1 text-xs">{isAdmin ? "فروق جرد المدير تُعتمد عند تأكيد الجلسة." : "كل صنف له قرار منفصل عند المدير إذا ظهر فرق."}</p></div></div>

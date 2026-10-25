@@ -29,15 +29,27 @@ const navItems = [
   { href: "/audit", icon: "history", label: "سجل التدقيق", disabled: false },
 ];
 
-// Pages currently mount their own SideNav; keep its position while navigating.
+const navGroups = [
+  { id: "sales", label: "المبيعات والصندوق", hrefs: ["/pos", "/cash-register", "/orders", "/returns", "/customers"] },
+  { id: "inventory", label: "المخزون والمشتريات", hrefs: ["/inventory", "/stock-operations", "/categories", "/offers", "/purchases", "/suppliers"] },
+  { id: "approvals", label: "الموافقات والرقابة", hrefs: ["/product-approvals", "/count-approvals", "/audit"] },
+  { id: "management", label: "الإدارة والتقارير", hrefs: ["/dashboard", "/financials", "/reports", "/integrations/whatsapp"] },
+] as const;
+
+const groupForPath = (path: string) => navGroups.find(group => group.hrefs.some(href => path === href || path.startsWith(`${href}/`)));
+
+// Preserve the scroll position across full page loads as well as client navigation.
 let rememberedNavScrollTop = 0;
 
 export default function SideNav() {
   const pathname = usePathname();
   const router = useRouter();
-  
+
   const [user, setUser] = useState<{ email: string | null; username?: string | null; role: string } | null>(() => cachedCurrentUser());
-  const [mobileOpen, setMobileOpen] = useState(false);
+  const [mobileMenu, setMobileMenu] = useState({ path: pathname, open: false });
+  const mobileOpen = mobileMenu.path === pathname && mobileMenu.open;
+  const [selectedGroup, setSelectedGroup] = useState<{ path: string; group: string }>(() => ({ path: pathname, group: groupForPath(pathname)?.id || "sales" }));
+  const expandedGroup = selectedGroup.path === pathname ? selectedGroup.group : groupForPath(pathname)?.id || "sales";
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
@@ -91,13 +103,13 @@ export default function SideNav() {
       type="button"
       aria-label={mobileOpen ? "إغلاق القائمة" : "فتح القائمة"}
       aria-expanded={mobileOpen}
-      onClick={() => setMobileOpen(!mobileOpen)}
-      className="fixed right-8 top-8 z-[70] flex h-10 w-10 items-center justify-center rounded-full bg-primary text-white lg:hidden"
+      onClick={() => setMobileMenu({ path: pathname, open: !mobileOpen })}
+      className="fixed right-8 top-8 z-[70] flex h-10 w-10 items-center justify-center rounded-full bg-primary text-white xl:hidden"
     >
       <span className="material-symbols-outlined">{mobileOpen ? "close" : "menu"}</span>
     </button>
-    {mobileOpen && <button type="button" aria-label="إغلاق القائمة" onClick={() => setMobileOpen(false)} className="fixed inset-0 z-50 bg-black/70 lg:hidden" />}
-    <aside className={`fixed bottom-0 right-0 top-0 z-[60] w-[min(22rem,88vw)] overflow-hidden rounded-none glass shadow-xl transition-transform duration-200 lg:bottom-8 lg:right-8 lg:top-8 lg:w-80 lg:translate-x-0 lg:rounded-2xl ${mobileOpen ? "translate-x-0" : "translate-x-full"}`}>
+    {mobileOpen && <button type="button" aria-label="إغلاق القائمة" onClick={() => setMobileMenu({ path: pathname, open: false })} className="fixed inset-0 z-50 bg-black/70 xl:hidden" />}
+    <aside className={`fixed bottom-0 right-0 top-0 z-[60] w-[min(22rem,88vw)] overflow-hidden rounded-none glass shadow-xl transition-transform duration-200 xl:bottom-4 xl:right-4 xl:top-4 xl:w-64 xl:translate-x-0 xl:rounded-2xl min-[1366px]:bottom-8 min-[1366px]:right-8 min-[1366px]:top-8 min-[1366px]:w-80 ${mobileOpen ? "translate-x-0" : "translate-x-full"}`}>
       <div ref={scrollRef} onScroll={event => { rememberedNavScrollTop = event.currentTarget.scrollTop; }} className="h-full w-full overflow-y-auto overflow-x-hidden custom-scrollbar" dir="ltr">
         <div className="flex min-h-full flex-col p-6" dir="rtl">
           {/* Logo & Brand */}
@@ -108,37 +120,31 @@ export default function SideNav() {
             </div>
             <div>
               <h1 className="text-2xl font-bold text-primary tracking-tight">مكتبة سعود الشافعي</h1>
-              <p className="text-sm text-[#e2bfb0]/70">{warehouseOnlyMode ? "إدارة المخازن" : "إدارة المكتبة والمبيعات"}</p>
+              <p className="app-muted text-sm">{warehouseOnlyMode ? "إدارة المخازن" : "إدارة المكتبة والمبيعات"}</p>
             </div>
           </div>
 
           {/* Navigation */}
           <nav className="flex flex-1 flex-col gap-y-1">
-            {visibleNavItems.map((item) => {
-              const isActive = pathname === item.href;
-              const Wrapper = Link;
-              return (
-                <Wrapper
-                  key={item.href}
-                  href={item.href}
-                  onClick={() => setMobileOpen(false)}
-                  className={`flex items-center gap-4 rounded-full px-4 py-3 transition-all font-bold ${
-                    isActive
-                      ? "bg-primary text-white shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-[0.98]"
-                      : item.disabled
-                      ? "text-[#e2bfb0]/30 cursor-not-allowed"
-                      : "text-[#e2bfb0] hover:bg-white/5 hover:-translate-x-1"
-                  }`}
-                >
-                  <span
-                    className="material-symbols-outlined"
-                    style={isActive ? { fontVariationSettings: "'FILL' 1" } : undefined}
-                  >
-                    {item.icon}
-                  </span>
-                  <span>{warehouseOnlyMode && item.href === "/stock-operations" ? "الجرد" : item.label}</span>
-                </Wrapper>
-              );
+            {navGroups.map(group => {
+              const items = visibleNavItems.filter(item => group.hrefs.some(href => href === item.href));
+              if (!items.length) return null;
+              const expanded = expandedGroup === group.id;
+              return <div key={group.id} className="border-b border-current/10 pb-2 last:border-b-0">
+                <button type="button" aria-expanded={expanded} aria-controls={`nav-group-${group.id}`}
+                  onClick={() => setSelectedGroup({ path: pathname, group: expanded ? "" : group.id })}
+                  className="app-muted flex w-full items-center justify-between rounded-xl px-3 py-2 text-right text-xs font-bold hover:bg-white/5">
+                  <span>{group.label}</span><span className="material-symbols-outlined text-base" aria-hidden="true">{expanded ? "expand_less" : "expand_more"}</span>
+                </button>
+                {expanded && <div id={`nav-group-${group.id}`} className="flex flex-col gap-y-1">{items.map(item => {
+                  const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
+                  return <Link key={item.href} href={item.href} onClick={() => setMobileMenu({ path: pathname, open: false })} aria-current={isActive ? "page" : undefined}
+                    className={`flex items-center gap-3 rounded-full px-4 py-2.5 text-sm font-bold transition-colors ${isActive ? "bg-primary text-white" : "text-[#e2bfb0] hover:bg-white/5"}`}>
+                    <span className="material-symbols-outlined" aria-hidden="true" style={isActive ? { fontVariationSettings: "'FILL' 1" } : undefined}>{item.icon}</span>
+                    <span>{warehouseOnlyMode && item.href === "/stock-operations" ? "الجرد" : item.label}</span>
+                  </Link>;
+                })}</div>}
+              </div>;
             })}
           </nav>
 
@@ -146,7 +152,7 @@ export default function SideNav() {
           <div className="mt-auto pt-6 flex flex-col gap-4">
             {user?.role === "ADMIN" && <Link
               href="/settings"
-              onClick={() => setMobileOpen(false)}
+              onClick={() => setMobileMenu({ path: pathname, open: false })}
               className={`flex items-center gap-4 rounded-full px-4 py-3 transition-all font-bold ${
                 pathname === "/settings"
                   ? "bg-primary text-white shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-[0.98]"
@@ -156,7 +162,7 @@ export default function SideNav() {
               <span className="material-symbols-outlined">settings</span>
               <span>الإعدادات</span>
             </Link>}
-            
+
           </div>
         </div>
       </div>

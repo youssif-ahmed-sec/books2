@@ -19,7 +19,7 @@ export default function UnitBarcodeField({ unitName, value, onChange, readOnly =
   return (
     <div className="unit-barcode-field">
       {readOnly ? (
-        <div className="flex items-center justify-between gap-2 rounded-xl border border-white/10 bg-[#201f1f] px-3 py-2 text-sm" title="الباركود المحفوظ لا يمكن تغييره">
+        <div className="flex items-center justify-between gap-2 rounded-xl border border-white/10 bg-surface-container px-3 py-2 text-sm" title="الباركود المحفوظ لا يمكن تغييره">
           <span dir="ltr" className="font-mono select-all truncate">{value}</span>
           <span className="material-symbols-outlined text-primary text-base" aria-hidden="true">lock</span>
         </div>
@@ -49,7 +49,7 @@ export default function UnitBarcodeField({ unitName, value, onChange, readOnly =
         }}
         disabled={selectedMode === "auto"}
         placeholder={selectedMode === "auto" ? "يُنشأ عند الحفظ" : "ضع المؤشر وامسح الباركود"}
-        className="w-full rounded-xl border border-white/10 bg-[#201f1f] px-3 py-2 text-sm disabled:opacity-60" />
+        className="w-full rounded-xl border border-white/10 bg-surface-container px-3 py-2 text-sm disabled:opacity-60" />
       </>}
     </div>
   );

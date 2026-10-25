@@ -1,8 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import SideNav from "@/components/SideNav";
-import TopNav from "@/components/TopNav";
 import { fetchApi } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
 import InvoiceDetailsDialog from "@/components/InvoiceDetailsDialog";
@@ -99,8 +97,8 @@ export default function OrdersPage() {
   }
 
   return <div className="min-h-screen">
-    <SideNav />
-    <TopNav title="الفواتير" />
+
+
     <main className="mx-4 mb-8 mt-28 flex min-w-0 flex-1 flex-col gap-4 lg:ml-8 lg:mr-[364px] lg:mt-36">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="app-heading">الفواتير</h1>

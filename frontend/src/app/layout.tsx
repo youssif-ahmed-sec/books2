@@ -3,6 +3,7 @@ import "./globals.css";
 import WarehouseModeGate from "@/components/WarehouseModeGate";
 import NotificationCenter from "@/components/NotificationCenter";
 import { ConfirmationProvider } from "@/components/ConfirmationProvider";
+import AppChrome from "@/components/AppChrome";
 
 export const metadata: Metadata = {
   title: "مكتبة سعود الشافعي | إدارة المكتبة",
@@ -38,7 +39,7 @@ export default function RootLayout({
         />
       </head>
       <body className="overflow-x-hidden antialiased">
-        <ConfirmationProvider><WarehouseModeGate>{children}</WarehouseModeGate></ConfirmationProvider>
+        <ConfirmationProvider><WarehouseModeGate><AppChrome />{children}</WarehouseModeGate></ConfirmationProvider>
         <NotificationCenter />
       </body>
     </html>

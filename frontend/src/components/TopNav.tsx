@@ -113,7 +113,7 @@ export default function TopNav({ title }: TopNavProps) {
       <div className="app-top-search relative min-w-0 w-[min(34vw,480px)]" ref={searchRef}>
         {posSearch ? <button type="button" className="app-search app-search-focus flex h-10 w-full items-center gap-2 rounded-full px-4 text-start" onClick={() => document.getElementById("pos-product-search")?.focus()} aria-label="الانتقال لبحث الأصناف والباركود في نقطة البيع">
           <span className="material-symbols-outlined text-xl app-muted" aria-hidden="true">search</span>
-          <span className="app-muted min-w-0 truncate text-sm">ابحث عن صنف أو امسح باركود</span>
+          <span className="app-muted min-w-0 truncate text-sm">انتقل إلى بحث الأصناف والباركود</span>
         </button> : <div className="app-search app-search-focus flex h-10 items-center gap-2 rounded-full px-4">
           <span className="material-symbols-outlined text-xl app-muted" aria-hidden="true">search</span>
           <input type="search" value={query} disabled={!searchLabel}

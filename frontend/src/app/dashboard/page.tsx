@@ -3,8 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { fetchApi } from "@/lib/api";
-import SideNav from "@/components/SideNav";
-import TopNav from "@/components/TopNav";
 import AdminGate from "@/components/AdminGate";
 import { readSectionSnapshot, sectionSnapshotRevision, writeSectionSnapshot } from "@/lib/sectionSnapshot";
 import { RankedBars, SalesCompositionChart, SalesTrendChart, SourceDonut, type SalesPoint } from "@/components/analytics/Charts";
@@ -220,7 +218,7 @@ function DashboardContent() {
   const healthyPercent = stockTotal ? stockHealthy / stockTotal * 100 : 0;
   const lowPercent = stockTotal ? overview!.low_stock_count / stockTotal * 100 : 0;
 
-  return <div className="min-h-screen" dir="rtl"><SideNav /><TopNav title="لوحة الإدارة" />
+  return <div className="min-h-screen" dir="rtl">
     <main className="app-main"><div className="space-y-6">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div><h1 className="app-heading">اللوحة الرئيسية</h1></div>

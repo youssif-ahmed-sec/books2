@@ -2,8 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import SideNav from "@/components/SideNav";
-import TopNav from "@/components/TopNav";
 import { LoadingTableRows } from "@/components/LoadingState";
 import { fetchApi } from "@/lib/api";
 import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
@@ -37,8 +35,8 @@ export default function AuditPage() {
     return () => { active = false; };
   }, [offset, focusedId]);
 
-  return <div className="min-h-screen bg-[#131313] text-white flex" dir="rtl">
-    <SideNav /><TopNav title="سجل التدقيق" />
+  return <div className="min-h-screen bg-surface text-white flex" dir="rtl">
+
     <main className="mx-4 mt-28 mb-8 flex-1 min-w-0 lg:mr-[364px] lg:mt-36 space-y-5">
       <h1 className="text-2xl font-bold">سجل العمليات</h1>
       {message && <p role="alert">{message}</p>}

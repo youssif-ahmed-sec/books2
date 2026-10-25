@@ -3,8 +3,6 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import SideNav from "@/components/SideNav";
-import TopNav from "@/components/TopNav";
 import { ProductSelect } from "@/components/ProductSelect";
 import { fetchApi } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
@@ -87,7 +85,7 @@ export default function WhatsAppIntegrationPage() {
     setMessage(picked?.message(vendor?.name || "المورد") || "");
   };
 
-  return <div className="min-h-screen" dir="rtl"><SideNav /><TopNav title="تكامل واتساب" /><main className="app-main space-y-6"><header><h1 className="app-heading">تكامل واتساب</h1></header>
+  return <div className="min-h-screen" dir="rtl"><main className="app-main space-y-6"><header><h1 className="app-heading">تكامل واتساب</h1></header>
     <div className="app-panel max-w-3xl space-y-5 p-5 sm:p-7"><div className="flex items-center gap-3"><i className="bi bi-whatsapp text-3xl text-green-400" aria-hidden="true" /><div><h2 className="font-bold">رسالة المورد</h2><p className="app-muted text-sm">لا تُرسل أي رسالة تلقائيًا من النظام.</p></div></div>
       {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
       {loading ? <div className="space-y-3"><span className="app-skeleton h-11 w-full" /><span className="app-skeleton h-40 w-full" /></div> : <><label className="block text-sm font-bold">أمر الشراء<ProductSelect label="أمر الشراء" value={selected} placeholder="اختر أمر شراء جاهزًا" options={choices.map(item => ({ value: item.key, label: item.label }))} onChange={select} /></label>

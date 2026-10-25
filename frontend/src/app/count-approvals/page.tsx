@@ -1,8 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import SideNav from "@/components/SideNav";
-import TopNav from "@/components/TopNav";
 import { fetchApi } from "@/lib/api";
 import { CountHistory, CountRecord, countErrorMessage, countStatusLabel, moneyText, quantityText, signedQuantity } from "@/lib/counts";
 import { errorMessage } from "@/lib/errors";
@@ -123,7 +121,7 @@ export default function CountApprovalsPage() {
   };
 
   return <div className="min-h-screen" dir="rtl">
-    <SideNav /><TopNav title="موافقات الجرد" />
+
     <main className="app-main space-y-7">
       <header className="flex flex-wrap items-end justify-between gap-5 border-b border-white/10 pb-7">
         <div>

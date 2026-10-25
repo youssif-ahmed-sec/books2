@@ -14,6 +14,7 @@ import BarcodePrintDialog, { type BarcodePrintUnit } from "@/components/BarcodeP
 import { productFormErrors, productSaveError } from "@/lib/productFormErrors";
 import { getUserRole } from "@/utils/auth";
 import { useHydrated } from "@/lib/useHydrated";
+import { optimizeProductImage } from "@/lib/productImage";
 
 const unitSchema = z.object({
   id: z.string(),
@@ -114,7 +115,7 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
     maxStockLevel: "0",
     is_bundle: false,
   });
-  
+
   const [isUploadingImage, setIsUploadingImage] = useState(false);
 
   const [units, setUnits] = useState<ProductUnit[]>([
@@ -230,7 +231,7 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
       setGlobalUnits([...globalUnits, created]);
       setShowNewUnitDialog(false);
       setNewGlobalUnit({ name: "", conversion_factor: 1 });
-      
+
       // Auto add this to the product units
       setUnits([
         ...units,
@@ -262,17 +263,16 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
     } else if ('target' in e && e.target.files && e.target.files.length > 0) {
       file = e.target.files[0];
     }
-    
+
     if (!file) return;
 
     setIsUploadingImage(true);
-    
-    const formData = new FormData();
-    formData.append("file", file);
 
     try {
+      const formData = new FormData();
+      formData.append("file", await optimizeProductImage(file));
       const token = localStorage.getItem("access_token");
-      
+
       const res = await fetch("/api/v1/upload/image", {
         method: "POST",
         headers: {
@@ -280,12 +280,12 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
         },
         body: formData,
       });
-      
+
       if (!res.ok) {
         const errData = await res.json();
         throw new Error(errData.detail || "Upload failed");
       }
-      
+
       const data = await res.json();
       if (data.secure_url) {
         setForm({ ...form, imageUrl: data.secure_url });
@@ -337,9 +337,9 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
         return;
       }
       setErrors([]);
-      
+
       setIsSaving(true);
-      
+
       // Map form data to API schema
       const productData = {
         sku: "INV-" + new Date().getFullYear() + "-" + Math.floor(Math.random() * 10000).toString(),
@@ -380,7 +380,7 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
         method: "POST",
         body: JSON.stringify(productData),
       });
-      
+
       onSaved();
       if (printBarcode) {
         const choices: BarcodePrintUnit[] = (savedProduct.units || []).map((savedUnit: { id: string; unit_name: string; barcode: string }) => {
@@ -410,9 +410,9 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
       />
 
       {/* Slide-over Panel */}
-      <aside className="add-product-panel product-editor-panel fixed top-0 bottom-0 left-0 w-full max-w-[1180px] bg-[#0e0e0e] z-[70] shadow-[0_0_80px_rgba(0,0,0,0.8)] flex flex-col animate-slide-in-left border-r border-white/10">
+      <aside className="add-product-panel product-editor-panel fixed top-0 bottom-0 left-0 w-full max-w-[1180px] bg-surface-container-lowest z-[70] shadow-[0_0_80px_rgba(0,0,0,0.8)] flex flex-col animate-slide-in-left border-r border-white/10">
         {/* Header */}
-        <header className="px-5 py-5 sm:px-8 xl:px-12 xl:py-6 flex justify-between items-center border-b border-white/5 bg-[#0e0e0e]/50 backdrop-blur-md sticky top-0 z-10">
+        <header className="px-5 py-5 sm:px-8 xl:px-12 xl:py-6 flex justify-between items-center border-b border-white/5 bg-surface-container-lowest/50 backdrop-blur-md sticky top-0 z-10">
           <div>
             <h2 className="text-2xl font-bold text-[#e5e2e1] leading-tight">إضافة منتج</h2>
           </div>
@@ -453,7 +453,7 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
                     setMatchedProduct(null);
                     if (errors.includes("nameAr")) setErrors(errors.filter(err => err !== "nameAr"));
                   }}
-                  className={`w-full bg-[#201f1f] border rounded-full p-4 text-lg font-bold text-[#e5e2e1] focus:ring-2 focus:ring-primary/30 transition-all ${
+                  className={`w-full bg-surface-container border rounded-full p-4 text-lg font-bold text-[#e5e2e1] focus:ring-2 focus:ring-primary/30 transition-all ${
                     errors.includes("nameAr") ? "border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.2)]" : "border-white/5"
                   }`}
                 />
@@ -471,7 +471,7 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
                     setForm({ ...form, nameEn: e.target.value });
                     if (errors.includes("nameEn")) setErrors(errors.filter(err => err !== "nameEn"));
                   }}
-                  className={`w-full bg-[#201f1f] border rounded-full p-4 text-[#e5e2e1] font-sans focus:ring-2 focus:ring-primary/30 transition-all ${
+                  className={`w-full bg-surface-container border rounded-full p-4 text-[#e5e2e1] font-sans focus:ring-2 focus:ring-primary/30 transition-all ${
                     errors.includes("nameEn") ? "border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.2)]" : "border-white/5"
                   }`}
                 />
@@ -544,7 +544,7 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
               {/* Active Status */}
               <div className="space-y-5">
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">حالة المنتج</label>
-                <div className="flex items-center gap-4 bg-[#201f1f] border border-white/5 rounded-full p-4">
+                <div className="flex items-center gap-4 bg-surface-container border border-white/5 rounded-full p-4">
                   <div
                     className="relative inline-flex items-center cursor-pointer"
                     onClick={() => setForm({ ...form, active: !form.active })}
@@ -565,34 +565,34 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
               </div>
 
               {/* Description */}
-              <div className="space-y-5"><label className="text-[#e2bfb0] text-sm font-semibold">مكان الصنف في المخزن / الرف · اختياري</label><input value={form.warehouseLocation} onChange={event => setForm({ ...form, warehouseLocation: event.target.value })} className="w-full bg-[#201f1f] border border-white/5 rounded-2xl p-4 text-white" /></div>
+              <div className="space-y-5"><label className="text-[#e2bfb0] text-sm font-semibold">مكان الصنف في المخزن / الرف · اختياري</label><input value={form.warehouseLocation} onChange={event => setForm({ ...form, warehouseLocation: event.target.value })} className="w-full bg-surface-container border border-white/5 rounded-2xl p-4 text-white" /></div>
               <div className="xl:col-span-2 space-y-5">
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">وصف تفصيلي · اختياري</label>
                 <textarea
                   placeholder="أدخل هنا مواصفات المنتج، المؤلف، أو أي تفاصيل فنية..."
                   value={form.description}
                   onChange={(e) => setForm({ ...form, description: e.target.value })}
-                  className="w-full bg-[#201f1f] border border-white/5 rounded-2xl p-5 text-[#e5e2e1] focus:ring-2 focus:ring-primary/30 min-h-[120px] transition-all resize-none"
+                  className="w-full bg-surface-container border border-white/5 rounded-2xl p-5 text-[#e5e2e1] focus:ring-2 focus:ring-primary/30 min-h-[120px] transition-all resize-none"
                 />
               </div>
 
               {/* Image Upload */}
               <div className="space-y-5">
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">صورة المنتج التعريفية · اختيارية</label>
-                <div 
-                  className="relative border-2 border-dashed border-white/10 rounded-2xl p-10 flex flex-col items-center justify-center gap-4 bg-white/[0.01] hover:bg-white/[0.03] hover:border-primary/40 transition-all cursor-pointer group overflow-hidden min-h-[200px]"
+                <div
+                  className="relative border-2 border-dashed border-white/10 rounded-2xl p-6 flex flex-col items-center justify-center gap-2 bg-white/[0.01] hover:bg-white/[0.03] hover:border-primary/40 transition-all cursor-pointer group overflow-hidden min-h-[144px]"
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={handleImageUpload}
                   onClick={() => document.getElementById("product-image-upload")?.click()}
                 >
-                  <input 
-                    id="product-image-upload" 
-                    type="file" 
-                    className="hidden" 
-                    accept="image/png, image/jpeg, image/webp" 
-                    onChange={handleImageUpload} 
+                  <input
+                    id="product-image-upload"
+                    type="file"
+                    className="hidden"
+                    accept="image/png, image/jpeg, image/webp"
+                    onChange={handleImageUpload}
                   />
-                  
+
                   {isUploadingImage ? (
                     <div className="flex flex-col items-center gap-3">
                       <div className="w-10 h-10 border-4 border-primary/30 border-t-primary rounded-full animate-spin"></div>
@@ -607,12 +607,12 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
                     </div>
                   ) : (
                     <>
-                      <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center text-primary group-hover:scale-110 transition-transform">
+                      <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center text-primary group-hover:scale-110 transition-transform">
                         <span className="material-symbols-outlined text-3xl">upload_file</span>
                       </div>
                       <div className="text-center">
                         <p className="text-[#e5e2e1] font-bold">اسحب الصورة هنا أو اضغط للاختيار</p>
-                        <p className="text-[#e2bfb0] text-xs mt-1">JPG, PNG (بحد أقصى 5 ميجابايت)</p>
+                        <p className="text-[#e2bfb0] text-xs mt-1">JPG، PNG، WebP (بحد أقصى 5 ميجابايت بعد الضغط)</p>
                       </div>
                     </>
                   )}
@@ -646,7 +646,7 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
             </div>
 
             {/* Stock Limits */}
-            <div className="grid grid-cols-2 gap-8 bg-[#1c1b1b] p-6 rounded-2xl border border-white/5 mb-6">
+            <div className="grid grid-cols-2 gap-8 bg-surface-container-low p-6 rounded-2xl border border-white/5 mb-6">
               <div className="space-y-5">
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">الحد الأدنى للكمية</label>
                 <div className="relative">
@@ -654,7 +654,7 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
 
                     value={form.minStockLevel}
                     onChange={(e) => setForm({ ...form, minStockLevel: e.target.value })}
-                    className="w-full bg-[#201f1f] border border-white/5 rounded-full p-4 text-[#e5e2e1] focus:ring-2 focus:ring-primary/30 transition-all"
+                    className="w-full bg-surface-container border border-white/5 rounded-full p-4 text-[#e5e2e1] focus:ring-2 focus:ring-primary/30 transition-all"
                   />
                   <span className="absolute left-6 top-1/2 -translate-y-1/2 font-bold opacity-40">قطعة</span>
                 </div>
@@ -666,14 +666,14 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
 
                     value={form.maxStockLevel}
                     onChange={(e) => setForm({ ...form, maxStockLevel: e.target.value })}
-                    className="w-full bg-[#201f1f] border border-white/5 rounded-full p-4 text-[#e5e2e1] focus:ring-2 focus:ring-primary/30 transition-all"
+                    className="w-full bg-surface-container border border-white/5 rounded-full p-4 text-[#e5e2e1] focus:ring-2 focus:ring-primary/30 transition-all"
                   />
                   <span className="absolute left-6 top-1/2 -translate-y-1/2 font-bold opacity-40">قطعة</span>
                 </div>
               </div>
             </div>
 
-            <div className="product-units-scroll bg-[#1c1b1b] rounded-2xl border border-white/5 overflow-hidden">
+            <div className="product-units-scroll bg-surface-container-low rounded-2xl border border-white/5 overflow-hidden">
               <table className="product-units-table w-full">
                 <thead>
                   <tr className="bg-white/5">
@@ -755,7 +755,7 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
                         {unit.isBase ? (
                           <span className="material-symbols-outlined text-white/10">lock</span>
                         ) : (
-                          <button 
+                          <button
                             onClick={() => deleteUnit(unit.id)}
                             className="w-10 h-10 rounded-full flex items-center justify-center text-[#ffb4ab] hover:bg-[#ffb4ab]/10 transition-colors"
                           >
@@ -790,10 +790,10 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
                       const newCost = e.target.value;
                       setForm({ ...form, costPrice: newCost });
                       if (errors.includes("costPrice")) setErrors(errors.filter(err => err !== "costPrice"));
-                      
+
                       recalculatePrices(newCost, form.vatRate, form);
                     }}
-                    className={`w-full bg-[#201f1f] border rounded-full p-5 text-2xl font-bold text-primary focus:ring-2 focus:ring-primary/30 transition-all ${
+                    className={`w-full bg-surface-container border rounded-full p-5 text-2xl font-bold text-primary focus:ring-2 focus:ring-primary/30 transition-all ${
                       errors.includes("costPrice") ? "border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.2)]" : "border-white/5"
                     }`}
                   />
@@ -810,10 +810,10 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
                       const newVat = e.target.value;
                       setForm({ ...form, vatRate: newVat });
                       if (errors.includes("vatRate")) setErrors(errors.filter(err => err !== "vatRate"));
-                      
+
                       recalculatePrices(form.costPrice, newVat, form);
                     }}
-                    className={`w-full bg-[#201f1f] border rounded-full p-5 text-2xl font-bold text-[#e5e2e1] focus:ring-2 focus:ring-primary/30 transition-all ${
+                    className={`w-full bg-surface-container border rounded-full p-5 text-2xl font-bold text-[#e5e2e1] focus:ring-2 focus:ring-primary/30 transition-all ${
                       errors.includes("vatRate") ? "border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.2)]" : "border-white/5"
                     }`}
                   />
@@ -831,7 +831,7 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
                       setForm({ ...form, profitMargin: newMargin });
                       recalculatePrices(form.costPrice, form.vatRate, { ...form, profitMargin: newMargin }, "retailPrice");
                     }}
-                    className={`w-full bg-[#201f1f] border rounded-full p-5 text-2xl font-bold text-[#e5e2e1] focus:ring-2 focus:ring-primary/30 transition-all border-white/5`}
+                    className={`w-full bg-surface-container border rounded-full p-5 text-2xl font-bold text-[#e5e2e1] focus:ring-2 focus:ring-primary/30 transition-all border-white/5`}
                   />
                   <span className="absolute left-8 top-1/2 -translate-y-1/2 font-bold opacity-40">%</span>
                 </div>
@@ -854,7 +854,7 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
                         setForm(previous => ({ ...previous, [key]: value }));
                         recalculatePrices(form.costPrice, form.vatRate, { ...form, [key]: value }, tier);
                       }}
-                      className="w-full bg-[#201f1f] border border-white/5 rounded-full p-5 text-2xl font-bold text-[#e5e2e1] focus:ring-2 focus:ring-primary/30"
+                      className="w-full bg-surface-container border border-white/5 rounded-full p-5 text-2xl font-bold text-[#e5e2e1] focus:ring-2 focus:ring-primary/30"
                     />
                     <span className="absolute left-8 top-1/2 -translate-y-1/2 font-bold opacity-40">%</span>
                   </div>
@@ -897,12 +897,12 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
                         <div
                           key={tier.label}
                           style={{ flexBasis: `${Math.max(17, String(unit[tier.key]).length + 12)}ch` }}
-                          className={`product-price-card bg-[#1c1b1b] rounded-xl p-4 space-y-2 border transition-colors ${
+                          className={`product-price-card bg-surface-container-low rounded-xl p-4 space-y-2 border transition-colors ${
                             errors.includes(errorKey)
                               ? "border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.2)]"
                               : tier.highlight
                                 ? "border-primary/30 ring-1 ring-primary/10 bg-primary/[0.02]"
-                                : "border-white/5 hover:bg-[#201f1f]"
+                                : "border-white/5 hover:bg-surface-container"
                           }`}
                         >
                           <span className={`text-sm font-bold ${tier.highlight ? "text-primary" : "text-[#e2bfb0]"}`}>
@@ -940,8 +940,8 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
         </div>
 
         {/* Footer Actions */}
-        <footer className="px-5 py-5 sm:px-8 xl:px-12 bg-[#0e0e0e]/80 backdrop-blur-xl border-t border-white/5 flex flex-wrap items-center gap-3 sticky bottom-0">
-          <button 
+        <footer className="px-5 py-5 sm:px-8 xl:px-12 bg-surface-container-lowest/80 backdrop-blur-xl border-t border-white/5 flex flex-wrap items-center gap-3 sticky bottom-0">
+          <button
             type="button"
             onClick={() => handleSave(false)}
             disabled={isSaving}
@@ -973,7 +973,7 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
       {/* New Unit Dialog */}
       {showNewUnitDialog && (
         <div className="motion-overlay fixed inset-0 bg-black/80 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
-          <div className="motion-dialog bg-[#1c1b1b] rounded-3xl border border-white/10 p-8 w-full max-w-md shadow-2xl">
+          <div className="motion-dialog bg-surface-container-low rounded-3xl border border-white/10 p-8 w-full max-w-md shadow-2xl">
             <h3 className="text-2xl font-bold mb-6">إضافة وحدة جديدة بالكامل</h3>
             <div className="space-y-4">
               <div>
@@ -983,7 +983,7 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
                   value={newGlobalUnit.name}
                   onChange={(e) => setNewGlobalUnit({ ...newGlobalUnit, name: e.target.value })}
                   placeholder="اسم الوحدة"
-                  className="w-full bg-[#201f1f] border border-white/10 rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/50 transition-all text-right"
+                  className="w-full bg-surface-container border border-white/10 rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/50 transition-all text-right"
                 />
               </div>
               <div>
@@ -993,7 +993,7 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
                   value={newGlobalUnit.conversion_factor || ""}
                   onChange={(e) => setNewGlobalUnit({ ...newGlobalUnit, conversion_factor: parseFloat(e.target.value) || 1 })}
                   placeholder="عدد القطع"
-                  className="w-full bg-[#201f1f] border border-white/10 rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/50 transition-all text-right"
+                  className="w-full bg-surface-container border border-white/10 rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/50 transition-all text-right"
                 />
               </div>
             </div>

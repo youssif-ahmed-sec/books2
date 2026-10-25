@@ -7,8 +7,6 @@ import { fetchApi } from "@/lib/api";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import SideNav from "@/components/SideNav";
-import TopNav from "@/components/TopNav";
 import { LoadingTableRows } from "@/components/LoadingState";
 import { useSectionSearchSelection } from "@/lib/useSectionSearchSelection";
 import AdminGate from "@/components/AdminGate";
@@ -121,8 +119,8 @@ function FinancialsContent() {
 
   return (
     <div className="min-h-screen" dir="rtl">
-      <SideNav />
-      <TopNav title="المالية" />
+
+
       <main className="app-main">
         <div className="space-y-6">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -183,7 +181,7 @@ function FinancialsContent() {
                   <td className="px-4 py-3" dir="ltr">{new Date(e.expense_date).toLocaleDateString()}</td>
                   <td className="px-4 py-3 font-medium text-white">{e.category}</td>
                   <td className="px-4 py-3">{e.description || "-"}</td>
-                  <td className="px-4 py-3 text-[#ffb4ab] font-bold">{Number(e.amount).toLocaleString("ar-EG")} ج.م</td>
+                  <td className="px-4 py-3 text-[#ffb4ab] font-bold">{Number(e.amount).toFixed(2)} ج.م</td>
                 </tr>
               ))}
               {!loading && activeTab === "income" && incomes.map((i) => (
@@ -191,10 +189,10 @@ function FinancialsContent() {
                   <td className="px-4 py-3" dir="ltr">{new Date(i.income_date).toLocaleDateString()}</td>
                   <td className="px-4 py-3 font-medium text-white">{i.source}</td>
                   <td className="px-4 py-3">{i.description || "-"}</td>
-                  <td className="px-4 py-3 text-primary font-bold">{Number(i.amount).toLocaleString("ar-EG")} ج.م</td>
+                  <td className="px-4 py-3 text-primary font-bold">{Number(i.amount).toFixed(2)} ج.م</td>
                 </tr>
               ))}
-              
+
               {!loading && !loadError && activeTab === "expense" && expenses.length === 0 && (
                 <tr>
                   <td colSpan={4} className="app-muted px-4 py-8 text-center">لا توجد مصروفات</td>
@@ -213,14 +211,14 @@ function FinancialsContent() {
       {isSlideoverOpen && (
         <div className="fixed inset-0 z-50 flex justify-end">
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsSlideoverOpen(false)}></div>
-          <div className="relative w-full max-w-md bg-[#1c1b1b] h-full shadow-2xl border-r border-white/10 flex flex-col animate-slide-in-right">
+          <div className="relative w-full max-w-md bg-surface-container-low h-full shadow-2xl border-r border-white/10 flex flex-col animate-slide-in-right">
             <div className="flex items-center justify-between p-6 border-b border-white/10">
               <h2 className="text-xl font-bold text-white">
                 {watchType === "expense" ? "إضافة مصروف" : "إضافة إيراد"}
               </h2>
               <button type="button" aria-label="إغلاق" onClick={() => setIsSlideoverOpen(false)} className="app-muted hover:text-white transition-colors">✕</button>
             </div>
-            
+
             <form onSubmit={handleSubmit(onSubmit)} className="flex-1 overflow-y-auto p-6 space-y-4">
               <input type="hidden" {...register("type")} />
 

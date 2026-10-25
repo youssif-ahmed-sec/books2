@@ -7,8 +7,6 @@ import { createPortal } from "react-dom";
 import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import SideNav from "@/components/SideNav";
-import TopNav from "@/components/TopNav";
 import { useSectionSearchSelection } from "@/lib/useSectionSearchSelection";
 import { ProductSelect } from "@/components/ProductSelect";
 import { useConfirmAction } from "@/components/ConfirmationProvider";
@@ -78,19 +76,19 @@ function CategoryModal({
 
   return createPortal(
     <div className="motion-overlay fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" dir="rtl">
-      <div className="motion-dialog bg-[#1c1b1b] border border-white/10 rounded-3xl p-8 max-w-md w-full relative">
-        <button onClick={onClose} className="absolute top-4 left-4 text-[#e2bfb0]/40 hover:text-white">
+      <div className="motion-dialog bg-surface-container-low border border-white/10 rounded-3xl p-8 max-w-md w-full relative">
+        <button onClick={onClose} className="absolute top-4 left-4 text-on-surface-variant hover:text-white">
           <span className="material-symbols-outlined">close</span>
         </button>
         <h3 className="text-xl font-bold text-white mb-6">{mode === "add" ? "إضافة تصنيف رئيسي" : "تعديل التصنيف"}</h3>
         <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
           <div>
-            <label className="text-xs text-[#e2bfb0]/60 mb-1 block">الاسم العربي *</label>
+            <label className="text-xs text-on-surface-variant mb-1 block">الاسم العربي *</label>
             <input {...register("name_ar")} placeholder="اسم التصنيف بالعربية" className={`w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border ${errors.name_ar ? "border-red-500/50" : "border-white/10"} focus:outline-none focus:border-primary/50`} />
             {errors.name_ar && <p className="text-red-400 text-xs mt-1">{errors.name_ar.message}</p>}
           </div>
           <div>
-            <label className="text-xs text-[#e2bfb0]/60 mb-1 block">الاسم بالإنجليزية · اختياري</label>
+            <label className="text-xs text-on-surface-variant mb-1 block">الاسم بالإنجليزية · اختياري</label>
             <input {...register("name_en")} placeholder="اسم التصنيف بالإنجليزية" className={`w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border ${errors.name_en ? "border-red-500/50" : "border-white/10"} focus:outline-none focus:border-primary/50`} />
             {errors.name_en && <p className="text-red-400 text-xs mt-1">{errors.name_en.message}</p>}
           </div>
@@ -144,14 +142,14 @@ function SubcategoryModal({
 
   return createPortal(
     <div className="motion-overlay fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" dir="rtl">
-      <div className="motion-dialog bg-[#1c1b1b] border border-white/10 rounded-3xl p-8 max-w-md w-full relative">
-        <button onClick={onClose} className="absolute top-4 left-4 text-[#e2bfb0]/40 hover:text-white">
+      <div className="motion-dialog bg-surface-container-low border border-white/10 rounded-3xl p-8 max-w-md w-full relative">
+        <button onClick={onClose} className="absolute top-4 left-4 text-on-surface-variant hover:text-white">
           <span className="material-symbols-outlined">close</span>
         </button>
         <h3 className="text-xl font-bold text-white mb-6">{mode === "add" ? "إضافة تصنيف فرعي" : "تعديل التصنيف الفرعي"}</h3>
         <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
           <div>
-            <label className="text-xs text-[#e2bfb0]/60 mb-1 block">التصنيف الرئيسي *</label>
+            <label className="text-xs text-on-surface-variant mb-1 block">التصنيف الرئيسي *</label>
             <Controller control={control} name="category_id" render={({ field }) =>
               <ProductSelect label="التصنيف الرئيسي" value={field.value || ""} onChange={field.onChange}
                 placeholder="اختر تصنيف رئيسي" invalid={!!errors.category_id}
@@ -160,12 +158,12 @@ function SubcategoryModal({
             {errors.category_id && <p className="text-red-400 text-xs mt-1">{errors.category_id.message}</p>}
           </div>
           <div>
-            <label className="text-xs text-[#e2bfb0]/60 mb-1 block">الاسم العربي *</label>
+            <label className="text-xs text-on-surface-variant mb-1 block">الاسم العربي *</label>
             <input {...register("name_ar")} placeholder="اسم التصنيف الفرعي بالعربية" className={`w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border ${errors.name_ar ? "border-red-500/50" : "border-white/10"} focus:outline-none focus:border-primary/50`} />
             {errors.name_ar && <p className="text-red-400 text-xs mt-1">{errors.name_ar.message}</p>}
           </div>
           <div>
-            <label className="text-xs text-[#e2bfb0]/60 mb-1 block">الاسم بالإنجليزية · اختياري</label>
+            <label className="text-xs text-on-surface-variant mb-1 block">الاسم بالإنجليزية · اختياري</label>
             <input {...register("name_en")} placeholder="اسم التصنيف الفرعي بالإنجليزية" className={`w-full glass rounded-xl px-4 py-3 text-sm text-white bg-transparent border ${errors.name_en ? "border-red-500/50" : "border-white/10"} focus:outline-none focus:border-primary/50`} />
             {errors.name_en && <p className="text-red-400 text-xs mt-1">{errors.name_en.message}</p>}
           </div>
@@ -265,8 +263,8 @@ export default function CategoriesPage() {
 
   return (
     <div className="min-h-screen" dir="rtl">
-      <SideNav />
-      <TopNav title="التصنيفات والعلامات التجارية" />
+
+
       <main className="app-main">
         {/* Header */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-8">
@@ -313,7 +311,7 @@ export default function CategoriesPage() {
                 {loading ? <span className="app-skeleton mt-2 h-7 w-14" role="status" aria-label="جاري تحميل عدد التصنيفات الفرعية" /> : <p className="text-2xl font-bold text-white">{subcategories.length}</p>}
               </div>
               <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center">
-                <span className="material-symbols-outlined text-[#e2bfb0]/60">subdirectory_arrow_right</span>
+                <span className="material-symbols-outlined text-on-surface-variant">subdirectory_arrow_right</span>
               </div>
             </div>
           </div>
@@ -323,7 +321,7 @@ export default function CategoriesPage() {
         {loading ? (
           <div className="space-y-4" role="status" aria-label="جاري تحميل التصنيفات"><span className="sr-only">جاري تحميل التصنيفات</span>{[0, 1, 2].map(index => <div key={index} aria-hidden="true" className="glass flex items-center gap-4 rounded-2xl p-6"><span className="app-skeleton h-10 w-10 rounded-xl" /><span className="app-skeleton h-5 w-40 max-w-[60%]" /><span className="app-skeleton mr-auto h-5 w-12" /></div>)}</div>
         ) : categories.length === 0 ? (
-          <div className="glass rounded-2xl p-16 text-center text-[#e2bfb0]/40">
+          <div className="glass rounded-2xl p-16 text-center text-on-surface-variant">
             <span className="material-symbols-outlined text-6xl block mb-4">category</span>
             <p className="font-bold mb-2">لا توجد تصنيفات بعد</p>
           </div>
@@ -337,7 +335,7 @@ export default function CategoriesPage() {
                   {/* Category Row */}
                   <div className="flex items-center justify-between p-6 border-b border-white/5">
                     <div className="flex items-center gap-4">
-                      <button onClick={() => toggleExpand(cat.id)} className="w-8 h-8 rounded-full glass flex items-center justify-center text-[#e2bfb0]/60 hover:text-white transition-all">
+                      <button onClick={() => toggleExpand(cat.id)} className="w-8 h-8 rounded-full glass flex items-center justify-center text-on-surface-variant hover:text-white transition-all">
                         <span className="material-symbols-outlined text-[18px]" style={{ transform: isExpanded ? "rotate(90deg)" : "rotate(0)", transition: "transform 0.2s" }}>
                           chevron_right
                         </span>
@@ -347,7 +345,7 @@ export default function CategoriesPage() {
                       </div>
                       <div>
                         <p className="font-bold text-white">{cat.name_ar}</p>
-                        <p className="text-xs text-[#e2bfb0]/50">{cat.name_en ? `${cat.name_en} · ` : ""}{subs.length} تصنيف فرعي</p>
+                        <p className="text-xs text-on-surface-variant">{cat.name_en ? `${cat.name_en} · ` : ""}{subs.length} تصنيف فرعي</p>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -355,10 +353,10 @@ export default function CategoriesPage() {
                         <span className="material-symbols-outlined text-[14px]">add</span>
                         فرعي
                       </button>
-                      <button onClick={() => setCatModal({ mode: "edit", existing: cat })} className="w-8 h-8 rounded-full glass flex items-center justify-center text-[#e2bfb0]/60 hover:text-primary transition-all">
+                      <button onClick={() => setCatModal({ mode: "edit", existing: cat })} className="w-8 h-8 rounded-full glass flex items-center justify-center text-on-surface-variant hover:text-primary transition-all">
                         <span className="material-symbols-outlined text-[16px]">edit</span>
                       </button>
-                      <button onClick={() => deleteCategory(cat.id)} className="w-8 h-8 rounded-full glass flex items-center justify-center text-[#e2bfb0]/60 hover:text-[#ffb4ab] transition-all">
+                      <button onClick={() => deleteCategory(cat.id)} className="w-8 h-8 rounded-full glass flex items-center justify-center text-on-surface-variant hover:text-[#ffb4ab] transition-all">
                         <span className="material-symbols-outlined text-[16px]">delete</span>
                       </button>
                     </div>
@@ -368,7 +366,7 @@ export default function CategoriesPage() {
                   {isExpanded && (
                     <div className="bg-white/2">
                       {subs.length === 0 ? (
-                        <div className="px-8 py-5 text-xs text-[#e2bfb0]/30 flex items-center gap-2">
+                        <div className="px-8 py-5 text-xs text-on-surface-variant flex items-center gap-2">
                           <span className="material-symbols-outlined text-[14px]">subdirectory_arrow_right</span>
                           لا توجد تصنيفات فرعية — اضغط &quot;فرعي&quot; لإضافة واحدة
                         </div>
@@ -378,20 +376,20 @@ export default function CategoriesPage() {
                             <div className="w-5 flex justify-center">
                               <div className="w-px h-4 bg-white/10" />
                             </div>
-                            <span className="material-symbols-outlined text-[#e2bfb0]/30 text-[14px]">subdirectory_arrow_right</span>
+                            <span className="material-symbols-outlined text-on-surface-variant text-[14px]">subdirectory_arrow_right</span>
                             <div className="w-8 h-8 rounded-xl bg-white/5 flex items-center justify-center">
-                              <span className="material-symbols-outlined text-[#e2bfb0]/40 text-[14px]">folder_open</span>
+                              <span className="material-symbols-outlined text-on-surface-variant text-[14px]">folder_open</span>
                             </div>
                             <div>
                               <p className="text-sm font-bold text-[#e2bfb0]/90">{sub.name_ar}</p>
-                              {sub.name_en && <p className="text-[10px] text-[#e2bfb0]/40">{sub.name_en}</p>}
+                              {sub.name_en && <p className="text-[10px] text-on-surface-variant">{sub.name_en}</p>}
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
-                            <button onClick={() => setSubModal({ mode: "edit", existing: sub })} className="w-7 h-7 rounded-full glass flex items-center justify-center text-[#e2bfb0]/50 hover:text-primary transition-all">
+                            <button onClick={() => setSubModal({ mode: "edit", existing: sub })} className="w-7 h-7 rounded-full glass flex items-center justify-center text-on-surface-variant hover:text-primary transition-all">
                               <span className="material-symbols-outlined text-[14px]">edit</span>
                             </button>
-                            <button onClick={() => deleteSubcategory(sub.id)} className="w-7 h-7 rounded-full glass flex items-center justify-center text-[#e2bfb0]/50 hover:text-[#ffb4ab] transition-all">
+                            <button onClick={() => deleteSubcategory(sub.id)} className="w-7 h-7 rounded-full glass flex items-center justify-center text-on-surface-variant hover:text-[#ffb4ab] transition-all">
                               <span className="material-symbols-outlined text-[14px]">delete</span>
                             </button>
                           </div>

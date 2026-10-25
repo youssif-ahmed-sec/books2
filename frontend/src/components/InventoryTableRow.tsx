@@ -59,18 +59,18 @@ export function InventoryTableRow({ item, onEdit, onDelete, userRole }: Inventor
       {/* Product */}
       <td className="px-8 py-6 min-w-[250px]">
         <Link href={`/inventory/product?id=${encodeURIComponent(String(item.id))}`} className="flex items-center justify-center gap-5 group" aria-label={`تفاصيل ${item.nameAr}`}>
-          <div className="w-14 h-14 rounded-2xl bg-[#2a2a2a] border border-white/5 flex-shrink-0 flex items-center justify-center overflow-hidden">
+          <div className="w-14 h-14 rounded-2xl bg-surface-container-high border border-white/5 flex-shrink-0 flex items-center justify-center overflow-hidden">
             {item.image ? (
               <Image src={item.image} alt={item.nameAr} width={56} height={56} className="object-cover w-full h-full" unoptimized />
             ) : (
-              <span className="material-symbols-outlined text-[#e2bfb0]/60" aria-hidden="true">menu_book</span>
+              <span className="material-symbols-outlined text-on-surface-variant" aria-hidden="true">menu_book</span>
             )}
           </div>
           <div className="text-right">
             <span className="font-bold text-[#e5e2e1] group-hover:text-primary group-focus:text-primary">{item.nameAr}</span>
-            <p className="text-[10px] text-[#e2bfb0]/60">{item.nameEn}</p>
+            <p className="text-[10px] text-on-surface-variant">{item.nameEn}</p>
             {item.brand && <p className="text-xs text-[#e2bfb0]/70">{item.brand}</p>}
-            {item.supplier && <p className="text-xs text-[#e2bfb0]/60">المورد: {item.supplier}</p>}
+            {item.supplier && <p className="text-xs text-on-surface-variant">المورد: {item.supplier}</p>}
           </div>
         </Link>
       </td>
@@ -86,7 +86,7 @@ export function InventoryTableRow({ item, onEdit, onDelete, userRole }: Inventor
 
       {/* Category */}
       <td className="px-8 py-6 text-center min-w-[150px] whitespace-nowrap">
-        <span className="px-4 py-1.5 bg-[#353534] text-[#e2bfb0]/80 rounded-full text-xs font-bold border border-white/5">
+        <span className="px-4 py-1.5 bg-surface-container-highest text-[#e2bfb0]/80 rounded-full text-xs font-bold border border-white/5">
           {item.category}{item.subcategory ? ` / ${item.subcategory}` : ""}
         </span>
       </td>
@@ -144,7 +144,7 @@ export function InventoryTableRow({ item, onEdit, onDelete, userRole }: Inventor
           >
             باركود
           </button>
-          
+
           {canEditProduct(userRole) && (
             <button
               type="button"
