@@ -56,6 +56,9 @@ async def upload_image(
             public_id=public_id,
             folder="bookstore-erp",
             resource_type="image",
+            transformation=[
+                {"width": 1200, "height": 1200, "crop": "limit", "quality": "auto"}
+            ],
         )
         secure_url = upload_result.get("secure_url")
         if not secure_url:

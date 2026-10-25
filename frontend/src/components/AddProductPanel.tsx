@@ -117,6 +117,7 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
   });
 
   const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [showAdvancedPricing, setShowAdvancedPricing] = useState(false);
 
   const [units, setUnits] = useState<ProductUnit[]>([
     { id: "1", name: "قطعة", conversionFactor: 1, sku: "", stock: 0, isBase: true, retailPrice: "0", semiWholesalePrice: "0", wholesalePrice: "0", superWholesalePrice: "0", vipPrice: "0" },
@@ -772,11 +773,29 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
 
           {/* Section 3: Pricing */}
           <section className="space-y-6 pt-6 border-t border-white/5 pb-8">
-            <div className="flex items-center gap-4">
-              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
-                <span className="material-symbols-outlined">payments</span>
+            <div className="flex items-center justify-between gap-4 flex-wrap">
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+                  <span className="material-symbols-outlined">payments</span>
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold">هيكل التسعير (ج.م)</h3>
+                  <p className="text-xs text-[#e2bfb0]/70 mt-0.5">تسعير التجزئة والتكلفة، مع إمكانية ضبط شرائح الجملة (B2B)</p>
+                </div>
               </div>
-              <h3 className="text-xl font-bold">هيكل التسعير (ج.م)</h3>
+
+              <button
+                type="button"
+                onClick={() => setShowAdvancedPricing(prev => !prev)}
+                className="flex items-center gap-2 text-xs font-bold text-primary bg-primary/10 hover:bg-primary/20 px-4 py-2 rounded-full border border-primary/20 transition-all cursor-pointer shadow-sm"
+              >
+                <span className="material-symbols-outlined text-base">
+                  {showAdvancedPricing ? "expand_less" : "tune"}
+                </span>
+                {showAdvancedPricing
+                  ? "إخفاء خيارات الجملة وكبار العملاء (B2B)"
+                  : "تخصيص أسعار الجملة وكبار العملاء (B2B)"}
+              </button>
             </div>
 
             <div className="product-pricing-grid flex flex-wrap gap-3 bg-primary/[0.03] p-4 rounded-2xl border border-primary/10">
@@ -784,13 +803,11 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">تكلفة شراء القطعة الواحدة</label>
                 <div className="relative">
                   <ZeroHintNumberInput
-
                     value={form.costPrice}
                     onChange={(e) => {
                       const newCost = e.target.value;
                       setForm({ ...form, costPrice: newCost });
                       if (errors.includes("costPrice")) setErrors(errors.filter(err => err !== "costPrice"));
-
                       recalculatePrices(newCost, form.vatRate, form);
                     }}
                     className={`w-full bg-surface-container border rounded-full p-5 text-2xl font-bold text-primary focus:ring-2 focus:ring-primary/30 transition-all ${
@@ -804,13 +821,11 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">نسبة ضريبة القيمة المضافة</label>
                 <div className="relative">
                   <ZeroHintNumberInput
-
                     value={form.vatRate}
                     onChange={(e) => {
                       const newVat = e.target.value;
                       setForm({ ...form, vatRate: newVat });
                       if (errors.includes("vatRate")) setErrors(errors.filter(err => err !== "vatRate"));
-
                       recalculatePrices(form.costPrice, newVat, form);
                     }}
                     className={`w-full bg-surface-container border rounded-full p-5 text-2xl font-bold text-[#e5e2e1] focus:ring-2 focus:ring-primary/30 transition-all ${
@@ -824,7 +839,6 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
                 <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">هامش الربح (المستهلك)</label>
                 <div className="relative">
                   <ZeroHintNumberInput
-
                     value={form.profitMargin}
                     onChange={(e) => {
                       const newMargin = e.target.value;
@@ -836,17 +850,17 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
                   <span className="absolute left-8 top-1/2 -translate-y-1/2 font-bold opacity-40">%</span>
                 </div>
               </div>
-              {([
+
+              {showAdvancedPricing && ([
                 { key: "semiWholesaleMargin", tier: "semiWholesalePrice", label: "هامش الربح (نصف الجملة)" },
                 { key: "wholesaleMargin", tier: "wholesalePrice", label: "هامش الربح (الجملة)" },
                 { key: "superWholesaleMargin", tier: "superWholesalePrice", label: "هامش الربح (سوبر جملة)" },
                 { key: "vipMargin", tier: "vipPrice", label: "هامش الربح (كبار العملاء)" },
               ] as const).map(({ key, tier, label }) => (
-                <div className="space-y-5" key={key} style={{ flexBasis: `${Math.max(18, form[key].length + 12)}ch` }}>
+                <div className="space-y-5 animate-fadeIn" key={key} style={{ flexBasis: `${Math.max(18, form[key].length + 12)}ch` }}>
                   <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">{label}</label>
                   <div className="relative">
                     <ZeroHintNumberInput
-
                       step="0.01"
                       value={form[key]}
                       onChange={(event) => {
@@ -861,30 +875,35 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
                 </div>
               ))}
             </div>
-            <p className="text-xs text-[#e2bfb0]/70">تكلفة الشراء للقطعة. إذا أضفت دستة بعامل تحويل 12، فسعر الجملة في قسم الدستة هو سعر الدستة كاملة.</p>
+            <p className="text-xs text-[#e2bfb0]/70">تكلفة الشراء للقطعة. إذا أضفت دستة أو كرتونة بعامل تحويل، فالسعر المحسوب في قسم الوحدة هو سعر العلبة أو الكرتونة كاملة.</p>
 
             <div className="space-y-6">
               {units.map((unit, index) => (
                 <div key={unit.id} className="space-y-4">
-                  <p className="text-[#e2bfb0] text-sm font-bold flex items-center gap-2">
-                    <span className="material-symbols-outlined text-lg text-primary">sell</span>
-                    أسعار {unit.name || `وحدة مخصصة ${index + 1}`} ({unit.conversionFactor} قطعة) · تكلفة الشراء {((parseFloat(form.costPrice) || 0) * unit.conversionFactor * (1 + (parseFloat(form.vatRate) || 0) / 100)).toFixed(2)} ج.م
-                  </p>
+                  <div className="flex items-center justify-between gap-4 flex-wrap">
+                    <p className="text-[#e2bfb0] text-sm font-bold flex items-center gap-2">
+                      <span className="material-symbols-outlined text-lg text-primary">sell</span>
+                      أسعار {unit.name || `وحدة مخصصة ${index + 1}`} ({unit.conversionFactor} قطعة) · تكلفة الشراء {((parseFloat(form.costPrice) || 0) * unit.conversionFactor * (1 + (parseFloat(form.vatRate) || 0) / 100)).toFixed(2)} ج.م
+                    </p>
+                    {!showAdvancedPricing && (
+                      <span className="text-xs text-primary/80 bg-primary/5 px-2.5 py-1 rounded-md border border-primary/10">
+                        + تم احتساب 4 فئات تسعير جملة تلقائياً وفق هوامش الربح
+                      </span>
+                    )}
+                  </div>
 
-
-                  <div className="border-t border-white/10 mt-6 pt-6"></div>
+                  <div className="border-t border-white/10 mt-2 pt-4"></div>
                   <div className="product-price-list flex flex-wrap gap-3">
                     {[
-                      { label: "سعر المستهلك", key: "retailPrice" as const, highlight: false },
-                      { label: "سعر نصف الجملة", key: "semiWholesalePrice" as const, highlight: false },
-                      { label: "سعر الجملة", key: "wholesalePrice" as const, highlight: false },
-                      { label: "سعر سوبر جملة", key: "superWholesalePrice" as const, highlight: false },
-                      { label: "سعر كبار العملاء", key: "vipPrice" as const, highlight: true },
-                    ].map((tier) => {
+                      { label: "سعر المستهلك", key: "retailPrice" as const, highlight: false, isB2B: false },
+                      { label: "سعر نصف الجملة", key: "semiWholesalePrice" as const, highlight: false, isB2B: true },
+                      { label: "سعر الجملة", key: "wholesalePrice" as const, highlight: false, isB2B: true },
+                      { label: "سعر سوبر جملة", key: "superWholesalePrice" as const, highlight: false, isB2B: true },
+                      { label: "سعر كبار العملاء", key: "vipPrice" as const, highlight: true, isB2B: true },
+                    ].filter(tier => showAdvancedPricing || !tier.isB2B).map((tier) => {
                       const salePrice = parseFloat(unit[tier.key]) || 0;
                       const baseCostPrice = parseFloat(form.costPrice) || 0;
                       const vatRate = parseFloat(form.vatRate) || 0;
-                      // التكلفة الفعلية = سعر الشراء × (1 + نسبة القيمة المضافة / 100)
                       const unitCostPrice = baseCostPrice * unit.conversionFactor * (1 + vatRate / 100);
                       let margin = 0;
                       if (unitCostPrice > 0) {
@@ -910,7 +929,6 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
                           </span>
                           <div className="relative">
                             <ZeroHintNumberInput
-
                               value={unit[tier.key]}
                               onChange={(e) => {
                                 updateUnit(unit.id, tier.key, e.target.value);

@@ -30,10 +30,10 @@ const navItems = [
 ];
 
 const navGroups = [
+  { id: "management", label: "الإدارة والتقارير", hrefs: ["/dashboard", "/financials", "/reports", "/integrations/whatsapp"] },
   { id: "sales", label: "المبيعات والصندوق", hrefs: ["/pos", "/cash-register", "/orders", "/returns", "/customers"] },
   { id: "inventory", label: "المخزون والمشتريات", hrefs: ["/inventory", "/stock-operations", "/categories", "/offers", "/purchases", "/suppliers"] },
   { id: "approvals", label: "الموافقات والرقابة", hrefs: ["/product-approvals", "/count-approvals", "/audit"] },
-  { id: "management", label: "الإدارة والتقارير", hrefs: ["/dashboard", "/financials", "/reports", "/integrations/whatsapp"] },
 ] as const;
 
 const groupForPath = (path: string) => navGroups.find(group => group.hrefs.some(href => path === href || path.startsWith(`${href}/`)));
@@ -97,6 +97,15 @@ export default function SideNav() {
     return true;
   });
 
+  const renderNavLink = (item: (typeof navItems)[number]) => {
+    const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
+    return <Link key={item.href} href={item.href} onClick={() => setMobileMenu({ path: pathname, open: false })} aria-current={isActive ? "page" : undefined}
+      className={`flex items-center gap-3 rounded-full px-4 py-2.5 text-sm font-bold transition-colors ${isActive ? "bg-primary text-white" : "text-[#e2bfb0] hover:bg-white/5"}`}>
+      <span className="material-symbols-outlined" aria-hidden="true" style={isActive ? { fontVariationSettings: "'FILL' 1" } : undefined}>{item.icon}</span>
+      <span>{warehouseOnlyMode && item.href === "/stock-operations" ? "الجرد" : item.label}</span>
+    </Link>;
+  };
+
   return (
     <>
     <button
@@ -109,7 +118,7 @@ export default function SideNav() {
       <span className="material-symbols-outlined">{mobileOpen ? "close" : "menu"}</span>
     </button>
     {mobileOpen && <button type="button" aria-label="إغلاق القائمة" onClick={() => setMobileMenu({ path: pathname, open: false })} className="fixed inset-0 z-50 bg-black/70 xl:hidden" />}
-    <aside className={`fixed bottom-0 right-0 top-0 z-[60] w-[min(22rem,88vw)] overflow-hidden rounded-none glass shadow-xl transition-transform duration-200 xl:bottom-4 xl:right-4 xl:top-4 xl:w-64 xl:translate-x-0 xl:rounded-2xl min-[1366px]:bottom-8 min-[1366px]:right-8 min-[1366px]:top-8 min-[1366px]:w-80 ${mobileOpen ? "translate-x-0" : "translate-x-full"}`}>
+    <aside className={`app-side-nav fixed bottom-0 right-0 top-0 z-[60] w-[min(22rem,88vw)] overflow-hidden rounded-none glass shadow-xl transition-transform duration-200 xl:bottom-4 xl:right-4 xl:top-4 xl:w-72 xl:translate-x-0 xl:rounded-2xl ${mobileOpen ? "translate-x-0" : "translate-x-full"}`}>
       <div ref={scrollRef} onScroll={event => { rememberedNavScrollTop = event.currentTarget.scrollTop; }} className="h-full w-full overflow-y-auto overflow-x-hidden custom-scrollbar" dir="ltr">
         <div className="flex min-h-full flex-col p-6" dir="rtl">
           {/* Logo & Brand */}
@@ -126,8 +135,8 @@ export default function SideNav() {
 
           {/* Navigation */}
           <nav className="flex flex-1 flex-col gap-y-1">
-            {navGroups.map(group => {
-              const items = visibleNavItems.filter(item => group.hrefs.some(href => href === item.href));
+            {user?.role === "ADMIN" ? navGroups.map(group => {
+              const items = group.hrefs.flatMap(href => visibleNavItems.filter(item => item.href === href));
               if (!items.length) return null;
               const expanded = expandedGroup === group.id;
               return <div key={group.id} className="border-b border-current/10 pb-2 last:border-b-0">
@@ -136,16 +145,9 @@ export default function SideNav() {
                   className="app-muted flex w-full items-center justify-between rounded-xl px-3 py-2 text-right text-xs font-bold hover:bg-white/5">
                   <span>{group.label}</span><span className="material-symbols-outlined text-base" aria-hidden="true">{expanded ? "expand_less" : "expand_more"}</span>
                 </button>
-                {expanded && <div id={`nav-group-${group.id}`} className="flex flex-col gap-y-1">{items.map(item => {
-                  const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
-                  return <Link key={item.href} href={item.href} onClick={() => setMobileMenu({ path: pathname, open: false })} aria-current={isActive ? "page" : undefined}
-                    className={`flex items-center gap-3 rounded-full px-4 py-2.5 text-sm font-bold transition-colors ${isActive ? "bg-primary text-white" : "text-[#e2bfb0] hover:bg-white/5"}`}>
-                    <span className="material-symbols-outlined" aria-hidden="true" style={isActive ? { fontVariationSettings: "'FILL' 1" } : undefined}>{item.icon}</span>
-                    <span>{warehouseOnlyMode && item.href === "/stock-operations" ? "الجرد" : item.label}</span>
-                  </Link>;
-                })}</div>}
+                {expanded && <div id={`nav-group-${group.id}`} className="flex flex-col gap-y-1">{items.map(renderNavLink)}</div>}
               </div>;
-            })}
+            }) : visibleNavItems.map(renderNavLink)}
           </nav>
 
           {/* Footer */}

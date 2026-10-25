@@ -4,11 +4,12 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { fetchApi } from "@/lib/api";
-import { searchSection, sectionSearchLabel, type SectionSearchResult } from "@/lib/sectionSearch";
+import { searchSection, sectionSearchHasSnapshot, sectionSearchLabel, type SectionSearchResult } from "@/lib/sectionSearch";
 import { cachedCurrentUser, getCurrentUser } from "@/lib/currentUser";
 import ThemeToggle from "@/components/ThemeToggle";
 import NotificationBell from "@/components/NotificationBell";
 import { notifyError } from "@/lib/notifications";
+import { useTopNavSearchSlot } from "@/lib/topNavSearchPortal";
 
 interface TopNavProps { title: string }
 interface CurrentUser { email: string | null; username?: string | null; full_name?: string | null; role: string }
@@ -32,11 +33,9 @@ export default function TopNav({ title }: TopNavProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchLabel = sectionSearchLabel(pathname);
-  const posSearch = pathname === "/pos";
-  const remoteSearch = ["/inventory", "/inventory/product", "/suppliers", "/audit"].includes(pathname);
+  const { setSlot, active: customSearch, overlay: overlaySearch } = useTopNavSearchSlot();
   const [user, setUser] = useState<CurrentUser | null>(() => cachedCurrentUser());
   const [query, setQuery] = useState("");
-  const [submittedQuery, setSubmittedQuery] = useState("");
   const [results, setResults] = useState<SectionSearchResult[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
@@ -44,7 +43,6 @@ export default function TopNav({ title }: TopNavProps) {
   const [searchError, setSearchError] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
-  const searchedPath = useRef(pathname);
   const accountRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -60,7 +58,7 @@ export default function TopNav({ title }: TopNavProps) {
   }, []);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => { setQuery(""); setSubmittedQuery(""); setResults([]); setSearchOpen(false); }, 0);
+    const timer = window.setTimeout(() => { setQuery(""); setResults([]); setSearchOpen(false); }, 0);
     return () => window.clearTimeout(timer);
   }, [pathname]);
 
@@ -71,9 +69,8 @@ export default function TopNav({ title }: TopNavProps) {
   }, [pathname]);
 
   useEffect(() => {
-    if (searchedPath.current !== pathname) { searchedPath.current = pathname; return; }
-    const value = (remoteSearch ? submittedQuery : query).trim();
-    if (value.length < (remoteSearch ? 3 : 2) || !searchLabel) return;
+    const value = query.trim();
+    if (customSearch || value.length < 2 || !searchLabel) return;
     let active = true;
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
@@ -87,9 +84,9 @@ export default function TopNav({ title }: TopNavProps) {
       } finally {
         if (active) setSearching(false);
       }
-    }, remoteSearch ? 0 : 150);
+    }, sectionSearchHasSnapshot(pathname) ? 0 : 200);
     return () => { active = false; controller.abort(); window.clearTimeout(timer); };
-  }, [query, submittedQuery, pathname, searchLabel, remoteSearch]);
+  }, [query, pathname, searchLabel, customSearch]);
 
   const logout = async () => {
     if (loggingOut) return;
@@ -106,30 +103,33 @@ export default function TopNav({ title }: TopNavProps) {
   };
 
   return (
-    <header className="app-top-nav fixed left-8 right-[364px] top-8 z-40 flex min-h-[76px] items-center gap-6 rounded-full px-7 py-3 lg:px-9">
+    <header className={`app-top-nav fixed left-8 right-[380px] top-8 ${overlaySearch ? "z-[130]" : "z-40"} flex min-h-[76px] items-center gap-6 rounded-full px-7 py-3 lg:px-9`}>
       <div className="app-top-title shrink-0">
         <h2 className="text-lg font-bold text-primary">{title}</h2>
       </div>
       <div className="app-top-search relative min-w-0 w-[min(34vw,480px)]" ref={searchRef}>
-        {posSearch ? <button type="button" className="app-search app-search-focus flex h-10 w-full items-center gap-2 rounded-full px-4 text-start" onClick={() => document.getElementById("pos-product-search")?.focus()} aria-label="الانتقال لبحث الأصناف والباركود في نقطة البيع">
-          <span className="material-symbols-outlined text-xl app-muted" aria-hidden="true">search</span>
-          <span className="app-muted min-w-0 truncate text-sm">انتقل إلى بحث الأصناف والباركود</span>
-        </button> : <div className="app-search app-search-focus flex h-10 items-center gap-2 rounded-full px-4">
+        <div ref={setSlot} className={customSearch ? "min-w-0 w-full" : "hidden"} />
+        {!customSearch && <div className="app-search app-search-focus flex h-10 items-center gap-2 rounded-full px-4">
           <span className="material-symbols-outlined text-xl app-muted" aria-hidden="true">search</span>
           <input type="search" value={query} disabled={!searchLabel}
-            onChange={(event) => { setQuery(event.target.value); setSubmittedQuery(""); setSearchOpen(true); setResults([]); }}
-            onKeyDown={(event) => { if (event.key === "Enter" && remoteSearch) { event.preventDefault(); setSubmittedQuery(query.trim()); setSearchOpen(true); } }}
+            onChange={(event) => { setQuery(event.target.value); setSearchOpen(true); }}
             onFocus={() => setSearchOpen(true)} placeholder={searchLabel ? `ابحث عن ${searchLabel}...` : "لا توجد سجلات للبحث في هذا القسم"} aria-label={searchLabel ? `البحث عن ${searchLabel}` : "البحث غير متاح في هذا القسم"}
-            className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:opacity-60" />
-          {remoteSearch && <button type="button" onClick={() => { setSubmittedQuery(query.trim()); setSearchOpen(true); }} disabled={query.trim().length < 3} aria-label="تنفيذ البحث" className="app-muted text-xs disabled:opacity-40">بحث</button>}
+            className="app-hide-native-search-clear min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:opacity-60" />
+          {query && <button type="button" onClick={() => { setQuery(""); setResults([]); }} aria-label="مسح البحث" className="app-muted text-xs hover:text-white">✕</button>}
         </div>}
-        {searchOpen && remoteSearch && query.trim().length >= 3 && !submittedQuery && <div className="app-menu absolute left-0 right-0 top-[calc(100%+8px)] rounded-2xl p-3 text-xs shadow-xl">اضغط Enter أو زر بحث لعرض النتائج</div>}
-        {searchOpen && (remoteSearch ? submittedQuery.trim().length >= 3 : query.trim().length >= 2) && (
-          <div className="app-menu absolute left-0 right-0 top-[calc(100%+8px)] max-h-72 overflow-y-auto rounded-2xl p-2 shadow-xl">
+        {!customSearch && searchOpen && query.trim().length >= 2 && (
+          <div className="app-menu absolute left-0 right-0 top-[calc(100%+8px)] max-h-80 overflow-y-auto rounded-2xl p-2 shadow-2xl z-50">
             {searching ? <p className="app-muted p-3 text-sm">جاري البحث...</p> : searchError ? <p className="p-3 text-sm text-[#ffb4ab]">تعذر البحث حاليًا. حاول مرة أخرى.</p> : results.length ? results.map((result) => (
-              <Link key={result.id} href={result.href} onClick={() => { setSearchOpen(false); setQuery(""); window.dispatchEvent(new CustomEvent("section-search-focus", { detail: result.id })); revealResult(result.id); }} className="app-search-result flex items-center justify-between gap-3 rounded-xl px-3 py-3 text-sm">
-                <span className="min-w-0 truncate font-semibold">{result.label}</span>
-                <span className="app-muted shrink-0 text-xs" dir="ltr">{result.detail}</span>
+              <Link key={result.id} href={result.href} onClick={() => { setSearchOpen(false); setQuery(""); window.dispatchEvent(new CustomEvent("section-search-focus", { detail: result.id })); revealResult(result.id); }} className="app-search-result flex items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-sm hover:bg-white/5 transition-colors">
+                <div className="min-w-0 flex-1">
+                  <span className="block truncate font-semibold">{result.label}</span>
+                  {result.detail && <span className="app-muted block truncate text-xs" dir="ltr">{result.detail}</span>}
+                </div>
+                {result.priceTag && (
+                  <span className="shrink-0 rounded-lg bg-primary/10 border border-primary/20 px-2.5 py-1 text-xs font-bold text-primary tabular-nums">
+                    {result.priceTag}
+                  </span>
+                )}
               </Link>
             )) : <p className="app-muted p-3 text-sm">لا توجد نتائج مطابقة</p>}
           </div>

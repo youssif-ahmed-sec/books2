@@ -120,7 +120,7 @@ async def cached_reference(name: str, load: Callable[[], Awaitable[list[dict[str
         # a result loaded under an older generation after that invalidation.
         await client.eval(
             "if (redis.call('GET', KEYS[1]) or '0') == ARGV[1] then "
-            "redis.call('SET', KEYS[2], ARGV[2]); return 1 else return 0 end",
+            "redis.call('SET', KEYS[2], ARGV[2], 'EX', 86400); return 1 else return 0 end",
             2, version_key, data_key, generation,
             json.dumps({"generation": generation, "value": value}),
         )

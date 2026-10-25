@@ -10,6 +10,7 @@ import { printPurchaseDocument, printPurchaseReceipt } from "@/lib/localPrint";
 import { errorMessage } from "@/lib/errors";
 import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
 import { getUserRole } from "@/utils/auth";
+import { TopNavSearchPortal } from "@/lib/topNavSearchPortal";
 import { emptyBarcodeScanCapture, englishBarcodeFromScan, recordBarcodeScanKey } from "@/lib/barcodeScanner";
 
 type Unit = { id: string; unit_name: string; conversion_factor: number };
@@ -105,7 +106,7 @@ function PurchaseEditor({ initial, suppliers, onClose, onSaved }: {
       <header className="flex items-center justify-between gap-3 border-b border-white/10 p-5"><div><h2 className="text-xl font-bold">{initial ? "تعديل الطلب" : "طلب شراء جديد"}</h2><p className="app-muted text-sm">مورد واحد وعدة أصناف؛ الكميات حسب الوحدة التي تختارها.</p></div><button type="button" className="app-icon-button" onClick={onClose} aria-label="إغلاق"><span className="material-symbols-outlined">close</span></button></header>
       <div className="custom-scrollbar space-y-5 overflow-y-auto p-5">
         <label className="block text-sm font-bold">المورد<ProductSelect label="المورد" value={supplierId} placeholder="اختر المورد" options={suppliers.map(item => ({ value: item.id, label: item.name }))} onChange={setSupplierId} /></label>
-        <div><label className="text-sm font-bold" htmlFor="purchase-search">أضف صنفًا بالاسم أو الباركود</label><input id="purchase-search" className="app-field mt-2" value={search} onChange={event => setSearch(event.target.value)} onKeyDown={event => {
+        <div><p className="text-sm font-bold">أضف صنفًا بالاسم أو الباركود من البحث بالأعلى</p><TopNavSearchPortal overlay><input id="purchase-search" aria-label="بحث أصناف أمر الشراء" className="app-search app-search-focus h-10 w-full rounded-full px-4" value={search} onChange={event => setSearch(event.target.value)} onKeyDown={event => {
           if (event.key !== "Enter") {
             if (!event.nativeEvent.isComposing) recordBarcodeScanKey(scanKeys.current, event);
             return;
@@ -113,7 +114,7 @@ function PurchaseEditor({ initial, suppliers, onClose, onSaved }: {
           const code = englishBarcodeFromScan(scanKeys.current, event.currentTarget.value.trim());
           if (code) { event.preventDefault(); setSearch(code); return; }
           if (matches[0]) { event.preventDefault(); add(matches[0]); }
-        }} placeholder="ابحث ثم اضغط Enter أو اختر الصنف" />
+        }} placeholder="ابحث أو امسح باركود صنف الشراء" /></TopNavSearchPortal>
           <div className="custom-scrollbar mt-2 max-h-36 overflow-y-auto rounded-xl border border-white/10 p-1">{searching ? <p className="app-muted p-3 text-sm">جاري البحث...</p> : matches.length ? matches.map(product => <button type="button" key={product.id} disabled={!product.is_active} onClick={() => add(product)} className="flex w-full justify-between gap-3 rounded-lg px-3 py-2 text-right text-sm hover:bg-white/5 disabled:opacity-50"><span>{product.name_ar}</span><span className="text-primary">إضافة +</span></button>) : <p className="app-muted p-3 text-sm">لا توجد أصناف مطابقة</p>}</div>
         </div>
         <div className="space-y-3">{lines.length === 0 ? <p className="app-muted rounded-xl border border-dashed border-white/15 p-6 text-center">لم تضف أي صنف بعد</p> : lines.map(line => {

@@ -33,7 +33,10 @@ elif DATABASE_URL.startswith("postgresql://"):
 
 # Set SSL via connect_args (the correct way for asyncpg)
 if needs_ssl:
-    ca_cert_path = os.getenv("DATABASE_SSL_CA_CERT")
+    ca_cert_env = os.getenv("DATABASE_SSL_CA_CERT")
+    if ca_cert_env and not Path(ca_cert_env).is_file():
+        raise RuntimeError("DATABASE_SSL_CA_CERT does not point to a readable file")
+    ca_cert_path = ca_cert_env or None
     database_host = urlsplit(DATABASE_URL).hostname or ""
     uses_bundled_supabase_ca = False
     if not ca_cert_path and database_host.endswith((".supabase.com", ".supabase.co")):
@@ -50,7 +53,21 @@ if needs_ssl:
         ssl_context.verify_flags &= ~ssl.VERIFY_X509_STRICT
     connect_args["ssl"] = ssl_context
 
-engine = create_async_engine(DATABASE_URL, echo=False, connect_args=connect_args)
+pool_size = int(os.getenv("DATABASE_POOL_SIZE", "4"))
+max_overflow = int(os.getenv("DATABASE_MAX_OVERFLOW", "2"))
+pool_recycle = int(os.getenv("DATABASE_POOL_RECYCLE", "300"))
+pool_timeout = int(os.getenv("DATABASE_POOL_TIMEOUT", "15"))
+
+engine = create_async_engine(
+    DATABASE_URL,
+    echo=False,
+    connect_args=connect_args,
+    pool_size=pool_size,
+    max_overflow=max_overflow,
+    pool_recycle=pool_recycle,
+    pool_pre_ping=True,
+    pool_timeout=pool_timeout,
+)
 
 AsyncSessionLocal = sessionmaker(
     engine, class_=AsyncSession, expire_on_commit=False

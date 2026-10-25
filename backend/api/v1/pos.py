@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy.orm import aliased, selectinload
+from sqlalchemy.orm import aliased, joinedload, selectinload
 from sqlalchemy import func, or_, not_
 from typing import Annotated, List, Optional
 from uuid import UUID
@@ -23,11 +23,11 @@ async def get_price_levels(current_user: User = Depends(require_pos_orders_acces
     Returns all active price levels in the system.
     """
     mapping = {
-        "Retail": "قطاعي (Retail)",
-        "Semi Wholesale": "نصف جملة (Semi Wholesale)",
-        "Wholesale": "جملة (Wholesale)",
-        "Super Wholesale": "سوبر جملة (Super Wholesale)",
-        "VIP": "خاص (VIP)"
+        "Retail": "قطاعي",
+        "Semi Wholesale": "نصف جملة",
+        "Wholesale": "جملة",
+        "Super Wholesale": "سوبر جملة",
+        "VIP": "خاص"
     }
     return [{"value": e.value, "label": mapping.get(e.value, e.value)} for e in PriceLevelEnum]
 
@@ -107,11 +107,11 @@ async def search_pos_products(
         )
         
     query = base_query.options(
-        selectinload(Product.units.and_(ProductUnit.is_deleted == False)).selectinload(ProductUnit.prices.and_(ProductPrice.is_deleted == False)),
-        selectinload(Product.category),
-        selectinload(Product.subcategory),
-        selectinload(Product.brand),
-        selectinload(Product.supplier),
+        selectinload(Product.units.and_(ProductUnit.is_deleted == False)).joinedload(ProductUnit.prices.and_(ProductPrice.is_deleted == False)),
+        joinedload(Product.category),
+        joinedload(Product.subcategory),
+        joinedload(Product.brand),
+        joinedload(Product.supplier),
         selectinload(Product.bundle_components.and_(ProductBundleComponent.is_deleted == False)),
     ).order_by(Product.name_ar, Product.id).offset(offset).limit(limit)
     

@@ -16,6 +16,8 @@ import { getUserRole, type UserRole } from "@/utils/auth";
 import { errorMessage } from "@/lib/errors";
 import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
 import { useConfirmAction } from "@/components/ConfirmationProvider";
+import { formatCurrency } from "@/lib/formatters";
+import { printCustomerStatement } from "@/lib/customerStatementPrint";
 
 const customerSchema = z.object({
   name: z.string().min(2, "الاسم مطلوب (أكثر من حرفين)"),
@@ -357,7 +359,7 @@ export default function CustomersPage() {
             </div>
           </div>
 
-          <section className="app-panel p-4 sm:p-5" aria-label="تصفية العملاء">
+          <section className="app-panel p-4 sm:p-5 space-y-4" aria-label="تصفية العملاء">
             <div className="flex flex-wrap items-end gap-3">
               <div className="min-w-40 flex-1 text-sm"><span className="mb-1 block">نوع العميل</span>
                 <ProductSelect label="تصفية حسب نوع العميل" value={filterType} onChange={setFilterType} placeholder="كل الأنواع"
@@ -485,35 +487,58 @@ export default function CustomersPage() {
               </dl>
               {userRole === "ADMIN" && <dl className="grid gap-x-6 border-t border-current/10 text-sm sm:grid-cols-2">
                 <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-2 border-b border-current/10 py-3"><dt className="app-muted">عدد المشتريات</dt><dd className="font-semibold">{profileCustomer.purchase_count ?? 0}</dd></div>
-                <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-2 border-b border-current/10 py-3"><dt className="app-muted">إجمالي المشتريات</dt><dd className="font-semibold">{Number(profileCustomer.total_purchases || 0).toFixed(2)} ج.م</dd></div>
-                <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-2 border-b border-current/10 py-3"><dt className="app-muted">متوسط الطلب</dt><dd className="font-semibold">{Number(profileCustomer.average_purchase || 0).toFixed(2)} ج.م</dd></div>
+                <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-2 border-b border-current/10 py-3"><dt className="app-muted">إجمالي المشتريات</dt><dd className="font-semibold">{formatCurrency(profileCustomer.total_purchases)}</dd></div>
+                <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-2 border-b border-current/10 py-3"><dt className="app-muted">متوسط الطلب</dt><dd className="font-semibold">{formatCurrency(profileCustomer.average_purchase)}</dd></div>
                 <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-2 border-b border-current/10 py-3"><dt className="app-muted">آخر شراء</dt><dd className="font-semibold">{profileCustomer.last_purchase_date ? new Date(profileCustomer.last_purchase_date).toLocaleDateString("ar-EG") : "لا يوجد"}</dd></div>
               </dl>}
             </div>}
             {profileTab === "statement" && userRole === "ADMIN" && <div className="space-y-4 text-sm">
-              {statement && <><div className="flex justify-between border-b border-current/10 pb-3"><span>الرصيد السابق</span><strong>{statement.opening_balance.toFixed(2)} ج.م</strong></div>
+              {statement && <>
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-current/10 pb-3">
+                  <div>
+                    <span className="app-muted text-xs block">الرصيد السابق</span>
+                    <strong className="text-base">{formatCurrency(statement.opening_balance)}</strong>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (statement && profileCustomer) {
+                        printCustomerStatement({
+                          name: profileCustomer.name,
+                          phone: profileCustomer.phone,
+                          customer_type: customerTypeLabels[profileCustomer.customer_type] || profileCustomer.customer_type,
+                          city: profileCustomer.city || undefined,
+                        }, statement);
+                      }
+                    }}
+                    className="app-secondary-button flex items-center gap-1.5 !px-3 !py-1.5 text-xs font-semibold"
+                  >
+                    <span className="material-symbols-outlined text-base">print</span>
+                    <span>طباعة كشف الحساب</span>
+                  </button>
+                </div>
                 {statement.entries.length === 0 && <p className="app-muted">لا توجد حركات مسجلة.</p>}
                 <div className="divide-y divide-current/10">{statement.entries.map(entry => <div key={`${entry.kind}-${entry.id}`} className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1 py-3 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
                   <div className="min-w-0"><strong>{entry.kind === "invoice" ? "فاتورة بيع" : entry.kind === "return" ? "استرجاع أو استبدال" : entry.kind === "refund" ? "رد مبلغ" : "دفعة"}{entry.public_number ? ` · ${entry.public_number}` : ""}</strong><div className="app-muted">{new Date(entry.at).toLocaleString("ar-EG")}{entry.method ? ` · ${entry.method}` : ""}</div></div>
-                  <span className={entry.direction === "debit" ? "text-[#ffb4ab]" : "text-emerald-400"}>{entry.direction === "debit" ? "+" : "−"}{entry.amount.toFixed(2)} ج.م</span>
-                  <span className="app-muted col-span-2 sm:col-span-1">الرصيد {entry.balance.toFixed(2)} ج.م</span>
+                  <span className={entry.direction === "debit" ? "text-[#ffb4ab]" : "text-emerald-400"}>{entry.direction === "debit" ? "+" : "−"}{formatCurrency(entry.amount)}</span>
+                  <span className="app-muted col-span-2 sm:col-span-1">الرصيد {formatCurrency(entry.balance)}</span>
                   {entry.order_id && <button type="button" className="w-fit text-primary underline-offset-4 hover:underline" onClick={() => setSelectedInvoiceId(entry.order_id)}>عرض الفاتورة</button>}
                 </div>)}</div>
-                <div className="flex justify-between border-t border-current/10 pt-3 font-bold"><span>الرصيد الحالي</span><span>{statement.closing_balance.toFixed(2)} ج.م</span></div></>}
+                <div className="flex justify-between border-t border-current/10 pt-3 font-bold"><span>الرصيد الحالي</span><span>{formatCurrency(statement.closing_balance)}</span></div></>}
             </div>}
             {profileTab === "payments" && <div className="space-y-6">
-              <div className="flex items-baseline justify-between border-b border-current/10 pb-4"><span className="app-muted text-sm">الرصيد المستحق</span><strong className="text-xl">{Number(profileCustomer.balance || 0).toFixed(2)} ج.م</strong></div>
+              <div className="flex items-baseline justify-between border-b border-current/10 pb-4"><span className="app-muted text-sm">الرصيد المستحق</span><strong className="text-xl">{formatCurrency(profileCustomer.balance)}</strong></div>
               {dues && <div className="space-y-2 text-sm"><h3 className="font-semibold">الفواتير المستحقة</h3>
-                {dues.unlinked_balance > 0 && <div className="app-muted border-b border-current/10 py-2">رصيد سابق غير مربوط بفاتورة: {dues.unlinked_balance.toFixed(2)} ج.م · موعده غير مسجل</div>}
-                {dues.invoices.map(invoice => <div key={invoice.order_id} className="flex flex-wrap justify-between gap-2 border-b border-current/10 py-2"><span>فاتورة {invoice.public_number} · {invoice.remaining.toFixed(2)} ج.م</span><span className={invoice.due_date && invoice.due_date < cairoToday() ? "text-[#ffb4ab]" : "app-muted"}>{invoice.due_date ? `استحقاق ${invoice.due_date}` : "الموعد غير مسجل"}</span></div>)}
+                {dues.unlinked_balance > 0 && <div className="app-muted border-b border-current/10 py-2">رصيد سابق غير مربوط بفاتورة: {formatCurrency(dues.unlinked_balance)} · موعده غير مسجل</div>}
+                {dues.invoices.map(invoice => <div key={invoice.order_id} className="flex flex-wrap justify-between gap-2 border-b border-current/10 py-2"><span>فاتورة {invoice.public_number} · {formatCurrency(invoice.remaining)}</span><span className={invoice.due_date && invoice.due_date < cairoToday() ? "text-[#ffb4ab]" : "app-muted"}>{invoice.due_date ? `استحقاق ${invoice.due_date}` : "الموعد غير مسجل"}</span></div>)}
                 {dues.invoices.length === 0 && dues.unlinked_balance === 0 && <p className="app-muted">لا توجد مديونيات مستحقة.</p>}
               </div>}
               {paymentError && <p role="alert" className="text-sm text-red-400">{paymentError}</p>}
               <div className="grid gap-3 sm:grid-cols-2"><label className="text-sm">المبلغ المحصّل<input type="number" min="0.01" max={Number(profileCustomer.balance || 0)} step="0.01" value={paymentAmount || ""} onChange={event => setPaymentAmount(Number(event.target.value) || 0)} className="app-field mt-1" /></label><div className="text-sm"><span className="mb-1 block">وسيلة التحصيل</span><ProductSelect label="وسيلة التحصيل" value={paymentMethod} onChange={setPaymentMethod} placeholder="اختر وسيلة التحصيل" allowClear={false} compact options={[{ value: "Cash", label: "نقدًا" }, { value: "Instapay", label: "إنستا باي" }, { value: "Credit Card", label: "فيزا" }, { value: "Wallet", label: "محفظة" }]} /></div></div>
               {needsNextDueDate(dues, paymentAmount) && <div className="text-sm">موعد الدفعة التالية للباقي *<div className="mt-1"><DatePicker label="موعد الدفعة التالية للباقي" value={nextDueDate} onChange={setNextDueDate} min={cairoToday()} /></div></div>}
-              {paymentMethod === "Wallet" && paymentAmount > 0 && <p className="app-muted text-sm">رسوم المحفظة ١٪: {(Math.round(paymentAmount) / 100).toFixed(2)} ج.م · المحصل: {(paymentAmount + Math.round(paymentAmount) / 100).toFixed(2)} ج.م</p>}
+              {paymentMethod === "Wallet" && paymentAmount > 0 && <p className="app-muted text-sm">رسوم المحفظة ١٪: {formatCurrency(Math.round(paymentAmount) / 100)} · المحصل: {formatCurrency(paymentAmount + Math.round(paymentAmount) / 100)}</p>}
               <button type="button" disabled={profileBusy || paymentBusy || paymentAmount <= 0 || Math.abs(Math.round(paymentAmount * 100) - paymentAmount * 100) > 1e-6 || paymentAmount > Number(profileCustomer.balance || 0) || needsNextDueDate(dues, paymentAmount) && (!nextDueDate || nextDueDate < cairoToday())} onClick={collectPayment} className="app-primary-button disabled:opacity-40">{paymentBusy ? "جارٍ التسجيل..." : "تسجيل التحصيل"}</button>
-              <div className="border-t border-current/10 pt-4"><h3 className="mb-2 font-semibold">{userRole === "ADMIN" ? "سجل المدفوعات" : "سجل التحصيل"}</h3>{paymentHistory.length === 0 && !profileBusy ? <p className="app-muted text-sm">لا توجد دفعات مسجلة.</p> : paymentHistory.map(payment => <div key={payment.id} className="flex flex-wrap justify-between gap-2 border-b border-current/10 py-3 text-sm"><span>{userRole === "ADMIN" ? `${payment.kind === "SALE" ? "دفعة بيع" : "تحصيل"} · ` : ""}{Number(payment.amount).toFixed(2)} ج.م{Number(payment.wallet_fee_amount || 0) > 0 ? ` · رسوم ${Number(payment.wallet_fee_amount).toFixed(2)}` : ""}</span><span className="app-muted">{payment.method} · {new Date(payment.created_at).toLocaleDateString("ar-EG")}</span></div>)}</div>
+              <div className="border-t border-current/10 pt-4"><h3 className="mb-2 font-semibold">{userRole === "ADMIN" ? "سجل المدفوعات" : "سجل التحصيل"}</h3>{paymentHistory.length === 0 && !profileBusy ? <p className="app-muted text-sm">لا توجد دفعات مسجلة.</p> : paymentHistory.map(payment => <div key={payment.id} className="flex flex-wrap justify-between gap-2 border-b border-current/10 py-3 text-sm"><span>{userRole === "ADMIN" ? `${payment.kind === "SALE" ? "دفعة بيع" : "تحصيل"} · ` : ""}{formatCurrency(payment.amount)}{Number(payment.wallet_fee_amount || 0) > 0 ? ` · رسوم ${formatCurrency(payment.wallet_fee_amount)}` : ""}</span><span className="app-muted">{payment.method} · {new Date(payment.created_at).toLocaleDateString("ar-EG")}</span></div>)}</div>
             </div>}
             {profileTab === "followup" && <div className="space-y-5">
               <div className="grid gap-3 sm:grid-cols-2"><div className="text-sm"><span className="mb-1 block">طريقة التواصل</span><ProductSelect label="طريقة التواصل" value={interactionChannel} onChange={setInteractionChannel} placeholder="اختر طريقة التواصل" allowClear={false} compact options={[{ value: "Phone Call", label: "اتصال هاتفي" }, { value: "In Person", label: "زيارة" }, { value: "Other", label: "أخرى" }]} /></div><div className="text-sm"><span className="mb-1 block">موعد متابعة · اختياري</span><div className="grid grid-cols-[minmax(0,1fr)_7rem] gap-2"><DatePicker label="تاريخ المتابعة" value={followUpAt.slice(0, 10)} onChange={date => setFollowUpAt(date ? `${date}T${followUpAt.slice(11, 16) || "09:00"}` : "")} allowClear /><input type="time" aria-label="وقت المتابعة" disabled={!followUpAt} className="app-field" value={followUpAt.slice(11, 16)} onChange={event => setFollowUpAt(`${followUpAt.slice(0, 10)}T${event.target.value}`)} /></div></div></div>

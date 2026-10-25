@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { fetchApi } from "@/lib/api";
+import { getOptimizedImageUrl } from "@/lib/cloudinary";
 
 type Price = { price_level: string; price: string };
 type Unit = { id: string; unit_name: string; conversion_factor: string; barcode?: string; prices: Price[] };
@@ -48,7 +49,7 @@ function ProductDetails() {
     Promise.all([
       fetchApi(`/products/${id}`),
       fetchApi("/inventory/balances"),
-      fetchApi(`/inventory/transactions?product_id=${encodeURIComponent(id)}&limit=100`),
+      fetchApi(`/inventory/transactions?product_id=${encodeURIComponent(id)}&limit=100&recent_days=90`),
       fetchApi(`/products/${id}/history`),
     ]).then(([item, stock, transactions, events]) => {
       if (!active) return;
@@ -80,7 +81,7 @@ function ProductDetails() {
         <span className="app-skeleton h-8 w-48" /><span className="app-skeleton h-28 w-full" /><span className="app-skeleton h-28 w-full" />
       </div> : error ? <div role="alert" className="app-panel p-8 text-red-300">{error}</div> : product && <>
         <header className="app-panel p-6 md:p-8 flex flex-wrap items-center gap-5">
-          {product.image_url ? <img src={product.image_url} alt="" className="h-20 w-20 rounded-2xl object-cover" /> :
+          {product.image_url ? <img src={getOptimizedImageUrl(product.image_url, { width: 160 })} alt="" className="h-20 w-20 rounded-2xl object-cover" /> :
             <span className="material-symbols-outlined text-primary text-5xl" aria-hidden="true">inventory_2</span>}
           <div className="min-w-0 flex-1">
             <h1 className="text-2xl font-bold">{product.name_ar}</h1>
@@ -124,11 +125,11 @@ function ProductDetails() {
         </section>
         <section className="app-panel p-6 space-y-4">
           <h2 className="text-xl font-bold">سجل المنتج والحركات</h2>
-          {timeline.length ? <ol className="space-y-3">{timeline.map(event => <li key={event.id} className="rounded-2xl border border-white/10 p-4 flex flex-wrap justify-between gap-3">
+          <p className="app-muted text-sm">آخر ٩٠ يوم · أحدث ١٠٠ حركة مخزون و١٠٠ تعديل للمنتج بحد أقصى</p>
+          {timeline.length ? <ol className="max-h-[32rem] space-y-3 overflow-y-auto overscroll-contain pe-2 custom-scrollbar" aria-label="حركات المنتج خلال آخر ٩٠ يوم">{timeline.map(event => <li key={event.id} className="rounded-2xl border border-white/10 p-4 flex flex-wrap justify-between gap-3">
             <div><strong>{event.title}</strong>{event.detail && <p className="app-muted text-sm mt-1">{event.detail}</p>}</div>
             <time className="app-muted text-sm" dateTime={event.date}>{new Date(event.date).toLocaleString("ar-EG")}</time>
           </li>)}</ol> : <p className="app-muted">لا توجد حركات مسجلة</p>}
-          <p className="app-muted text-xs">آخر 100 حركة مخزون وآخر 100 حدث للمنتج.</p>
         </section>
       </>}
     </main>

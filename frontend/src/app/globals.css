@@ -176,7 +176,7 @@ html[data-theme="light"] body { background: #f6f4f1; color: #24211f; }
 
 /* Shared application surfaces, based on the inventory screen. */
 .app-main {
-  margin-right: 364px;
+  margin-right: 380px;
   margin-left: 32px;
   padding-top: 160px;
   padding-bottom: 64px;
@@ -198,6 +198,7 @@ html[data-theme="light"] body { background: #f6f4f1; color: #24211f; }
 .app-checkout-block { border-color: #926a24; background: #3b2a0b; color: #ffdb92; }
 html[data-theme="light"] .app-checkout-block { border-color: #a36816; background: #fff1d0; color: #653c06; }
 .app-search { border-color: #292929; }
+.app-hide-native-search-clear::-webkit-search-cancel-button { display: none; }
 .app-icon-button { display: inline-flex; height: 42px; width: 42px; flex: none; align-items: center; justify-content: center; border-radius: 50%; color: #c7aa9d; }
 .app-icon-button:hover, .app-account-button:hover { background: rgba(255,255,255,.09); }
 .app-menu { background: #242321; border: 1px solid rgba(255,255,255,.12); }
@@ -352,14 +353,20 @@ html[data-theme="light"] .login-input::placeholder { color: #9c8d82; }
 }
 
 @media (min-width: 1280px) and (max-width: 1365px) {
-  .app-main { margin-right: 292px; margin-left: 24px; }
-  .app-top-nav { right: 292px; left: 24px; }
+  .app-side-nav { width: 272px; }
+  .app-main { margin-right: 308px; margin-left: 24px; }
+  .app-top-nav { right: 308px; left: 24px; }
+  .app-side-page { margin-right: 308px; }
+}
+@media (min-width: 1366px) {
+  .app-side-nav { top: 32px; right: 32px; bottom: 32px; width: 336px; }
+  .app-side-page { margin-right: 380px; }
 }
 @media (max-width: 520px) {
   .app-top-nav { gap: 8px; padding-left: 10px; }
   .app-top-nav .app-search { height: 40px; }
   .app-top-nav .app-icon-button { width: 38px; height: 40px; }
-  .app-top-nav input::placeholder { color: transparent; }
+  .app-top-nav input::placeholder { color: var(--color-on-surface-variant); opacity: .8; }
 }
 
 /* A single quiet scrollbar treatment for lists, drawers and page content. */

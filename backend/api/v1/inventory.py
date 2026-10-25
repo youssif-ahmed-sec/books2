@@ -11,7 +11,7 @@ from models.product import Product, ProductUnit, ProductPrice, ProductSupplierLi
 from models.user import User, RoleEnum, AuditLog
 from schemas.inventory import InventoryTransactionCreate, InventoryTransactionResponse, InventoryBalanceResponse, InventoryStatsResponse, InventoryTransactionRecentResponse, PaginatedInventoryTransactionResponse, StockReceiptCreate
 from sqlalchemy import func, desc
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from core.dependencies import require_inventory_access, require_warehouse_access
 from core.idempotency import request_fingerprint
 from database import get_db
@@ -367,27 +367,30 @@ async def get_inventory_transactions(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     product_id: UUID | None = Query(None),
+    recent_days: int | None = Query(None, ge=1, le=365),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_inventory_access),
 ):
     offset = (page - 1) * limit
+    criteria = []
+    if product_id is not None:
+        criteria.append(InventoryTransaction.product_id == product_id)
+    if recent_days is not None:
+        criteria.append(InventoryTransaction.created_at >= datetime.now(timezone.utc) - timedelta(days=recent_days))
     
     # Get total count
-    total_query = select(func.count(InventoryTransaction.id))
-    if product_id is not None:
-        total_query = total_query.where(InventoryTransaction.product_id == product_id)
+    total_query = select(func.count(InventoryTransaction.id)).where(*criteria)
     total = (await db.execute(total_query)).scalar() or 0
 
     # Get paginated data with product names
     query = (
         select(InventoryTransaction, Product.name_ar)
         .outerjoin(Product, InventoryTransaction.product_id == Product.id)
+        .where(*criteria)
         .order_by(InventoryTransaction.created_at.desc())
         .offset(offset)
         .limit(limit)
     )
-    if product_id is not None:
-        query = query.where(InventoryTransaction.product_id == product_id)
     result = await db.execute(query)
     rows = result.all()
     

@@ -14,9 +14,10 @@ import { armUiSound, playUiSound } from "@/lib/uiSounds";
 import { getCurrentUser } from "@/lib/currentUser";
 import { useConfirmAction } from "@/components/ConfirmationProvider";
 import { ProductSelect } from "@/components/ProductSelect";
-import { DatePicker } from "@/components/DatePicker";
+import { formatCurrency } from "@/lib/formatters";
 import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
 import { emptyBarcodeScanCapture, englishBarcodeFromArabicLayout, englishBarcodeFromScan, recordBarcodeScanKey } from "@/lib/barcodeScanner";
+import { TopNavSearchPortal } from "@/lib/topNavSearchPortal";
 
 interface CheckoutPayload {
   warehouse_id: string;
@@ -80,16 +81,24 @@ type CatalogSnapshot = { key: string; at: number; products: Product[]; hasMore: 
 const catalogKey = (warehouseId: string, query: string, categoryId: string, subcategoryId: string, brandId: string, productKind: string) =>
   JSON.stringify([warehouseId, query, categoryId, subcategoryId, brandId, productKind]);
 
+function filterCompleteCatalog(snapshot: CatalogSnapshot | null, query: string, key: string): Product[] | null {
+  if (!snapshot || snapshot.hasMore || snapshot.key !== key || Date.now() - snapshot.at >= 30_000 || /[%_]/.test(query)) return null;
+  const needle = query.trim().toLocaleLowerCase();
+  if (!needle) return snapshot.products;
+  return snapshot.products.filter(product => [product.name_ar, product.name_en, product.sku, product.barcode,
+    ...product.units.map(unit => unit.barcode)].some(value => value?.toLocaleLowerCase().includes(needle)));
+}
+
 interface FallbackProduct extends Product {
   is_active: boolean;
   is_bundle: boolean;
   bundle_components: { component_id: string; quantity: number }[];
 }
 
-async function searchAdminInventory(query: string, warehouseId: string, offset = 0, categoryId = "", subcategoryId = "", brandId = "", productKind: "all" | "products" | "offers" = "all"): Promise<Product[]> {
+async function searchAdminInventory(query: string, warehouseId: string, offset = 0, categoryId = "", subcategoryId = "", brandId = "", productKind: "all" | "products" | "offers" = "all", signal?: AbortSignal): Promise<Product[]> {
   const [catalog, balances] = await Promise.all([
-    fetchApi(`/products?search=${encodeURIComponent(query)}&skip=${offset}&limit=50${categoryId ? `&category_id=${encodeURIComponent(categoryId)}` : ""}${productKind !== "all" ? `&is_bundle=${productKind === "offers"}` : ""}`, { silentErrors: true }),
-    fetchApi(`/inventory/balances?warehouse_id=${encodeURIComponent(warehouseId)}`, { silentErrors: true }),
+    fetchApi(`/products?search=${encodeURIComponent(query)}&skip=${offset}&limit=50${categoryId ? `&category_id=${encodeURIComponent(categoryId)}` : ""}${productKind !== "all" ? `&is_bundle=${productKind === "offers"}` : ""}`, { silentErrors: true, signal }),
+    fetchApi(`/inventory/balances?warehouse_id=${encodeURIComponent(warehouseId)}`, { silentErrors: true, signal }),
   ]);
   const stockByProduct = new Map<string, number>();
   for (const balance of balances as { product_id: string; current_stock: number }[]) {
@@ -179,11 +188,11 @@ const customerTypes = [
   { value: "VIP Customer", label: "عميل VIP" },
 ];
 const priceLevels = [
-  { value: "Retail", label: "مستهلك" },
+  { value: "Retail", label: "قطاعي" },
   { value: "Semi Wholesale", label: "نصف جملة" },
   { value: "Wholesale", label: "جملة" },
   { value: "Super Wholesale", label: "سوبر جملة" },
-  { value: "VIP", label: "كبار العملاء" },
+  { value: "VIP", label: "خاص" },
 ];
 const defaultCustomerPriceLevel = (type: string) =>
   type === "Wholesale Customer" ? "Wholesale" :
@@ -195,6 +204,7 @@ export default function POSPage() {
   const confirmAction = useConfirmAction();
   const [catalogInitial] = useState(() => readSectionSnapshot<CatalogSnapshot>("pos-catalog"));
   const catalogCache = useRef<CatalogSnapshot | null>(catalogInitial);
+  const completeCatalogCache = useRef<CatalogSnapshot | null>(catalogInitial?.query === "" ? catalogInitial : null);
   const [searchQuery, setSearchQuery] = useState(() => catalogInitial?.query || "");
   const [products, setProducts] = useState<Product[]>(() => catalogInitial?.products || []);
   const [loading, setLoading] = useState(false);
@@ -214,6 +224,7 @@ export default function POSPage() {
   const scanInFlight = useRef<string | null>(null);
   const scanKeys = useRef(emptyBarcodeScanCapture());
   const searchSequence = useRef(0);
+  const searchAbort = useRef<AbortController | null>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   const searchFocusedOnReady = useRef(false);
   const [shiftOpen, setShiftOpen] = useState<boolean | null>(null);
@@ -409,15 +420,32 @@ export default function POSPage() {
     searchInput.current?.focus();
   };
 
+  const checkoutActionRef = useRef<() => void>(() => {});
+  const checkoutBlockRef = useRef<string>("");
+
   useEffect(() => {
     const onShortcut = (event: globalThis.KeyboardEvent) => {
-      if (event.repeat || event.altKey || event.ctrlKey || event.metaKey || pendingProduct || heldOpen || pendingCheckout || receiptOpen) return;
+      if (event.repeat || pendingProduct || heldOpen || pendingCheckout || receiptOpen) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && (target.isContentEditable || target.closest("input, textarea, select, [role='combobox']"))) return;
       if (event.key === "F1") {
         event.preventDefault();
         searchInput.current?.focus();
+      } else if (event.key === "F2" && !isProcessing && !reviewingCart) {
+        event.preventDefault();
+        if (!isCreditSale && !isDelivery) {
+          setIsCreditSale(true); setIsDelivery(false);
+        } else if (isCreditSale) {
+          setIsCreditSale(false); setIsDelivery(true);
+        } else {
+          setIsCreditSale(false); setIsDelivery(false);
+        }
       } else if (event.key === "F4" && cart.length && !isProcessing && !reviewingCart) {
         event.preventDefault();
         holdCart();
+      } else if ((event.key === "F9" || (event.ctrlKey && event.key === "Enter")) && cart.length && !checkoutBlockRef.current && !isProcessing && !reviewingCart) {
+        event.preventDefault();
+        checkoutActionRef.current();
       }
     };
     window.addEventListener("keydown", onShortcut);
@@ -540,11 +568,6 @@ export default function POSPage() {
     return () => { active = false; };
   }, []);
 
-  const getPrice = useCallback((unit: ProductUnit, level: string) => {
-    const p = unit.prices.find(pr => pr.price_level === level);
-    return p ? Number(p.price) : 0;
-  }, []);
-
   const applyCustomerPrice = (customer: PosCustomer) => {
     const level = customer.price_level || "Retail";
     const missingPrice = userRole !== "ADMIN" && cart.some(item => !item.availableUnits.find(candidate => candidate.id === item.unitId)?.prices.some(price => price.price_level === level));
@@ -648,18 +671,15 @@ export default function POSPage() {
 
     if (!unit) return false;
 
-    const customerLevel = customers.find(customer => customer.id === selectedCustomer)?.price_level || "Retail";
-    if (userRole !== "ADMIN" && selectedPriceLevel !== customerLevel) {
-      notifyError("لا يمكن تغيير فئة سعر العميل من هذا الحساب.");
-      return false;
-    }
-    if (!unit.prices.some(price => price.price_level === selectedPriceLevel)) {
+    const availablePrice = unit.prices.find(price => price.price_level === selectedPriceLevel && Number(price.price) > 0)
+      || unit.prices.find(price => Number(price.price) > 0);
+    if (!availablePrice) {
       notifyError("لا يوجد أسعار لهذه الوحدة.");
       return false;
     }
-
-    const unitPrice = getPrice(unit, selectedPriceLevel);
-    if (unitPrice === 0) {
+    const finalPriceLevel = availablePrice.price_level;
+    const unitPrice = Number(availablePrice.price);
+    if (unitPrice <= 0) {
       notifyError("السعر صفر لهذه الوحدة.");
       return false;
     }
@@ -670,7 +690,7 @@ export default function POSPage() {
       notifyError("لا يوجد مخزون كافٍ.");
       return false;
     }
-    const existing = previous.find(item => item.productId === product.id && item.unitId === unit.id && item.priceLevel === selectedPriceLevel);
+    const existing = previous.find(item => item.productId === product.id && item.unitId === unit.id && item.priceLevel === finalPriceLevel);
     const next = existing
       ? previous.map(item => item.id === existing.id
           ? { ...item, quantity: item.quantity + 1, totalPrice: (item.quantity + 1) * item.unitPrice }
@@ -683,7 +703,7 @@ export default function POSPage() {
           unitId: unit.id,
           unitName: unit.unit_name,
           quantity: 1,
-          priceLevel: selectedPriceLevel,
+          priceLevel: finalPriceLevel,
           unitPrice: unitPrice,
           totalPrice: unitPrice,
           conversionFactor: unit.conversion_factor,
@@ -693,14 +713,73 @@ export default function POSPage() {
     cartRef.current = next;
     setCart(next);
     setCheckoutError("");
+    searchAbort.current?.abort();
     ++searchSequence.current;
+    completeCatalogCache.current = null;
     setSearchQuery("");
     setProducts([]);
     setLoading(false);
     setCatalogRefresh(value => value + 1);
     window.requestAnimationFrame(() => searchInput.current?.focus());
     return true;
-  }, [getPrice, customers, selectedCustomer, userRole]);
+  }, []);
+
+  const switchCartItemUnit = (cartItemId: string, newUnitId: string) => {
+    setCart(prev => {
+      const currentItem = prev.find(item => item.id === cartItemId);
+      if (!currentItem) return prev;
+      const targetUnit = currentItem.availableUnits.find(u => u.id === newUnitId);
+      if (!targetUnit) return prev;
+
+      // Calculate base stock used by other cart lines of the same product
+      const usedByOthers = prev
+        .filter(item => item.id !== cartItemId && item.productId === currentItem.productId)
+        .reduce((sum, item) => sum + item.quantity * item.conversionFactor, 0);
+
+      const availableForThisLine = Math.max(0, currentItem.maxStock - usedByOthers);
+
+      // Validate stock availability
+      const requiredBaseStock = currentItem.quantity * targetUnit.conversion_factor;
+      let newQuantity = currentItem.quantity;
+      if (currentItem.maxStock > 0 && requiredBaseStock > availableForThisLine) {
+        const maxPossibleUnits = Math.floor(availableForThisLine / targetUnit.conversion_factor);
+        if (maxPossibleUnits < 1) {
+          notifyError(`رصيد المخزن المتبقي لهذا الصنف (${availableForThisLine}) لا يكفي لوحدة واحدة من ${targetUnit.unit_name}`);
+          return prev;
+        }
+        newQuantity = maxPossibleUnits;
+        notifyError(`تم تعديل الكمية إلى ${newQuantity} ${targetUnit.unit_name} لتناسب الرصيد المتاح (${availableForThisLine})`);
+      }
+
+      // Match price level or synchronize to fallback price level
+      const matchingPriceObj = targetUnit.prices.find(p => p.price_level === currentItem.priceLevel && Number(p.price) > 0);
+      const fallbackPriceObj = matchingPriceObj || targetUnit.prices.find(p => Number(p.price) > 0);
+      if (!fallbackPriceObj) {
+        notifyError(`لا يوجد سعر صالح لوحدة ${targetUnit.unit_name}.`);
+        return prev;
+      }
+      const newPriceLevel = matchingPriceObj ? currentItem.priceLevel : (fallbackPriceObj?.price_level || currentItem.priceLevel);
+      const unitPrice = Number(fallbackPriceObj.price);
+      if (prev.some(item => item.id !== cartItemId && item.productId === currentItem.productId && item.unitId === targetUnit.id && item.priceLevel === newPriceLevel)) {
+        notifyError("هذه الوحدة والسعر موجودان بالفعل في السلة. عدّل كميتهما أو احذف أحد السطرين أولًا.");
+        return prev;
+      }
+
+      return prev.map(item => {
+        if (item.id !== cartItemId) return item;
+        return {
+          ...item,
+          unitId: targetUnit.id,
+          unitName: targetUnit.unit_name,
+          conversionFactor: targetUnit.conversion_factor,
+          quantity: newQuantity,
+          priceLevel: newPriceLevel,
+          unitPrice: unitPrice,
+          totalPrice: newQuantity * unitPrice,
+        };
+      });
+    });
+  };
 
   const openProductSelection = useCallback((product: Product, selectedUnitId?: string): boolean => {
     const unit = product.units.find(candidate => candidate.id === selectedUnitId) ||
@@ -709,26 +788,47 @@ export default function POSPage() {
     const customerLevel = customers.find(customer => customer.id === selectedCustomer)?.price_level || "Retail";
     setPendingProduct(product);
     setPendingUnitId(unit.id);
-    setPendingPriceLevel(unit.prices.some(price => price.price_level === customerLevel) ? customerLevel : userRole === "ADMIN" ? unit.prices[0]?.price_level || "" : customerLevel);
+    const initialPriceLevel = unit.prices.some(price => price.price_level === customerLevel && Number(price.price) > 0)
+      ? customerLevel
+      : unit.prices.find(price => Number(price.price) > 0)?.price_level || unit.prices[0]?.price_level || "Retail";
+    setPendingPriceLevel(initialPriceLevel);
     searchInput.current?.blur();
     return true;
-  }, [customers, selectedCustomer, userRole]);
+  }, [customers, selectedCustomer]);
 
   const searchProducts = useCallback(async (query: string, scanned = false, alternateCode: string | null = null, offset = 0) => {
     if (!warehouseId) {
+      searchAbort.current?.abort();
+      ++searchSequence.current;
       setProducts([]);
       setHasMoreProducts(false);
       return;
     }
     const key = catalogKey(warehouseId, query, categoryId, subcategoryId, brandId, productKind);
+    const sequence = ++searchSequence.current;
+    searchAbort.current?.abort();
+    searchAbort.current = null;
+    if (!scanned) scanInFlight.current = null;
     const cached = catalogCache.current;
     if (!scanned && offset === 0 && cached?.key === key && Date.now() - cached.at < 120_000 && catalogRefresh === 0) {
       setProducts(cached.products);
       setHasMoreProducts(cached.hasMore);
       setLoading(false);
+      setSearchError("");
       return;
     }
-    const sequence = ++searchSequence.current;
+    const localProducts = !scanned && offset === 0 && catalogRefresh === 0
+      ? filterCompleteCatalog(completeCatalogCache.current, query, catalogKey(warehouseId, "", categoryId, subcategoryId, brandId, productKind))
+      : null;
+    if (localProducts) {
+      setProducts(localProducts);
+      setHasMoreProducts(false);
+      setLoading(false);
+      setSearchError("");
+      return;
+    }
+    const controller = new AbortController();
+    searchAbort.current = controller;
     if (offset > 0) setLoadingMore(true);
     else {
       setLoading(true);
@@ -746,12 +846,13 @@ export default function POSPage() {
           if (!scanned && brandId) params.set("brand_id", brandId);
           if (!scanned && productKind !== "all") params.set("is_bundle", String(productKind === "offers"));
           if (!scanned && productKind === "offers") params.set("available_only", "true");
-          const res = await fetchApi(`/pos/search?${params.toString()}`, { silentErrors: true });
+          const res = await fetchApi(`/pos/search?${params.toString()}`, { silentErrors: true, signal: controller.signal });
           return res.data || res || [];
         } catch (error) {
+          if (controller.signal.aborted) throw error;
           if ((userRole ?? getUserRole()) !== "ADMIN") throw error;
           if (productKind === "offers" && !scanned) throw error;
-          return searchAdminInventory(searchText, warehouseId, offset, scanned ? "" : categoryId, scanned ? "" : subcategoryId, scanned ? "" : brandId, scanned ? "all" : productKind);
+          return searchAdminInventory(searchText, warehouseId, offset, scanned ? "" : categoryId, scanned ? "" : subcategoryId, scanned ? "" : brandId, scanned ? "all" : productKind, controller.signal);
         }
       };
       let dataArr = await fetchProducts(query);
@@ -769,6 +870,7 @@ export default function POSPage() {
         const snapshot: CatalogSnapshot = { key, at: Date.now(), products: dataArr, hasMore: dataArr.length === 50,
           query, categoryId, subcategoryId, brandId, productKind };
         catalogCache.current = snapshot;
+        if (!query && !snapshot.hasMore) completeCatalogCache.current = snapshot;
         writeSectionSnapshot("pos-catalog", snapshot);
       }
       if (!scanned) return;
@@ -776,11 +878,16 @@ export default function POSPage() {
       const exactProductMatches = dataArr.filter(product => product.barcode === matchedCode || product.sku === matchedCode);
       if (exactUnitMatches.length === 1 && exactProductMatches.every(product => product.id === exactUnitMatches[0].product.id)) {
         const { product, unit } = exactUnitMatches[0];
-        const customerLevel = customers.find(customer => customer.id === selectedCustomer)?.price_level || "Retail";
-        const priceLevel = unit.prices.some(price => price.price_level === customerLevel && Number(price.price) > 0)
-          ? customerLevel : userRole === "ADMIN" ? unit.prices.find(price => Number(price.price) > 0)?.price_level || "" : customerLevel;
-        const added = addToCart(product, unit.id, priceLevel);
-        playUiSound(added ? "scanSuccess" : "scanFailure");
+        if (product.units.length > 1) {
+          const added = openProductSelection(product, unit.id);
+          playUiSound(added ? "scanSuccess" : "scanFailure");
+        } else {
+          const customerLevel = customers.find(customer => customer.id === selectedCustomer)?.price_level || "Retail";
+          const priceLevel = unit.prices.some(price => price.price_level === customerLevel && Number(price.price) > 0)
+            ? customerLevel : unit.prices.find(price => Number(price.price) > 0)?.price_level || "Retail";
+          const added = addToCart(product, unit.id, priceLevel);
+          playUiSound(added ? "scanSuccess" : "scanFailure");
+        }
       } else if (exactUnitMatches.length === 0 && exactProductMatches.length === 1) {
         const added = openProductSelection(exactProductMatches[0]);
         playUiSound(added ? "scanSuccess" : "scanFailure");
@@ -792,6 +899,7 @@ export default function POSPage() {
         if (dataArr.length === 0) setSearchError("لم نعثر على صنف بهذا الكود.");
       }
     } catch (error) {
+      if (controller.signal.aborted) return;
       console.error(error);
       if (sequence === searchSequence.current) {
         const message = errorMessage(error, "تعذر البحث عن الأصناف.");
@@ -799,7 +907,8 @@ export default function POSPage() {
       }
       if (scanned) playUiSound("scanFailure");
     } finally {
-      if (scanned) scanInFlight.current = null;
+      if (searchAbort.current === controller) searchAbort.current = null;
+      if (scanned && sequence === searchSequence.current) scanInFlight.current = null;
       if (sequence === searchSequence.current) {
         if (offset > 0) setLoadingMore(false);
         else setLoading(false);
@@ -819,9 +928,14 @@ export default function POSPage() {
       } else {
         void searchProducts(searchQuery);
       }
-    }, 300);
+    }, !searchQuery.trim() || (catalogRefresh === 0 && (
+      catalogCache.current?.key === catalogKey(warehouseId, searchQuery, categoryId, subcategoryId, brandId, productKind) ||
+      filterCompleteCatalog(completeCatalogCache.current, searchQuery, catalogKey(warehouseId, "", categoryId, subcategoryId, brandId, productKind)) !== null
+    )) ? 0 : 200);
     return () => clearTimeout(delayDebounceFn);
-  }, [searchQuery, searchProducts, warehouseId, catalogRefresh]);
+  }, [searchQuery, searchProducts, warehouseId, catalogRefresh, categoryId, subcategoryId, brandId, productKind]);
+
+  useEffect(() => () => searchAbort.current?.abort(), []);
 
   const updateCartItemQuantity = (id: string, newQty: number) => {
     if (!Number.isInteger(newQty)) return;
@@ -869,11 +983,11 @@ export default function POSPage() {
     customerPhone.length > 0 && !selectedCustomer && customerLookup !== "new" ? "أكمل رقم التليفون أو امسحه قبل البيع" :
     isCreditSale && !selectedCustomer && customerLookup !== "new" ? "اكتب رقم تليفون العميل للبيع الآجل" :
     userRole !== "ADMIN" && selectedCustomer && cart.some(item => item.priceLevel !== (customers.find(customer => customer.id === selectedCustomer)?.price_level || "Retail")) ? "راجع مستوى سعر الأصناف مع العميل قبل البيع" :
-    isCreditSale && !validReceivedAmount ? "اكتب المبلغ المستلم، واكتب 0 لو البيع كله آجل" :
+    isCreditSale && cashReceived !== "" && !validReceivedAmount ? "اكتب المبلغ المسدد بشكل صحيح (أو اتركه فارغًا للآجل الكامل)" :
     isCreditSale && receivedAmount > baseTotal ? "المبلغ المسدد لا يتجاوز صافي المشتريات" :
-    isCreditSale && receivedCents < baseTotalCents && !expectedCollectionMethod ? "اختر وسيلة تحصيل الباقي لاحقًا" :
-    isCreditSale && receivedCents < baseTotalCents && !nextDueDate ? "حدد تاريخ استحقاق الدفعة القادمة" :
-    isCreditSale && receivedCents < baseTotalCents && nextDueDate < cairoToday() ? "تاريخ الاستحقاق لا يمكن أن يكون في الماضي" :
+    isCreditSale && receivedCents < baseTotalCents && !expectedCollectionMethod ? "اختر طريقة تحصيل باقي المبلغ الآجل" :
+    isCreditSale && receivedCents < baseTotalCents && !nextDueDate ? "حدد تاريخ استحقاق باقي المبلغ الآجل" :
+    isCreditSale && nextDueDate && nextDueDate < cairoToday() ? "تاريخ الاستحقاق لا يمكن أن يكون في الماضي" :
     !posPaymentMethods.some(method => method === paymentMethod) ? "اختر طريقة دفع متاحة" :
     ((paymentMethod === "Wallet" && (!isCreditSale || receivedAmount > 0)) || (isCreditSale && receivedCents < baseTotalCents && expectedCollectionMethod === "Wallet")) && !walletAvailable ? "المحفظة تحتاج تحديث السيرفر قبل البيع بها" :
     paymentMethod === "Cash" && (!isCreditSale || receivedAmount > 0) && shiftOpen !== true ? (shiftError || "افتح وردية الصندوق قبل البيع النقدي") : "");
@@ -936,7 +1050,7 @@ export default function POSPage() {
     setDiscountPercent(0); setCashReceived(""); setExpectedCollectionMethod(""); setNextDueDate(""); setIsCreditSale(false); setIsDelivery(false); setDeliveryFee(""); setSaleCustomerName("");
     setSelectedCustomer(""); setCustomerName(""); setCustomerPhone(""); setCustomerAddress("");
     setNewAddress(""); setAddingAddress(false);
-    catalogCache.current = null; setCatalogRefresh(value => value + 1);
+    catalogCache.current = null; completeCatalogCache.current = null; setCatalogRefresh(value => value + 1);
     setCustomerType("Retail Customer"); setCustomerLookup("idle"); setPaymentMethod("Cash");
     window.requestAnimationFrame(() => searchInput.current?.focus());
     latestPrintOrder.current = res.id;
@@ -1011,8 +1125,8 @@ export default function POSPage() {
         if (isCreditSale) {
           payload.amount_received = receivedAmount;
           if (receivedAmount > 0) payload.received_method = paymentMethod;
-          if (receivedCents < baseTotalCents) payload.expected_collection_method = expectedCollectionMethod;
-          if (receivedCents < baseTotalCents) payload.next_due_date = nextDueDate;
+          if (receivedCents < baseTotalCents && expectedCollectionMethod) payload.expected_collection_method = expectedCollectionMethod;
+          if (receivedCents < baseTotalCents && nextDueDate) payload.next_due_date = nextDueDate;
         }
         if (saleCustomerId) { payload.customer_id = saleCustomerId; payload.customer_address = customerAddress; }
         const fingerprint = JSON.stringify(payload);
@@ -1048,6 +1162,10 @@ export default function POSPage() {
       setIsProcessing(false);
     }
   };
+  useEffect(() => {
+    checkoutActionRef.current = () => void handleCheckout();
+    checkoutBlockRef.current = checkoutBlock;
+  });
 
   const verifyCheckout = async () => {
     if (!pendingCheckout || isProcessing || !pendingCheckout.payload.request_id) return;
@@ -1197,29 +1315,35 @@ export default function POSPage() {
               {walletFee > 0 && <div className="flex justify-between text-sm"><span>ضريبة المحفظة (١٪)</span><span>+{walletFee.toFixed(2)} ج.م</span></div>}
 
               <div className="flex justify-between items-center text-xl">
-                <span className="font-black text-white">الصافي:</span>
-                <span className="font-black text-primary">{totalAmount.toFixed(2)} ج.م</span>
+                <span className="font-black text-on-surface">الصافي:</span>
+                <span className="font-black text-primary">{formatCurrency(totalAmount)}</span>
               </div>
 
               <div className="grid grid-cols-2 gap-2" role="group" aria-label="نوع البيع">
-                <button type="button" aria-pressed={!isCreditSale} onClick={() => { setIsCreditSale(false); setCashReceived(""); setNextDueDate(""); }} className={!isCreditSale ? "app-primary-button justify-center" : "app-secondary-button justify-center"}>دفع كامل</button>
-                <button type="button" aria-pressed={isCreditSale} onClick={() => { setIsCreditSale(true); setCashReceived(""); }} className={isCreditSale ? "app-primary-button justify-center" : "app-secondary-button justify-center"}>بيع آجل</button>
+                <button type="button" aria-pressed={!isCreditSale} onClick={() => { setIsCreditSale(false); setCashReceived(""); setNextDueDate(""); }} className={!isCreditSale ? "app-primary-button justify-center flex items-center gap-1.5" : "app-secondary-button justify-center flex items-center gap-1.5"}>
+                  <span>دفع كامل</span>
+                  <kbd className="rounded bg-black/10 px-1 text-[10px] font-mono opacity-80">F2</kbd>
+                </button>
+                <button type="button" aria-pressed={isCreditSale} onClick={() => { setIsCreditSale(true); setCashReceived(""); }} className={isCreditSale ? "app-primary-button justify-center flex items-center gap-1.5" : "app-secondary-button justify-center flex items-center gap-1.5"}>
+                  <span>بيع آجل</span>
+                  <kbd className="rounded bg-black/10 px-1 text-[10px] font-mono opacity-80">F2</kbd>
+                </button>
               </div>
-              {isCreditSale && <label className="block text-sm">المبلغ المسدد من قيمة الفاتورة *
-                <input className="app-field mt-2" type="number" inputMode="decimal" min="0" max={baseTotal} step="0.01" required
-                  value={cashReceived} onChange={event => setCashReceived(event.target.value)} disabled={isProcessing} placeholder="اكتب 0 لو كله آجل" />
+              {isCreditSale && <label className="block text-sm">المبلغ المسدد من قيمة الفاتورة <span className="app-muted text-xs">(اتركه 0 للآجل الكامل)</span>
+                <input className="app-field mt-2" type="number" inputMode="decimal" min="0" max={baseTotal} step="0.01"
+                  value={cashReceived} onChange={event => setCashReceived(event.target.value)} disabled={isProcessing} placeholder="0" />
               </label>}
-              {isCreditSale && validReceivedAmount && <p className="text-sm font-bold">المتبقي على العميل: {Math.max(0, baseTotal - receivedAmount).toFixed(2)} ج.م</p>}
-              {isCreditSale && paymentMethod === "Wallet" && walletFee > 0 && <p className="text-sm">المبلغ المحصل بالمحفظة شامل الضريبة: {(receivedAmount + walletFee).toFixed(2)} ج.م</p>}
+              {isCreditSale && validReceivedAmount && <p className="text-sm font-bold">المتبقي على العميل: {formatCurrency(Math.max(0, baseTotal - receivedAmount))}</p>}
+              {isCreditSale && paymentMethod === "Wallet" && walletFee > 0 && <p className="text-sm">المبلغ المحصل بالمحفظة شامل الضريبة: {formatCurrency(receivedAmount + walletFee)}</p>}
               {(!isCreditSale || receivedAmount > 0) && <><label className="block text-sm font-bold">{isCreditSale ? "طريقة دفع المبلغ المستلم الآن" : "طريقة الدفع"}</label>
               <ProductSelect label="طريقة الدفع" value={paymentMethod} disabled={isProcessing}
                 onChange={setPaymentMethod}
                 placeholder="طريقة الدفع" options={[{ value: "Cash", label: "كاش" }, { value: "Instapay", label: "إنستا باي" }, { value: "Credit Card", label: "فيزا" }, ...(walletAvailable ? [{ value: "Wallet", label: "محفظة" }] : [])]} allowClear={false} /></>}
-              {isCreditSale && validReceivedAmount && receivedCents < baseTotalCents && <><label className="block text-sm font-bold">طريقة تحصيل الباقي لاحقًا</label>
+              {isCreditSale && validReceivedAmount && receivedCents < baseTotalCents && <><label className="block text-sm font-semibold text-on-surface-variant">طريقة تحصيل الباقي لاحقًا <span className="text-amber-400 font-normal text-xs">(مطلوب للمتبقي)</span></label>
                 <ProductSelect label="طريقة تحصيل الباقي لاحقًا" value={expectedCollectionMethod} onChange={setExpectedCollectionMethod} disabled={isProcessing}
-                  placeholder="اختر وسيلة التحصيل" options={[{ value: "Cash", label: "كاش" }, { value: "Instapay", label: "إنستا باي" }, { value: "Credit Card", label: "فيزا" }, ...(walletAvailable ? [{ value: "Wallet", label: "محفظة" }] : [])]} allowClear={false} />
-                <div className="text-sm font-bold">تاريخ استحقاق الدفعة القادمة *
-                  <div className="mt-2"><DatePicker label="تاريخ استحقاق الدفعة القادمة" value={nextDueDate} onChange={setNextDueDate} min={cairoToday()} disabled={isProcessing} /></div>
+                  placeholder="اختر وسيلة تحصيل الباقي" options={[{ value: "Cash", label: "كاش" }, { value: "Instapay", label: "إنستا باي" }, { value: "Credit Card", label: "فيزا" }, ...(walletAvailable ? [{ value: "Wallet", label: "محفظة" }] : [])]} allowClear={false} />
+                <div className="text-sm font-semibold text-on-surface-variant">تاريخ استحقاق الدفعة القادمة <span className="text-amber-400 font-normal text-xs">(مطلوب للمتبقي)</span>
+                  <div className="mt-2"><input type="date" aria-label="تاريخ استحقاق الدفعة القادمة" value={nextDueDate} onChange={e => setNextDueDate(e.target.value)} min={cairoToday()} disabled={isProcessing} className="app-field" /></div>
                 </div>
               </>}
               {paymentMethod === "Cash" && (!isCreditSale || receivedAmount > 0) && <>
@@ -1240,8 +1364,11 @@ export default function POSPage() {
                 سلة المشتريات
               </h3>
               <div className="flex items-center gap-2">
-                <button type="button" className="app-secondary-button !px-3 !py-2 text-xs" onClick={holdCart}
-                  disabled={!cart.length || isProcessing || reviewingCart || Boolean(pendingCheckout)} title="F4">تعليق السلة · F4</button>
+                <button type="button" className="app-secondary-button !px-3 !py-2 text-xs flex items-center gap-1.5" onClick={holdCart}
+                  disabled={!cart.length || isProcessing || reviewingCart || Boolean(pendingCheckout)} title="F4">
+                  <span>تعليق السلة</span>
+                  <kbd className="rounded bg-current/10 px-1 py-0.5 text-[10px] font-mono opacity-80">F4</kbd>
+                </button>
                 <button type="button" className="app-secondary-button !px-3 !py-2 text-xs" onClick={() => setHeldOpen(true)}
                   disabled={!heldCarts.length || isProcessing || Boolean(pendingCheckout)}>المعلّقة {heldCarts.length ? `(${heldCarts.length})` : ""}</button>
               </div>
@@ -1257,9 +1384,30 @@ export default function POSPage() {
                 <div className="flex flex-col gap-2">
                   {cart.map(item => (
                     <div key={item.id} className="bg-white/5 p-4 rounded-xl border border-white/5 flex flex-col gap-3 shadow-sm">
-                      {/* Top Row: Name and Delete */}
-                      <div className="flex justify-between items-center">
-                        <div className="min-w-0 flex-1 pl-2"><h4 className="truncate text-[15px] font-bold text-white">{item.nameAr}</h4><span className="app-muted text-xs">{item.unitName}</span></div>
+                      {/* Top Row: Name, Unit Switcher, and Delete */}
+                      <div className="flex justify-between items-start gap-2">
+                        <div className="min-w-0 flex-1 pl-2">
+                          <h4 className="truncate text-[15px] font-bold text-on-surface">{item.nameAr}</h4>
+                          <div className="flex items-center gap-2 mt-1">
+                            {item.availableUnits && item.availableUnits.length > 1 ? (
+                              <select
+                                aria-label={`تغيير وحدة ${item.nameAr}`}
+                                value={item.unitId}
+                                onChange={e => switchCartItemUnit(item.id, e.target.value)}
+                                className="rounded-lg border border-white/20 bg-surface px-2 py-0.5 text-xs font-semibold text-primary focus:ring-1 focus:ring-primary cursor-pointer"
+                              >
+                                {item.availableUnits.map(unit => (
+                                  <option key={unit.id} value={unit.id} className="bg-surface text-on-surface">
+                                    {unit.unit_name}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              <span className="app-muted text-xs">{item.unitName}</span>
+                            )}
+                            <span className="app-muted text-[11px]">· {formatCurrency(item.unitPrice)}</span>
+                          </div>
+                        </div>
                         <button onClick={() => removeCartItem(item.id)} className="text-[#ffb4ab]/60 hover:text-[#ffb4ab] bg-[#ffb4ab]/5 hover:bg-[#ffb4ab]/15 rounded-lg p-1.5 transition-colors shrink-0">
                           <span className="material-symbols-outlined text-[18px]">delete</span>
                         </button>
@@ -1279,7 +1427,7 @@ export default function POSPage() {
                             <span className="material-symbols-outlined text-lg">add</span>
                           </button>
                         </div>
-                        <span className="text-lg font-bold text-white tabular-nums">{item.totalPrice.toFixed(2)} ج.م</span>
+                        <span className="text-lg font-bold text-on-surface tabular-nums">{formatCurrency(item.totalPrice)}</span>
                       </div>
                     </div>
                   ))}
@@ -1293,9 +1441,10 @@ export default function POSPage() {
               <button type="button" onClick={() => void handleCheckout()}
                 disabled={Boolean(checkoutBlock) || isProcessing || reviewingCart || Boolean(pendingCheckout)}
                 aria-describedby={checkoutBlock ? "pos-checkout-block" : undefined}
-                className="app-primary-button flex w-full justify-center gap-2 py-3.5 disabled:opacity-50">
+                className="app-primary-button flex w-full justify-center items-center gap-2 py-3.5 disabled:opacity-50">
                 {isProcessing || reviewingCart ? <span className="material-symbols-outlined animate-spin" aria-hidden="true">sync</span> : <span className="material-symbols-outlined" aria-hidden="true">point_of_sale</span>}
-                إتمام البيع · {totalAmount.toFixed(2)} ج.م
+                <span>إتمام البيع · {formatCurrency(totalAmount)}</span>
+                <kbd className="hidden sm:inline-block rounded bg-black/25 px-2 py-0.5 text-[11px] font-mono tracking-wider text-white/90">F9</kbd>
               </button>
               {checkoutBlock && <p id="pos-checkout-block" role="status" className="app-checkout-block rounded-xl border px-3 py-2 text-center text-sm font-semibold">{checkoutBlock}</p>}
             </div>
@@ -1303,12 +1452,12 @@ export default function POSPage() {
           </div>
         </div>
 
-        {/* Product search stays beside customer details and cart on desktop. */}
+        {/* Search results stay beside customer details and cart. */}
         <div className="app-panel order-1 flex min-w-0 flex-col overflow-hidden rounded-2xl lg:order-2 lg:min-h-[420px] lg:max-h-[calc(100vh-180px)] xl:col-start-1 xl:row-start-1">
-          {/* Search Header */}
           <div className="shrink-0 border-b border-white/5 bg-black/10 p-4">
-            <div className="app-field app-search-focus flex min-h-14 items-center gap-3 rounded-xl px-4">
-              <span className="material-symbols-outlined shrink-0 text-primary/70" aria-hidden="true">search</span>
+            <TopNavSearchPortal>
+            <div className="app-search app-search-focus flex h-10 items-center gap-2 rounded-full px-4">
+              <span className="material-symbols-outlined text-xl app-muted" aria-hidden="true">search</span>
               <input
                 type="text"
                 id="pos-product-search"
@@ -1318,9 +1467,12 @@ export default function POSPage() {
                 value={searchQuery}
                 disabled={!warehouseId || isProcessing || savingCustomer}
                 onChange={(e) => {
+                  searchAbort.current?.abort();
+                  ++searchSequence.current;
+                  scanInFlight.current = null;
                   setSearchQuery(e.target.value);
                   setSearchError("");
-                  if (!e.target.value) { ++searchSequence.current; setProducts([]); setLoading(false); }
+                  if (!e.target.value) { setProducts([]); setLoading(false); }
                 }}
                 onKeyDown={(event) => {
                   if (event.key !== "Enter") {
@@ -1341,12 +1493,11 @@ export default function POSPage() {
                   }
                 }}
                 placeholder={warehouseId ? "امسح باركود أو ابحث عن صنف · F1" : "اختر المخزن أولًا"}
-                className="min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-on-surface-variant"
+                className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:opacity-60"
               />
-              {searchQuery && <button type="button" aria-label="مسح البحث" title="مسح البحث" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-current/65 hover:bg-primary/10 hover:text-primary focus-visible:outline-2 focus-visible:outline-primary" onClick={() => { ++searchSequence.current; scanInFlight.current = null; setSearchQuery(""); setSearchError(""); setProducts([]); setLoading(false); searchInput.current?.focus(); }}>
-                <span className="material-symbols-outlined text-xl" aria-hidden="true">close</span>
-              </button>}
+              {searchQuery && <button type="button" aria-label="مسح البحث" title="مسح البحث" className="app-muted text-xs hover:text-white" onClick={() => { searchAbort.current?.abort(); ++searchSequence.current; scanInFlight.current = null; setSearchQuery(""); setSearchError(""); setProducts([]); setLoading(false); searchInput.current?.focus(); }}>✕</button>}
             </div>
+            </TopNavSearchPortal>
             <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label="نوع الأصناف">
               {([{ value: "all", label: "الكل" }, { value: "products", label: "المنتجات" }, { value: "offers", label: "العروض المتاحة" }] as const).map(option =>
                 <button key={option.value} type="button" onClick={() => setProductKind(option.value)} aria-pressed={productKind === option.value}
@@ -1381,29 +1532,61 @@ export default function POSPage() {
                 {products.map(product => {
                   const baseUnit = product.units.find(unit => unit.unit_name === product.base_unit) || product.units[0];
                   const level = customers.find(customer => customer.id === selectedCustomer)?.price_level || "Retail";
-                  const price = baseUnit?.prices.find(candidate => candidate.price_level === level) ||
+                  const primaryPrice = baseUnit?.prices.find(candidate => candidate.price_level === level) ||
                     (userRole === "ADMIN" ? baseUnit?.prices.find(candidate => Number(candidate.price) > 0) : undefined);
+                  const retailPrice = baseUnit?.prices.find(p => p.price_level === "Retail")?.price;
+                  const wholesalePrice = baseUnit?.prices.find(p => p.price_level === "Wholesale")?.price;
+                  const otherUnits = product.units.filter(u => u.id !== baseUnit?.id);
                   const hasAvailablePrice = product.units.some(unit => unit.prices.some(candidate =>
                     Number(candidate.price) > 0 && (userRole === "ADMIN" || candidate.price_level === level)));
+
                   return (
-                  <article key={product.id} className="pos-product-card min-w-0 p-4">
-                    <div className="flex min-w-0 items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <h4 className="truncate text-[15px] font-semibold leading-6" title={product.name_ar}>{product.name_ar}</h4>
-                        {product.is_bundle && <span className="text-xs font-bold text-primary">عرض · سعر ثابت</span>}
+                  <article key={product.id} className="pos-product-card min-w-0 p-4 flex flex-col justify-between">
+                    <div>
+                      <div className="flex min-w-0 items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <h4 className="truncate text-[15px] font-semibold leading-6 text-on-surface" title={product.name_ar}>{product.name_ar}</h4>
+                          {product.is_bundle && <span className="text-xs font-bold text-primary block mt-0.5">عرض · سعر ثابت</span>}
+                          {product.sku && <span className="text-[11px] font-mono text-on-surface-variant block mt-0.5">{product.sku}</span>}
+                        </div>
+                        <span className={`shrink-0 pt-0.5 text-xs font-medium ${product.current_stock > 0 ? "app-muted" : "text-[#ffb4ab]"}`}>
+                          {product.current_stock > 0 ? `${product.current_stock} ${product.base_unit} متاح` : "نفد المخزون"}
+                        </span>
                       </div>
-                      <span className={`shrink-0 pt-1 text-xs ${product.current_stock > 0 ? "app-muted" : "text-[#ffb4ab]"}`}>
-                        {product.current_stock > 0 ? `${product.current_stock} ${product.base_unit} متاح` : "نفد المخزون"}
-                      </span>
+
+                      {/* Pricing pills breakdown */}
+                      <div className="mt-3 flex flex-wrap gap-1.5 items-center">
+                        {retailPrice != null && Number(retailPrice) > 0 && (
+                          <span className="text-xs px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-on-surface font-medium">
+                            قطاعي: <strong className="text-primary font-bold">{formatCurrency(Number(retailPrice))}</strong>
+                          </span>
+                        )}
+                        {wholesalePrice != null && Number(wholesalePrice) > 0 && (
+                          <span className="text-xs px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-medium">
+                            جملة: <strong className="font-bold">{formatCurrency(Number(wholesalePrice))}</strong>
+                          </span>
+                        )}
+                        {otherUnits.map(unit => {
+                          const unitRetail = unit.prices.find(p => p.price_level === "Retail")?.price || unit.prices[0]?.price;
+                          return (
+                            <span key={unit.id} className="text-xs px-2 py-0.5 rounded-md bg-sky-500/10 border border-sky-500/20 text-sky-300 font-medium">
+                              {unit.unit_name}: <strong>{unitRetail ? formatCurrency(Number(unitRetail)) : "—"}</strong>
+                            </span>
+                          );
+                        })}
+                      </div>
                     </div>
-                    <div className="pos-product-card-footer mt-4 flex flex-wrap items-end justify-between gap-3 pt-3">
+
+                    <div className="pos-product-card-footer mt-4 flex flex-wrap items-end justify-between gap-3 pt-3 border-t border-white/5">
                       <div className="min-w-0">
-                        <span className="app-muted block text-xs">سعر الوحدة</span>
-                        <strong className="mt-0.5 block text-lg font-bold leading-6 tabular-nums">{price ? `${Number(price.price).toFixed(2)} ج.م` : "بلا سعر"}</strong>
+                        <span className="app-muted block text-[11px]">السعر المعتمد ({level === "Retail" ? "مستهلك" : level})</span>
+                        <strong className="mt-0.5 block text-lg font-bold leading-6 tabular-nums text-primary">
+                          {primaryPrice ? formatCurrency(Number(primaryPrice.price)) : "بلا سعر"}
+                        </strong>
                       </div>
                       <button type="button" onClick={() => openProductSelection(product)} disabled={isProcessing || savingCustomer || product.current_stock <= 0 || !hasAvailablePrice}
                         aria-label={`إضافة ${product.name_ar} إلى السلة`}
-                        className="app-primary-button !rounded-xl !px-3 !py-2 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
+                        className="app-primary-button !rounded-xl !px-3.5 !py-2 text-sm font-bold shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
                         إضافة للسلة
                       </button>
                     </div>
@@ -1470,17 +1653,60 @@ export default function POSPage() {
         <div className="app-panel w-full max-w-md rounded-2xl p-5 shadow-2xl">
           <div className="mb-4 flex items-start justify-between gap-3"><div><h2 className="text-lg font-bold">{pendingProduct.name_ar}</h2><p className="app-muted text-sm">اختيار الوحدة والسعر</p></div><button type="button" aria-label="إغلاق" onClick={() => { setPendingProduct(null); searchInput.current?.focus(); }} className="app-icon-button"><span className="material-symbols-outlined">close</span></button></div>
           <div className="space-y-4">
-            <div><h3 className="mb-2 text-sm font-semibold">الوحدة</h3><div className="flex flex-wrap gap-2">{pendingProduct.units.map(unit => {
-              const available = unit.prices.some(price => Number(price.price) > 0 && (userRole === "ADMIN" || price.price_level === customerPriceLevel));
-              return <button key={unit.id} type="button" disabled={!available} aria-pressed={pendingUnitId === unit.id}
-                onClick={() => { setPendingUnitId(unit.id); setPendingPriceLevel(unit.prices.some(price => price.price_level === customerPriceLevel && Number(price.price) > 0) ? customerPriceLevel : unit.prices.find(price => Number(price.price) > 0)?.price_level || ""); }}
-                className={`rounded-xl border px-4 py-2 text-sm disabled:opacity-40 ${pendingUnitId === unit.id ? "border-primary bg-primary/15 text-primary" : "border-white/10 hover:border-white/30"}`}>{unit.unit_name}</button>;
-            })}</div></div>
-            <div><h3 className="mb-2 text-sm font-semibold">التسعير</h3>{pendingProduct.is_bundle ? <p className="text-sm">سعر العرض ثابت</p> : userRole === "ADMIN" ?
-              <div className="space-y-2">{pendingPrices.map(price => <button key={price.price_level} type="button" aria-pressed={pendingPriceLevel === price.price_level} onClick={() => setPendingPriceLevel(price.price_level)}
-                className={`flex w-full items-center justify-between rounded-xl border px-4 py-2 text-sm ${pendingPriceLevel === price.price_level ? "border-primary bg-primary/15" : "border-white/10 hover:border-white/30"}`}>
-                <span>{availablePriceLevels.find(level => level.value === price.price_level)?.label || priceLevels.find(level => level.value === price.price_level)?.label || price.price_level}</span><strong>{Number(price.price).toFixed(2)} ج.م</strong>
-              </button>)}</div> : <p className="text-lg font-bold text-primary">{pendingPrice ? `${Number(pendingPrice.price).toFixed(2)} ج.م` : "لا يوجد سعر متاح لهذه الوحدة"}</p>}</div>
+            <div>
+              <h3 className="mb-2 text-sm font-semibold">الوحدة</h3>
+              <div className="flex flex-wrap gap-2">
+                {pendingProduct.units.map(unit => {
+                  const available = unit.prices.some(price => Number(price.price) > 0);
+                  return (
+                    <button
+                      key={unit.id}
+                      type="button"
+                      disabled={!available}
+                      aria-pressed={pendingUnitId === unit.id}
+                      onClick={() => {
+                        setPendingUnitId(unit.id);
+                        setPendingPriceLevel(unit.prices.some(price => price.price_level === customerPriceLevel && Number(price.price) > 0) ? customerPriceLevel : unit.prices.find(price => Number(price.price) > 0)?.price_level || "");
+                      }}
+                      className={`rounded-xl border px-4 py-2 text-sm disabled:opacity-40 font-semibold transition-all ${
+                        pendingUnitId === unit.id ? "border-primary bg-primary/15 text-primary shadow-sm" : "border-white/10 hover:border-white/30"
+                      }`}
+                    >
+                      {unit.unit_name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div>
+              <h3 className="mb-2 text-sm font-semibold">التسعير</h3>
+              {pendingProduct.is_bundle ? (
+                <p className="text-sm">سعر العرض ثابت</p>
+              ) : (
+                <div className="space-y-2">
+                  {pendingPrices.map(price => (
+                    <button
+                      key={price.price_level}
+                      type="button"
+                      aria-pressed={pendingPriceLevel === price.price_level}
+                      onClick={() => setPendingPriceLevel(price.price_level)}
+                      className={`flex w-full items-center justify-between rounded-xl border px-4 py-2.5 text-sm transition-all ${
+                        pendingPriceLevel === price.price_level
+                          ? "border-primary bg-primary/15 text-primary font-bold shadow-sm"
+                          : "border-white/10 hover:border-white/30"
+                      }`}
+                    >
+                      <span>
+                        {availablePriceLevels.find(level => level.value === price.price_level)?.label ||
+                          priceLevels.find(level => level.value === price.price_level)?.label ||
+                          price.price_level}
+                      </span>
+                      <strong>{formatCurrency(price.price)}</strong>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <button type="button" disabled={!canAddPending} onClick={() => { if (pendingUnit && pendingPrice && addToCart(pendingProduct, pendingUnit.id, pendingPrice.price_level)) setPendingProduct(null); }} className="app-primary-button w-full justify-center disabled:opacity-50">إضافة للسلة</button>
           </div>
         </div>

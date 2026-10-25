@@ -1,30 +1,30 @@
+"""Inspect user account status on an explicitly selected database."""
+
 import asyncio
 import os
-import sys
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.future import select
-import ssl
 
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from models.user import User
+from sqlalchemy import select
 
-DB_URL = "postgresql+asyncpg://postgres.nxdyxkvqiamjodmnetvs:Qx%2A%2FT%25N4bgf%40K2e@aws-0-eu-west-1.pooler.supabase.com:5432/postgres"
 
-ssl_ctx = ssl.create_default_context()
-ssl_ctx.check_hostname = False
-ssl_ctx.verify_mode = ssl.CERT_NONE
+async def check() -> None:
+    if not os.environ.get("DATABASE_URL", "").strip():
+        raise RuntimeError("DATABASE_URL must be set explicitly")
 
-engine = create_async_engine(DB_URL, connect_args={"ssl": ssl_ctx})
-AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    from database import AsyncSessionLocal, engine
+    from models.user import User
 
-async def check():
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(select(User))
-        users = result.scalars().all()
-        print(f"Total users: {len(users)}")
-        for u in users:
-            print(f"User: {u.email} | active: {u.is_active} | hash: {u.hashed_password}")
+    try:
+        async with AsyncSessionLocal() as session:
+            users = (await session.execute(select(User).order_by(User.created_at))).scalars().all()
+            print(f"Total users: {len(users)}")
+            for user in users:
+                print(
+                    f"User: {user.username or user.email} | "
+                    f"role: {user.role.value} | active: {user.is_active}"
+                )
+    finally:
+        await engine.dispose()
+
 
 if __name__ == "__main__":
     asyncio.run(check())

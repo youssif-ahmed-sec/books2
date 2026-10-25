@@ -37,7 +37,7 @@ export default function AuditPage() {
 
   return <div className="min-h-screen bg-surface text-white flex" dir="rtl">
 
-    <main className="mx-4 mt-28 mb-8 flex-1 min-w-0 lg:mr-[364px] lg:mt-36 space-y-5">
+    <main className="app-side-page mx-4 mt-28 mb-8 flex-1 min-w-0 lg:mt-36 space-y-5">
       <h1 className="text-2xl font-bold">سجل العمليات</h1>
       {message && <p role="alert">{message}</p>}
       {focusedId && <button type="button" className="app-secondary-button" onClick={() => { setLoading(true); setFocusedId(""); router.replace("/audit"); }}>العودة لكل العمليات</button>}

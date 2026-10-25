@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy import update, func, delete, or_, and_
 from sqlalchemy.exc import IntegrityError
 from uuid import UUID
@@ -22,6 +22,27 @@ from core.product_access import visible_product
 from database import get_db
 
 router = APIRouter(prefix="/products", tags=["Products"], dependencies=[Depends(require_basic_staff_access)])
+
+
+def product_search_filter(search: str):
+    """Match every search word across product names and identifiers."""
+    arabic_folds = (("أ", "ا"), ("إ", "ا"), ("آ", "ا"), ("ة", "ه"), ("ى", "ي"))
+    normalized_name = Product.name_ar
+    normalized_search = search
+    for original, replacement in arabic_folds:
+        normalized_name = func.replace(normalized_name, original, replacement)
+        normalized_search = normalized_search.replace(original, replacement)
+    return and_(*(
+        or_(
+            Product.sku.ilike(f"%{token}%"),
+            Product.barcode.ilike(f"%{token}%"),
+            Product.name_en.ilike(f"%{token}%"),
+            normalized_name.ilike(f"%{token}%"),
+            Product.id.in_(select(ProductUnit.product_id).where(
+                ProductUnit.barcode.ilike(f"%{token}%"), ProductUnit.is_deleted == False,
+            )),
+        ) for token in normalized_search.split()
+    ))
 
 @router.get("/categories", response_model=List[CategoryResponse])
 async def get_categories(db: AsyncSession = Depends(get_db)):
@@ -256,17 +277,8 @@ async def get_products(
                 )
             )
 
-    if search:
-        search_pattern = f"%{search}%"
-        base_query = base_query.where(
-            (Product.sku.ilike(search_pattern)) | 
-            (Product.barcode.ilike(search_pattern)) | 
-            (Product.name_en.ilike(search_pattern)) |
-            (Product.name_ar.ilike(search_pattern)) |
-            (Product.id.in_(select(ProductUnit.product_id).where(
-                ProductUnit.barcode.ilike(search_pattern), ProductUnit.is_deleted == False,
-            )))
-        )
+    if search and search.strip():
+        base_query = base_query.where(product_search_filter(search))
     
     # Get total count
     count_query = select(func.count()).select_from(base_query.subquery())
@@ -275,11 +287,11 @@ async def get_products(
 
     # Get data
     query = base_query.options(
-        selectinload(Product.units.and_(ProductUnit.is_deleted == False)).selectinload(ProductUnit.prices.and_(ProductPrice.is_deleted == False)),
-        selectinload(Product.category),
-        selectinload(Product.subcategory),
-        selectinload(Product.brand),
-        selectinload(Product.supplier),
+        selectinload(Product.units.and_(ProductUnit.is_deleted == False)).joinedload(ProductUnit.prices.and_(ProductPrice.is_deleted == False)),
+        joinedload(Product.category),
+        joinedload(Product.subcategory),
+        joinedload(Product.brand),
+        joinedload(Product.supplier),
         selectinload(Product.bundle_components.and_(ProductBundleComponent.is_deleted == False))
     ).offset(skip).limit(limit)
     
@@ -289,6 +301,7 @@ async def get_products(
     return {"data": [visible_product(product, current_user.role) for product in products], "total": total_count}
 
 from services.product_service import ProductService
+from services.audit_retention import audit_cutoff
 
 @router.get("/{product_id}/history")
 async def get_product_history(
@@ -301,6 +314,7 @@ async def get_product_history(
         raise HTTPException(status_code=404, detail="Product not found")
     rows = (await db.execute(select(AuditLog).where(
         AuditLog.entity_type == "Product", AuditLog.entity_id == str(product_id),
+        AuditLog.created_at >= audit_cutoff(),
     ).order_by(AuditLog.created_at.desc()).limit(min(max(limit, 1), 100)))).scalars().all()
     return [{"id": row.id, "action": row.action, "created_at": row.created_at,
              "user_id": row.user_id} for row in rows]

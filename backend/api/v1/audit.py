@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.dependencies import require_admin
 from database import get_db
 from models.user import AuditLog, User
+from services.audit_retention import audit_cutoff
 
 router = APIRouter(prefix="/audit", tags=["Audit"])
 
@@ -17,7 +18,9 @@ async def audit_history(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_admin),
 ):
-    query = select(AuditLog, User.full_name, User.username, User.email).outerjoin(User, User.id == AuditLog.user_id)
+    query = select(AuditLog, User.full_name, User.username, User.email).outerjoin(User, User.id == AuditLog.user_id).where(
+        AuditLog.created_at >= audit_cutoff(),
+    )
     if search and search.strip():
         literal = search.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         pattern = f"%{literal}%"

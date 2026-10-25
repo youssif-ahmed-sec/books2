@@ -2,7 +2,7 @@
 
 import { notifyError, notifySuccess } from "@/lib/notifications";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { InventoryTableRow } from "@/components/InventoryTableRow";
 import { ProductSelect } from "@/components/ProductSelect";
@@ -52,6 +52,8 @@ interface CatalogProduct {
 }
 interface Balance { product_id: string; current_stock: string }
 interface RecentTransaction { transaction_type: string; product_name?: string; created_at: string; notes?: string | null }
+interface InventoryStats { today_movements: number; low_stock_count: number; critical_stock_count: number; total_value: string }
+interface InventoryAux { balances: Balance[]; stats: InventoryStats; transactions: RecentTransaction[] }
 interface StockMovement { product: string; type: string; date: string; typeStyle: string }
 interface PurchaseNeeded { id: string; name: string; stock: string; image?: string }
 interface StockAlert { product_id: string; name: string; stock: number; base_unit: string; image_url?: string }
@@ -59,7 +61,7 @@ interface SupplierOption { id: string; name: string }
 interface CategoryOption { id: string; name_ar: string }
 interface InventorySnapshot {
   items: InventoryItem[]; stats: StatCard[]; movements: StockMovement[];
-  purchaseNeeded: PurchaseNeeded[]; total: number; page: number;
+  purchaseNeeded: PurchaseNeeded[]; total: number; page: number; at: number;
   supplier: string; category: string; status: string;
 }
 
@@ -91,9 +93,12 @@ export default function InventoryPage() {
   const [selectedSupplier, setSelectedSupplier] = useState(() => readSectionSnapshot<InventorySnapshot>("inventory")?.supplier || "");
   const [selectedCategory, setSelectedCategory] = useState(() => readSectionSnapshot<InventorySnapshot>("inventory")?.category || "");
   const [selectedStockStatus, setSelectedStockStatus] = useState(() => readSectionSnapshot<InventorySnapshot>("inventory")?.status || "");
+  const auxiliaryData = useRef<Promise<InventoryAux> | null>(null);
+  const loadSequence = useRef(0);
 
   const [page, setPage] = useState(() => readSectionSnapshot<InventorySnapshot>("inventory")?.page || 1);
   const [totalItems, setTotalItems] = useState(() => readSectionSnapshot<InventorySnapshot>("inventory")?.total || 0);
+
   const limit = 10;
   const totalPages = Math.max(1, Math.ceil(totalItems / limit));
   const pageNumbers = Array.from(new Set([
@@ -110,6 +115,7 @@ export default function InventoryPage() {
 
   const loadData = useCallback(async (showLoading = true) => {
     if (!userRole) return;
+    const requestId = ++loadSequence.current;
       try {
         if (showLoading && !readSectionSnapshot<InventorySnapshot>("inventory")) setLoading(true);
 
@@ -118,13 +124,19 @@ export default function InventoryPage() {
         if (selectedCategory) params.append("category_id", selectedCategory);
         if (selectedStockStatus) params.append("stock_status", selectedStockStatus);
 
-        // Fetch products and balances
-        const [productsRes, balancesRes, statsRes, transactionsRes] = await Promise.all([
-          fetchApi(`/products?${params.toString()}`),
-          fetchApi("/inventory/balances"),
-          fetchApi("/inventory/stats"),
-          fetchApi("/inventory/transactions/recent"),
+        if (!auxiliaryData.current) {
+          const request = Promise.all([
+            fetchApi("/inventory/balances") as Promise<Balance[]>,
+            fetchApi("/inventory/stats") as Promise<InventoryStats>,
+            fetchApi("/inventory/transactions/recent") as Promise<RecentTransaction[]>,
+          ]).then(([balances, stats, transactions]) => ({ balances, stats, transactions }));
+          auxiliaryData.current = request;
+          request.catch(() => { if (auxiliaryData.current === request) auxiliaryData.current = null; });
+        }
+        const [productsRes, { balances: balancesRes, stats: statsRes, transactions: transactionsRes }] = await Promise.all([
+          fetchApi(`/products?${params.toString()}`), auxiliaryData.current,
         ]);
+        if (requestId !== loadSequence.current) return;
 
         setTotalItems(productsRes.total || 0);
         const productsList: CatalogProduct[] = productsRes.data || [];
@@ -244,14 +256,15 @@ export default function InventoryPage() {
         writeSectionSnapshot<InventorySnapshot>("inventory", {
           items: mappedItems, stats: mappedStats, movements: mappedMovements,
           purchaseNeeded: readSectionSnapshot<InventorySnapshot>("inventory")?.purchaseNeeded || [],
-          total: productsRes.total || 0, page, supplier: selectedSupplier, category: selectedCategory, status: selectedStockStatus,
+          total: productsRes.total || 0, page, supplier: selectedSupplier, category: selectedCategory, status: selectedStockStatus, at: Date.now(),
         });
 
       } catch (error) {
+        if (requestId !== loadSequence.current) return;
         console.error("Failed to load inventory data:", error);
         notifyError(error instanceof Error ? error.message : "تعذر تحميل بيانات المخزون");
       } finally {
-        setLoading(false);
+        if (requestId === loadSequence.current) setLoading(false);
       }
   }, [page, limit, selectedSupplier, selectedCategory, selectedStockStatus, userRole, hasInventoryAccess]);
 
@@ -287,6 +300,7 @@ export default function InventoryPage() {
   }, [loadPurchaseNeeded]);
 
   const refreshData = useCallback(() => {
+    auxiliaryData.current = null;
     void loadData(false);
     void loadPurchaseNeeded();
   }, [loadData, loadPurchaseNeeded]);
@@ -303,6 +317,7 @@ export default function InventoryPage() {
         }
         await fetchApi(`/products/${item.id}`, { method: 'DELETE' });
         setShowEditPanel(false);
+        auxiliaryData.current = null;
         if (inventoryItems.length === 1 && page > 1) setPage(page - 1);
         else await loadData(false);
         await loadPurchaseNeeded();
@@ -317,7 +332,7 @@ export default function InventoryPage() {
   };
 
   return (
-    <div className="min-h-screen bg-surface text-[#e5e2e1] overflow-x-hidden selection:bg-primary/30">
+    <div className="min-h-screen bg-surface text-on-surface overflow-x-hidden selection:bg-primary/30">
       {/* Side Nav */}
 
 
@@ -390,38 +405,40 @@ export default function InventoryPage() {
           {/* Main Product Table */}
           <div className="col-span-12 lg:col-span-9 space-y-8 min-w-0">
             {/* Filters */}
-            <div className="glass p-8 rounded-2xl grid grid-cols-1 md:grid-cols-3 gap-6 hi-fi-shadow">
-              <div>
-                <ProductSelect
-                  label="التصنيف"
-                  value={selectedCategory}
-                  onChange={(value) => { setSelectedCategory(value); setPage(1); }}
-                  placeholder="جميع الفئات"
-                  options={categories.map((c) => ({ value: c.id, label: c.name_ar }))}
-                  filter
-                />
-              </div>
+            <div className="glass p-6 sm:p-8 rounded-2xl space-y-6 hi-fi-shadow">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div>
+                  <ProductSelect
+                    label="التصنيف"
+                    value={selectedCategory}
+                    onChange={(value) => { setSelectedCategory(value); setPage(1); }}
+                    placeholder="جميع الفئات"
+                    options={categories.map((c) => ({ value: c.id, label: c.name_ar }))}
+                    filter
+                  />
+                </div>
 
-              <div>
-                <ProductSelect
-                  label="المورد"
-                  value={selectedSupplier}
-                  onChange={(value) => { setSelectedSupplier(value); setPage(1); }}
-                  placeholder="كافة الموردين"
-                  options={suppliers.map((s) => ({ value: s.id, label: s.name }))}
-                  filter
-                />
-              </div>
+                <div>
+                  <ProductSelect
+                    label="المورد"
+                    value={selectedSupplier}
+                    onChange={(value) => { setSelectedSupplier(value); setPage(1); }}
+                    placeholder="كافة الموردين"
+                    options={suppliers.map((s) => ({ value: s.id, label: s.name }))}
+                    filter
+                  />
+                </div>
 
-              <div>
-                <ProductSelect
-                  label="حالة المخزون"
-                  value={selectedStockStatus}
-                  onChange={(value) => { setSelectedStockStatus(value); setPage(1); }}
-                  placeholder="الكل"
-                  options={[{ value: "low", label: "مخزون منخفض" }, { value: "critical", label: "مخزون حرج (صفر)" }]}
-                  filter
-                />
+                <div>
+                  <ProductSelect
+                    label="حالة المخزون"
+                    value={selectedStockStatus}
+                    onChange={(value) => { setSelectedStockStatus(value); setPage(1); }}
+                    placeholder="الكل"
+                    options={[{ value: "low", label: "مخزون منخفض" }, { value: "critical", label: "مخزون حرج (صفر)" }]}
+                    filter
+                  />
+                </div>
               </div>
             </div>
 

@@ -10,6 +10,7 @@ import { getUserRole } from "@/utils/auth";
 import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
 import { printSalesReturnReceipt } from "@/lib/localPrint";
 import { emptyBarcodeScanCapture, englishBarcodeFromScan, recordBarcodeScanKey } from "@/lib/barcodeScanner";
+import { TopNavSearchPortal } from "@/lib/topNavSearchPortal";
 
 type Order = { id: string; public_number: number; status: string; total_amount: number; customer_id: string | null };
 type EligibleItem = { order_item_id: string; product_name: string; unit_name: string; remaining_quantity: number; unit_price: number; manual_review: boolean };
@@ -121,7 +122,9 @@ export default function ReturnsPage() {
       const invoice = await fetchApi(`/returns/lookup/${encodeURIComponent(number)}`, { invalidateSnapshots: false }) as { id: string };
       selectOrder(invoice.id);
     } catch (error) {
-      setMessage(errorMessage(error, "لم تُعثر على فاتورة مكتملة بهذا الرقم"));
+      setMessage((error as { status?: number })?.status === 404
+        ? "لم تُعثر على فاتورة مكتملة بهذا الرقم"
+        : errorMessage(error, "تعذر البحث عن الفاتورة"));
     } finally { setLookingUp(false); }
   }
   useSectionSearchSelection(selectOrder);
@@ -283,9 +286,9 @@ export default function ReturnsPage() {
       <div className="min-w-0 space-y-4">
       <section className="app-panel space-y-3 rounded-2xl p-4">
         <h2 className="font-bold">الفاتورة الأصلية</h2>
-          <form className="flex flex-wrap gap-2" onSubmit={event => { event.preventDefault(); void lookupOrder(); }}>
-            <input className="app-field min-w-40 flex-1" aria-label="رقم الفاتورة المطبوع" placeholder="رقم الفاتورة المطبوع" value={orderFilter} disabled={busy || lookingUp} onChange={event => { setOrderFilter(event.target.value); if (orderId) selectOrder(""); }} />
-            <button type="submit" className="app-primary-button disabled:opacity-50" disabled={busy || lookingUp || !orderFilter.trim()}>{lookingUp ? "جارٍ البحث..." : "فتح الفاتورة"}</button>
+          <form id="return-lookup-form" className="flex flex-wrap gap-2" onSubmit={event => { event.preventDefault(); void lookupOrder(); }}>
+            {(!eligibility || kind !== "EXCHANGE") && <TopNavSearchPortal><input form="return-lookup-form" type="search" className="app-search app-search-focus h-10 w-full rounded-full px-4" aria-label="بحث عن الفاتورة الأصلية" placeholder="رقم الفاتورة الأصلية" value={orderFilter} disabled={busy || lookingUp} onChange={event => { setOrderFilter(event.target.value); if (orderId) selectOrder(""); }} /></TopNavSearchPortal>}
+            {eligibility && kind === "EXCHANGE" ? <button type="button" className="app-secondary-button" onClick={() => { setKind("REFUND"); selectOrder(""); setOrderFilter(""); }}>تغيير الفاتورة</button> : <button type="submit" className="app-primary-button disabled:opacity-50" disabled={busy || lookingUp || !orderFilter.trim()}>{lookingUp ? "جارٍ البحث..." : "فتح الفاتورة"}</button>}
           </form>
           {isAdmin && orders.length > 0 && <div>
             <button type="button" className="app-muted text-sm underline underline-offset-4" aria-expanded={showRecentOrders} onClick={() => setShowRecentOrders(value => !value)}>
@@ -328,14 +331,14 @@ export default function ReturnsPage() {
           <label className="app-secondary-button cursor-pointer"><input type="radio" className="ml-2" checked={kind === "EXCHANGE"} disabled={busy} onChange={() => { invalidatePreview(); setKind("EXCHANGE"); }} />استبدال</label>
         </div>
         {kind === "EXCHANGE" && <div className="space-y-3">
-          <input className="app-field" aria-label="ابحث عن الصنف البديل" placeholder="ابحث عن الصنف البديل بالاسم أو الباركود" value={search} disabled={busy} onChange={event => { setSearch(event.target.value); setProducts([]); }} onKeyDown={event => {
+          <TopNavSearchPortal><input type="search" className="app-search app-search-focus h-10 w-full rounded-full px-4" aria-label="ابحث عن الصنف البديل" placeholder="ابحث عن الصنف البديل بالاسم أو الباركود" value={search} disabled={busy} onChange={event => { setSearch(event.target.value); setProducts([]); }} onKeyDown={event => {
             if (event.key !== "Enter") {
               if (!event.nativeEvent.isComposing) recordBarcodeScanKey(scanKeys.current, event);
               return;
             }
             const code = englishBarcodeFromScan(scanKeys.current, event.currentTarget.value.trim());
             if (code) { event.preventDefault(); setSearch(code); setProducts([]); }
-          }} />
+          }} /></TopNavSearchPortal>
           {searching && <p className="app-muted text-sm">جارٍ البحث...</p>}
           {products.length > 0 && <div className="grid gap-2">{products.map(product => {
             const level = eligibility.customer_price_level;

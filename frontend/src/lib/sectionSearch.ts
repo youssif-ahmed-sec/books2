@@ -1,14 +1,29 @@
 import { fetchApi } from "@/lib/api";
 import { readSectionSnapshot, sectionSnapshotRevision } from "@/lib/sectionSnapshot";
+import { formatCurrency } from "@/lib/formatters";
+import { matchesSearch } from "@/lib/searchUtils";
 
-export type SectionSearchResult = { id: string; label: string; detail?: string; href: string };
+export type SectionSearchResult = { id: string; label: string; detail?: string; href: string; priceTag?: string };
 type Row = Record<string, unknown>;
 
 const text = (value: unknown) => value == null ? "" : String(value);
-const matches = (query: string, ...values: unknown[]) => values.some(value => text(value).toLocaleLowerCase().includes(query.toLocaleLowerCase()));
+const matches = (query: string, ...values: unknown[]) => matchesSearch(query, ...values);
 const target = (path: string, id: string) => `${path}?focus=${encodeURIComponent(id)}`;
 const rows = (value: unknown): Row[] => Array.isArray(value) ? value as Row[] : [];
 const loaded = new Map<string, { revision: number; token: string | null; data: Promise<Row[]> }>();
+
+type InventorySearchSnapshot = {
+  at: number; total: number; page: number; supplier: string; category: string; status: string;
+  items: Array<{ id: string; nameAr: string; nameEn: string; sku: string; barcode: string;
+    retailPrice: string; wholesalePrice: string; units: Array<{ barcode: string }> }>;
+};
+
+function completeInventorySnapshot(): InventorySearchSnapshot | null {
+  const snapshot = readSectionSnapshot<InventorySearchSnapshot>("inventory");
+  return snapshot && Date.now() - snapshot.at < 30_000 && snapshot.page === 1 &&
+    !snapshot.supplier && !snapshot.category && !snapshot.status && snapshot.total <= snapshot.items.length
+    ? snapshot : null;
+}
 
 function list(section: string, endpoint: string, select: (snapshot: unknown) => unknown = value => value): Promise<Row[]> {
   const snapshot = readSectionSnapshot<unknown>(section);
@@ -28,8 +43,8 @@ export function sectionSearchLabel(pathname: string): string | null {
   if (pathname === "/suppliers") return "مورد بالاسم أو الهاتف أو البريد";
   if (pathname === "/categories") return "تصنيف أو تصنيف فرعي";
   if (pathname === "/offers") return "عرض";
-  if (pathname === "/customers") return "عميل بالاسم أو الهاتف";
-  if (pathname === "/orders") return "فاتورة برقمها";
+  if (pathname === "/customers") return "عميل بالاسم أو الهاتف أو المدينة";
+  if (pathname === "/orders") return "فاتورة برقمها أو اسم العميل أو هاتفه";
   if (pathname === "/purchases") return "أمر شراء برقم الأمر أو المورد أو الصنف";
   if (pathname === "/purchases/legacy") return "أمر شراء قديم برقم الأمر";
   if (pathname === "/audit") return "عملية في سجل التدقيق";
@@ -39,12 +54,65 @@ export function sectionSearchLabel(pathname: string): string | null {
   return null;
 }
 
+export function sectionSearchHasSnapshot(pathname: string): boolean {
+  if (pathname === "/inventory" || pathname === "/inventory/product") return completeInventorySnapshot() !== null;
+  const snapshots: Record<string, string> = {
+    "/categories": "categories",
+    "/offers": "offers",
+    "/customers": "customers-list",
+    "/purchases": "purchase-documents",
+    "/purchases/legacy": "purchases",
+    "/settings": "settings-users",
+    "/financials": "financials",
+    "/cash-register": "cash-register",
+  };
+  const key = snapshots[pathname];
+  return Boolean(key && readSectionSnapshot(key) !== null);
+}
+
 export async function searchSection(pathname: string, query: string, signal?: AbortSignal): Promise<SectionSearchResult[]> {
   const q = query.trim();
   if (!q) return [];
   if (pathname === "/inventory" || pathname === "/inventory/product") {
+    const snapshot = completeInventorySnapshot();
+    if (snapshot) return snapshot.items.filter(item => matches(q, item.nameAr, item.nameEn, item.sku, item.barcode,
+      ...item.units.map(unit => unit.barcode))).slice(0, 20).map(item => {
+      const details = [item.sku];
+      if (Number(item.wholesalePrice) > 0) details.push(`جملة: ${formatCurrency(Number(item.wholesalePrice))}`);
+      if (item.units.length > 1) details.push(`${item.units.length} وحدات`);
+      return { id: item.id, label: item.nameAr, detail: details.filter(Boolean).join(" · "),
+        priceTag: Number(item.retailPrice) > 0 ? formatCurrency(Number(item.retailPrice)) : undefined,
+        href: `/inventory/product?id=${encodeURIComponent(item.id)}` };
+    });
     const response = await fetchApi(`/products?is_bundle=false&search=${encodeURIComponent(q)}&limit=20`, { signal, silentErrors: true });
-    return rows(response.data).map(item => ({ id: text(item.id), label: text(item.name_ar), detail: text(item.sku), href: `/inventory/product?id=${encodeURIComponent(text(item.id))}` }));
+    return rows(response.data).map(item => {
+      const units = Array.isArray(item.units) ? (item.units as Array<{ unit_name?: string; prices?: Array<{ price_level?: string; price?: string | number }> }>) : [];
+      const baseUnit = units.find(u => u.unit_name === item.base_unit) || units[0];
+      const retailPrice = baseUnit?.prices?.find(p => p.price_level === "Retail")?.price;
+      const wholesalePrice = baseUnit?.prices?.find(p => p.price_level === "Wholesale")?.price;
+
+      let priceTag = "";
+      if (retailPrice != null && Number(retailPrice) > 0) {
+        priceTag = formatCurrency(Number(retailPrice));
+      }
+
+      const details: string[] = [];
+      if (item.sku) details.push(String(item.sku));
+      if (wholesalePrice != null && Number(wholesalePrice) > 0) {
+        details.push(`جملة: ${formatCurrency(Number(wholesalePrice))}`);
+      }
+      if (units.length > 1) {
+        details.push(`${units.length} وحدات`);
+      }
+
+      return {
+        id: text(item.id),
+        label: text(item.name_ar),
+        detail: details.join(" · ") || text(item.sku),
+        priceTag: priceTag || undefined,
+        href: `/inventory/product?id=${encodeURIComponent(text(item.id))}`,
+      };
+    });
   }
   if (pathname === "/suppliers") {
     const response = await fetchApi(`/suppliers?search=${encodeURIComponent(q)}&limit=20`, { signal, silentErrors: true });
@@ -62,18 +130,18 @@ export async function searchSection(pathname: string, query: string, signal?: Ab
     return (await list("offers", "/offers")).filter(item => matches(q, item.name, item.id)).map(item => ({ id: text(item.id), label: text(item.name), href: target(pathname, text(item.id)) }));
   }
   if (pathname === "/customers") {
-    return (await list("customers-list", "/customers")).filter(item => matches(q, item.name, item.phone, item.email)).map(item => ({ id: text(item.id), label: text(item.name), detail: text(item.phone), href: target(pathname, text(item.id)) }));
+    return (await list("customers-list", "/customers")).filter(item => matches(q, item.name, item.phone, item.email, item.city)).map(item => ({ id: text(item.id), label: text(item.name), detail: text(item.phone), href: target(pathname, text(item.id)) }));
   }
   if (pathname === "/orders") {
     let completedInvoice: SectionSearchResult[] = [];
-    if (/^[1-9][0-9]*$/.test(q) || /^[0-9a-f]{12}$/i.test(q) || /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(q)) {
+    if (/^[0-9a-f]{12}$/i.test(q) || /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(q)) {
       const invoice = await fetchApi(`/returns/lookup/${encodeURIComponent(q)}`, { signal, silentErrors: true })
         .catch(() => null) as { id: string } | null;
       if (invoice) completedInvoice = [{ id: invoice.id, label: `فاتورة ${invoice.id.slice(-12)}`, href: target("/orders", invoice.id) }];
     }
-    const data = await list("orders-list", "/orders?group=returnable&limit=50&offset=0");
-    return [...completedInvoice, ...data.filter(item => matches(q, item.public_number, item.id))
-      .map(item => ({ id: text(item.id), label: `فاتورة ${text(item.public_number)}`, detail: text(item.status), href: target("/orders", text(item.id)) }))];
+    const data = rows(await fetchApi(`/orders/invoices?search=${encodeURIComponent(q)}&limit=20`, { signal, silentErrors: true }));
+    return [...completedInvoice, ...data.filter(item => !completedInvoice.some(found => found.id === text(item.id)))
+      .map(item => ({ id: text(item.id), label: `فاتورة ${text(item.public_number)}`, detail: text(item.customer_name), href: target("/orders", text(item.id)) }))];
   }
   if (pathname === "/purchases" || pathname === "/purchases/legacy") {
     const endpoint = pathname === "/purchases" ? "/purchase-documents" : "/purchases";

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { ProductSelect } from "@/components/ProductSelect";
+import { TopNavSearchPortal } from "@/lib/topNavSearchPortal";
 import { ZeroHintNumberInput } from "@/components/ZeroHintNumberInput";
 import { fetchApi } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
@@ -104,7 +105,7 @@ function OfferEditor({ offer, onClose, onSaved }: { offer: Offer | null; onClose
         <div className="min-w-0 space-y-5">
           <label className="block text-sm font-bold">اسم العرض<input className="app-field mt-2" value={name} onChange={event => setName(event.target.value)} maxLength={160} placeholder="مثال: باقة العودة للمدارس" autoFocus /></label>
           <section className="space-y-3"><div><h3 className="font-bold">منتجات العرض</h3></div>
-            <input className="app-field app-search-focus" value={search} onChange={event => setSearch(event.target.value)} placeholder="ابحث عن صنف موجود..." aria-label="بحث عن منتج للعرض" />
+            <TopNavSearchPortal overlay><input type="search" className="app-search app-search-focus h-10 w-full rounded-full px-4" value={search} onChange={event => setSearch(event.target.value)} placeholder="ابحث عن صنف لإضافته للعرض" aria-label="بحث عن منتج للعرض" /></TopNavSearchPortal>
             <div className="custom-scrollbar max-h-40 overflow-y-auto rounded-xl border border-white/10 p-1">
               {searching ? <p className="app-muted p-3 text-sm">جاري البحث...</p> : results.length ? results.map(product =>
                 <button type="button" key={product.id} disabled={!product.is_active} onClick={() => addProduct(product)} className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-right text-sm hover:bg-white/5 disabled:opacity-50"><span className="min-w-0 truncate">{product.name_ar} <span className="app-muted text-xs" dir="ltr">{product.sku}</span></span><span className="shrink-0 font-bold text-primary">إضافة +</span></button>) : <p className="app-muted p-3 text-sm">لا توجد أصناف مطابقة.</p>}

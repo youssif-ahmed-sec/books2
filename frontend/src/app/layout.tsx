@@ -4,6 +4,7 @@ import WarehouseModeGate from "@/components/WarehouseModeGate";
 import NotificationCenter from "@/components/NotificationCenter";
 import { ConfirmationProvider } from "@/components/ConfirmationProvider";
 import AppChrome from "@/components/AppChrome";
+import { TopNavSearchProvider } from "@/lib/topNavSearchPortal";
 
 export const metadata: Metadata = {
   title: "مكتبة سعود الشافعي | إدارة المكتبة",
@@ -39,7 +40,7 @@ export default function RootLayout({
         />
       </head>
       <body className="overflow-x-hidden antialiased">
-        <ConfirmationProvider><WarehouseModeGate><AppChrome />{children}</WarehouseModeGate></ConfirmationProvider>
+        <ConfirmationProvider><WarehouseModeGate><TopNavSearchProvider><AppChrome />{children}</TopNavSearchProvider></WarehouseModeGate></ConfirmationProvider>
         <NotificationCenter />
       </body>
     </html>

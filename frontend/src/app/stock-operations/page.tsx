@@ -12,6 +12,7 @@ import { notifySuccess } from "@/lib/notifications";
 import { refreshNotificationBell } from "@/lib/notificationEvents";
 import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
 import { warehouseOnlyMode } from "@/lib/warehouseMode";
+import { TopNavSearchPortal } from "@/lib/topNavSearchPortal";
 
 type Warehouse = { id: string; name: string };
 type Product = { id: string; name_ar: string; sku: string; barcode: string | null; base_unit: string; cost: number | null; units: { barcode: string | null; conversion_factor: number }[] };
@@ -245,7 +246,7 @@ export default function StockOperationsPage() {
           <div><h2 className="text-lg font-bold">عدّ منتج</h2></div>
           {warehouses.length > 1 && <div><label className="mb-2 block text-sm" htmlFor="count-warehouse">المخزن</label><select id="count-warehouse" className="app-field" value={sourceId} disabled={draft.length > 0} onChange={event => setWarehouseId(event.target.value)}><option value="">اختر المخزن</option>{warehouses.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></div>}
           {!loading && warehouses.length === 0 && <p role="alert" className="stock-ops-warning text-sm">لا يوجد مخزن نشط للجرد.</p>}
-          <div><label className="mb-2 block text-sm" htmlFor="count-product-search">الباركود أو اسم المنتج</label><input ref={searchRef} id="count-product-search" className="app-field" value={search} onChange={event => { setSearch(event.target.value); if (!event.target.value.trim()) setProducts([]); }} onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); void scanSearch(); } }} placeholder="امسح الباركود أو اكتب الاسم" /></div>
+          <TopNavSearchPortal><input ref={searchRef} id="count-product-search" aria-label="بحث منتج الجرد" className="app-search app-search-focus h-10 w-full rounded-full px-4" value={search} onChange={event => { setSearch(event.target.value); if (!event.target.value.trim()) setProducts([]); }} onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); void scanSearch(); } }} placeholder="امسح باركود أو ابحث عن منتج للجرد" /></TopNavSearchPortal>
           <ProductSelect label="المنتج" value={selectedProduct?.id || ""} onChange={id => { const product = matchingProducts.find(row => row.id === id); if (product) chooseProduct(product); }} placeholder="اختر المنتج" options={matchingProducts.map(product => ({ value: product.id, label: `${product.name_ar} · ${product.sku}` }))} />
           {selectedProduct && <div className="app-divider flex flex-wrap items-center justify-between gap-3 border-y border-white/10 py-3 text-sm"><span className="app-muted">الرصيد المسجل</span><strong className="text-lg tabular-nums">{quantityText(current)} {selectedProduct.base_unit}</strong></div>}
           {inactiveStock > 0 && <p role="alert" className="stock-ops-warning text-sm">للمنتج رصيد في مخزن غير نشط. يلزم تصحيح المخزن قبل جرده.</p>}

@@ -7,9 +7,12 @@ import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot
 import { getUserRole } from "@/utils/auth";
 import { useConfirmAction } from "@/components/ConfirmationProvider";
 import { ZeroHintNumberInput } from "@/components/ZeroHintNumberInput";
+import { formatCurrency } from "@/lib/formatters";
 
 type Shift = { id: string; status: string; opening_cash: number | null; expected_cash: number | null; closing_cash: number | null; difference: number | null; opened_at: string; closed_at: string | null; email_report_status?: string };
 type Snapshot = { current: Shift | null; history: Shift[] };
+
+const CURRENCY_DENOMINATIONS = [200, 100, 50, 20, 10, 5, 1] as const;
 
 const money = (value: number) => Number(value).toFixed(2);
 const validMoney = (value: string) => {
@@ -30,7 +33,11 @@ export default function CashRegisterPage() {
   const [loading, setLoading] = useState(!snapshot);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [showDenomCalc, setShowDenomCalc] = useState(false);
+  const [denomCounts, setDenomCounts] = useState<Record<number, number>>({ 200: 0, 100: 0, 50: 0, 20: 0, 10: 0, 5: 0, 1: 0 });
   const pendingAdjustment = useRef<{ fingerprint: string; id: string } | null>(null);
+
+  const denomCalculatedTotal = CURRENCY_DENOMINATIONS.reduce((sum, denom) => sum + denom * (denomCounts[denom] || 0), 0);
 
   const reload = async () => {
     const [shift, shifts] = await Promise.all([
@@ -120,11 +127,75 @@ export default function CashRegisterPage() {
           </div>
           <button type="button" disabled={busy || !adjustmentValid} onClick={() => void act("adjustments", { amount: -Number(adjustment), reason: reason.trim() })} className="app-secondary-button">{busy ? "جارٍ التسجيل…" : "تسجيل السحب"}</button>
         </div>
-        <div className="space-y-3 border-t border-current/10 pt-5"><h3 className="font-bold">إغلاق الوردية</h3><p className="app-muted text-xs">{isAdmin ? "عدّ النقدية في الدرج أولًا. سيُحفظ الفرق بين المبلغ المعدود والمتوقع." : "عدّ النقدية في الدرج وأدخل المبلغ الفعلي قبل الإغلاق."}</p>
+        <div className="space-y-4 border-t border-current/10 pt-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="font-bold text-base">إغلاق الوردية</h3>
+              <p className="app-muted text-xs mt-0.5">{isAdmin ? "عدّ النقدية في الدرج أولًا. سيُحفظ الفرق بين المبلغ المعدود والمتوقع." : "عدّ النقدية في الدرج وأدخل المبلغ الفعلي قبل الإغلاق."}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowDenomCalc(!showDenomCalc)}
+              className="app-secondary-button !px-3 !py-1.5 text-xs flex items-center gap-1.5"
+            >
+              <span className="material-symbols-outlined text-base">calculate</span>
+              <span>{showDenomCalc ? "إخفاء حاسبة الفئات" : "حاسبة فئات النقدية"}</span>
+            </button>
+          </div>
+
+          {showDenomCalc && (
+            <div className="rounded-2xl border border-white/10 bg-surface-container-low p-4 space-y-3">
+              <div className="flex items-center justify-between border-b border-white/10 pb-2">
+                <span className="text-xs font-bold text-on-surface">جدول فئات النقدية بالدرج</span>
+                <span className="text-xs font-bold text-primary">المجموع: {formatCurrency(denomCalculatedTotal)}</span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                {CURRENCY_DENOMINATIONS.map(denom => (
+                  <div key={denom} className="rounded-xl border border-white/10 bg-surface p-2.5 text-center">
+                    <span className="text-xs font-bold block mb-1 text-on-surface-variant">{denom} جنيه</span>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min="0"
+                      step="1"
+                      placeholder="0"
+                      aria-label={`عدد ورقات ${denom} جنيه`}
+                      value={denomCounts[denom] || ""}
+                      onChange={e => {
+                        const count = Math.max(0, parseInt(e.target.value) || 0);
+                        setDenomCounts(prev => ({ ...prev, [denom]: count }));
+                      }}
+                      className="w-full text-center rounded-lg border border-current/10 bg-surface-container px-2 py-1 text-sm font-bold text-on-surface focus:ring-1 focus:ring-primary"
+                    />
+                    <span className="text-[11px] app-muted block mt-1">={formatCurrency(denom * (denomCounts[denom] || 0))}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-center justify-between pt-2">
+                <button
+                  type="button"
+                  onClick={() => setDenomCounts({ 200: 0, 100: 0, 50: 0, 20: 0, 10: 0, 5: 0, 1: 0 })}
+                  className="text-xs text-[#ffb4ab] hover:underline"
+                >
+                  تفريغ الحاسبة
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCounted(denomCalculatedTotal.toFixed(2));
+                  }}
+                  className="app-primary-button !px-3 !py-1.5 text-xs font-bold"
+                >
+                  تطبيق {formatCurrency(denomCalculatedTotal)} على النقدية المعدودة
+                </button>
+              </div>
+            </div>
+          )}
+
           <label className="block max-w-xs text-sm">النقدية المعدودة
-            <input aria-label="النقدية المعدودة" className="app-field mt-1" type="number" inputMode="decimal" min="0" step="0.01" value={counted} disabled={busy} onChange={event => setCounted(event.target.value)} placeholder="أدخل المبلغ بعد العدّ" />
+            <input aria-label="النقدية المعدودة" className="app-field mt-1 font-bold text-primary" type="number" inputMode="decimal" min="0" step="0.01" value={counted} disabled={busy} onChange={event => setCounted(event.target.value)} placeholder="أدخل المبلغ بعد العدّ" />
           </label>
-          {difference !== null && <p className="text-sm">الفرق المتوقع عند الإغلاق: <strong className={difference === 0 ? "text-green-600" : "text-amber-600"}>{money(difference)} ج.م</strong></p>}
+          {difference !== null && <p className="text-sm">الفرق المتوقع عند الإغلاق: <strong className={difference === 0 ? "text-green-500" : "text-amber-500"}>{formatCurrency(difference)}</strong></p>}
           <button type="button" disabled={busy || !countedValid} onClick={closeShift} className="app-primary-button disabled:opacity-50">{busy ? "جارٍ الإغلاق..." : "مراجعة وإغلاق الوردية"}</button>
         </div>
       </section>}

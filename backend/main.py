@@ -1,5 +1,9 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+from database import get_db
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import Response, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 import asyncio
@@ -8,6 +12,7 @@ from pathlib import Path
 from core.reference_cache import open_reference_cache, close_reference_cache
 from core.dashboard_events import dashboard_event_hub
 from services.notification_retention import run_notification_retention
+from services.audit_retention import run_audit_retention
 from services.customer_due_alerts import run_customer_due_alerts
 
 from api.v1.products import router as products_router
@@ -37,18 +42,23 @@ from api.v1.purchase_documents import router as purchase_documents_router
 from core.feature_flags import warehouse_only_mode
 from contextlib import asynccontextmanager, suppress
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await open_reference_cache(os.getenv("REDIS_URL"))
     retention_task = asyncio.create_task(run_notification_retention())
+    audit_retention_task = asyncio.create_task(run_audit_retention())
     due_alert_task = asyncio.create_task(run_customer_due_alerts())
     try:
         yield
     finally:
         retention_task.cancel()
+        audit_retention_task.cancel()
         due_alert_task.cancel()
         with suppress(asyncio.CancelledError):
             await retention_task
+        with suppress(asyncio.CancelledError):
+            await audit_retention_task
         with suppress(asyncio.CancelledError):
             await due_alert_task
         await dashboard_event_hub.close()
@@ -105,6 +115,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # ── Routers ───────────────────────────────────────────────────────────────────
 app.include_router(auth_router,      prefix="/api/v1")
@@ -140,8 +151,13 @@ else:
 
 
 @app.get("/health", tags=["Health"])
-async def root():
-    return {"message": "Welcome to Souod El Shafie Bookstore API", "docs": "/docs"}
+async def root(response: Response, db: AsyncSession = Depends(get_db)):
+    try:
+        await db.execute(text("SELECT 1"))
+        return {"message": "Welcome to Souod El Shafie Bookstore API", "status": "ok", "database": "connected", "docs": "/docs"}
+    except Exception:
+        response.status_code = 503
+        return {"message": "Welcome to Souod El Shafie Bookstore API", "status": "degraded", "database": "unreachable", "docs": "/docs"}
 
 # ── SPA / Static Files Serving ───────────────────────────────────────────────
 def select_static_dir(*candidates: Path) -> Path | None:

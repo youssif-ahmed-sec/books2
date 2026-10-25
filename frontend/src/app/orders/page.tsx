@@ -12,22 +12,21 @@ import { useSectionSearchSelection } from "@/lib/useSectionSearchSelection";
 import { toast } from "react-toastify";
 
 type Invoice = { id: string; public_number: number; customer_name: string; status: string; total_amount: number; payment_method: string; payment_status: "paid" | "due" | "untracked"; created_at: string };
-type InvoiceFilters = { search: string; dateFrom: string; dateTo: string; paymentStatus: string };
+type InvoiceFilters = { dateFrom: string; dateTo: string; paymentStatus: string };
 
 const PAGE_SIZE = 50;
-const emptyFilters: InvoiceFilters = { search: "", dateFrom: "", dateTo: "", paymentStatus: "" };
+const emptyFilters: InvoiceFilters = { dateFrom: "", dateTo: "", paymentStatus: "" };
 const paymentStatusLabels = { paid: "مدفوعة", due: "عليها باقي", untracked: "رصيد قديم غير محدد" };
 const money = (value: number) => `${Number(value).toLocaleString("ar-EG", { maximumFractionDigits: 2 })} ج.م`;
 const date = (value: string) => new Date(value).toLocaleString("ar-EG", { dateStyle: "medium", timeStyle: "short" });
 const invoiceUrl = (filters: InvoiceFilters, offset: number) => {
   const query = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) });
-  if (filters.search.trim()) query.set("search", filters.search.trim());
   if (filters.dateFrom) query.set("date_from", filters.dateFrom);
   if (filters.dateTo) query.set("date_to", filters.dateTo);
   if (filters.paymentStatus) query.set("payment_status", filters.paymentStatus);
   return `/orders/invoices?${query}`;
 };
-const noFilters = (filters: InvoiceFilters) => !filters.search && !filters.dateFrom && !filters.dateTo && !filters.paymentStatus;
+const noFilters = (filters: InvoiceFilters) => !filters.dateFrom && !filters.dateTo && !filters.paymentStatus;
 
 export default function OrdersPage() {
   const [invoices, setInvoices] = useState<Invoice[]>(() => readSectionSnapshot<Invoice[]>("orders-list") || []);
@@ -99,18 +98,15 @@ export default function OrdersPage() {
   return <div className="min-h-screen">
 
 
-    <main className="mx-4 mb-8 mt-28 flex min-w-0 flex-1 flex-col gap-4 lg:ml-8 lg:mr-[364px] lg:mt-36">
+    <main className="app-side-page mx-4 mb-8 mt-28 flex min-w-0 flex-1 flex-col gap-4 lg:ml-8 lg:mt-36">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="app-heading">الفواتير</h1>
       </header>
-      <form className="app-panel flex flex-wrap items-end gap-3 p-4" onSubmit={event => { event.preventDefault(); applyFilters(); }} aria-label="البحث في الفواتير">
-        <label className="min-w-44 flex-[2_1_14rem] text-sm">رقم الفاتورة أو العميل
-          <input className="app-field mt-1" type="search" maxLength={80} value={draftFilters.search} onChange={event => setDraftFilters(current => ({ ...current, search: event.target.value }))} placeholder="ابحث بالرقم أو الاسم أو الهاتف" />
-        </label>
+      <form className="app-panel flex flex-wrap items-end gap-3 p-4" onSubmit={event => { event.preventDefault(); applyFilters(); }} aria-label="تصفية الفواتير">
         <div className="min-w-36 flex-1 text-sm"><span className="mb-1 block">من تاريخ</span><DatePicker label="من تاريخ" value={draftFilters.dateFrom} onChange={value => setDraftFilters(current => ({ ...current, dateFrom: value }))} max={draftFilters.dateTo || undefined} allowClear /></div>
         <div className="min-w-36 flex-1 text-sm"><span className="mb-1 block">إلى تاريخ</span><DatePicker label="إلى تاريخ" value={draftFilters.dateTo} onChange={value => setDraftFilters(current => ({ ...current, dateTo: value }))} min={draftFilters.dateFrom || undefined} allowClear /></div>
         <div className="min-w-40 flex-1 text-sm"><span className="mb-1 block">حالة السداد</span><ProductSelect label="حالة سداد الفاتورة" value={draftFilters.paymentStatus} onChange={value => setDraftFilters(current => ({ ...current, paymentStatus: value }))} placeholder="كل الحالات" compact options={[{ value: "paid", label: "مدفوعة" }, { value: "due", label: "عليها باقي" }, { value: "untracked", label: "رصيد قديم غير محدد" }]} /></div>
-        <button type="submit" className="app-primary-button">بحث</button>
+        <button type="submit" className="app-primary-button">تطبيق الفلاتر</button>
         {!noFilters(activeFilters) && <button type="button" className="app-secondary-button" onClick={clearFilters}>مسح</button>}
       </form>
       {error && <div role="alert" className="rounded-xl border border-red-500/30 p-3 text-sm text-red-500">{error}</div>}

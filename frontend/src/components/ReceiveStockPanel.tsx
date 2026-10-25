@@ -6,6 +6,7 @@ import { sendLocalPrint } from "@/lib/localPrint";
 import { ProductSelect } from "@/components/ProductSelect";
 import { ZeroHintNumberInput } from "@/components/ZeroHintNumberInput";
 import { emptyBarcodeScanCapture, englishBarcodeFromScan, recordBarcodeScanKey } from "@/lib/barcodeScanner";
+import { TopNavSearchPortal } from "@/lib/topNavSearchPortal";
 
 type Choice = { id: string; name?: string };
 type Product = { id: string; name_ar: string; sku: string; barcode?: string; base_unit: string; is_bundle?: boolean; units?: Array<{ barcode?: string }> };
@@ -181,16 +182,16 @@ export default function ReceiveStockPanel({ onClose, onSaved }: { onClose: () =>
               warehousesLoaded && <p role="alert" className="text-red-400">لا يوجد مخزن نشط.</p>}
           </div>
           {newSupplierOpen && <div className="grid gap-2 rounded-xl border border-white/10 p-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end"><label className="text-sm">اسم المورد<input className="app-field mt-1" value={newSupplierName} onChange={event => setNewSupplierName(event.target.value)} /></label><label className="text-sm">الهاتف · اختياري<input className="app-field mt-1" value={newSupplierPhone} onChange={event => setNewSupplierPhone(event.target.value)} /></label><button type="button" className="app-secondary-button" disabled={creatingSupplier} onClick={createSupplier}>{creatingSupplier ? "جارٍ الحفظ..." : "إضافة واختيار"}</button></div>}
-          <form onSubmit={findProduct} className="space-y-2"><label htmlFor="receiving-search" className="text-sm font-semibold">اسكن باركود الصنف أو اكتب اسمه ثم اضغط Enter</label>
-            <div className="flex gap-2"><input id="receiving-search" ref={searchInput} autoFocus value={search} onChange={event => { setSearch(event.target.value); setMatches([]); }} onKeyDown={event => {
+          <TopNavSearchPortal overlay><form onSubmit={findProduct} className="flex w-full min-w-0 gap-2">
+            <div className="flex w-full min-w-0 gap-2"><input id="receiving-search" ref={searchInput} autoFocus value={search} onChange={event => { setSearch(event.target.value); setMatches([]); }} onKeyDown={event => {
               if (event.key !== "Enter") {
                 if (!event.nativeEvent.isComposing) recordBarcodeScanKey(scanKeys.current, event);
                 return;
               }
               const code = englishBarcodeFromScan(scanKeys.current, event.currentTarget.value.trim());
               if (code) { scannedSearch.current = code; setSearch(code); }
-            }} placeholder="باركود أو اسم الصنف" className="app-field app-search-focus min-w-0 flex-1" />
-              <button type="submit" className="app-secondary-button">إضافة</button></div></form>
+            }} placeholder="باركود أو اسم الصنف للاستلام" aria-label="بحث صنف الاستلام" className="app-search app-search-focus min-w-0 flex-1 rounded-full px-4" />
+              <button type="submit" className="app-secondary-button !px-3">إضافة</button></div></form></TopNavSearchPortal>
           {matches.length > 0 && <div className="max-h-44 overflow-y-auto rounded-xl border border-white/10" role="listbox" aria-label="الأصناف المطابقة">{matches.map(product =>
             <button type="button" role="option" aria-selected="false" key={product.id} onClick={() => addProduct(product)} className="block w-full border-b border-white/10 px-3 py-2 text-right hover:bg-white/10">{product.name_ar} <span className="app-muted text-xs">{product.sku}</span></button>)}</div>}
           <div className="overflow-x-auto rounded-xl border border-white/10"><table className="w-full text-sm text-right"><thead className="bg-white/5"><tr><th className="p-3">الصنف</th><th className="p-3">الكمية بالوحدة الأساسية</th><th className="p-3">سعر شراء القطعة</th><th className="p-3">حذف</th></tr></thead><tbody>
