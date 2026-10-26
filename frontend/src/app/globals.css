@@ -316,6 +316,44 @@ html[data-theme="light"] select option { background: #fffdfa; color: #24211f; }
 .pos-product-card { background: var(--color-surface-container-low); border: 1px solid rgba(255,255,255,.1); border-radius: 1rem; transition: border-color .15s ease, background .15s ease; }
 .pos-product-card:hover { background: var(--color-surface-container); border-color: rgba(255,255,255,.2); }
 .pos-product-card-footer { border-top: 1px solid rgba(255,255,255,.1); }
+
+/* POS stock and bundle badges with high contrast in both themes */
+.pos-stock-badge--available {
+  background: rgba(16, 185, 129, 0.12);
+  color: #6ee7b7;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+.pos-stock-badge--empty {
+  background: rgba(244, 63, 94, 0.12);
+  color: #fda4af;
+  border: 1px solid rgba(244, 63, 94, 0.25);
+}
+.pos-bundle-badge {
+  background: rgba(255, 107, 0, 0.15);
+  color: #ff8a3d;
+  border: 1px solid rgba(255, 107, 0, 0.25);
+}
+.pos-filter-pill {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #c3a99e;
+  background: transparent;
+  transition: all 0.15s ease;
+}
+.pos-filter-pill:hover {
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.05);
+}
+.pos-filter-pill--active {
+  border-color: #ff6b00;
+  background: rgba(255, 107, 0, 0.15);
+  color: #ff8a3d;
+}
+.pos-cart-item {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
 .pos-quick-customer { background: rgba(255,255,255,.035); border: 1px solid rgba(255,255,255,.1); }
 .customer-drawer { background: var(--color-surface-container-low); color: var(--color-on-surface); border-inline-start: 1px solid rgba(255,255,255,.1); }
 .customer-drawer-footer { background: var(--color-surface-container-low); }
@@ -323,6 +361,45 @@ html[data-theme="light"] select option { background: #fffdfa; color: #24211f; }
 html[data-theme="light"] .pos-product-card { background: #fffdfa; border-color: #e5ddd5; }
 html[data-theme="light"] .pos-product-card:hover { background: #fff; border-color: #d5c5b9; }
 html[data-theme="light"] .pos-product-card-footer { border-color: #e9e1db; }
+html[data-theme="light"] .pos-product-card .text-primary { color: #c2410c; }
+html[data-theme="light"] .pos-stock-badge--available {
+  background: #ecfdf5;
+  color: #065f46;
+  border-color: #a7f3d0;
+  font-weight: 700;
+}
+html[data-theme="light"] .pos-stock-badge--empty {
+  background: #fff1f2;
+  color: #9f1239;
+  border-color: #fecdd3;
+  font-weight: 700;
+}
+html[data-theme="light"] .pos-bundle-badge {
+  background: #fff7ed;
+  color: #c2410c;
+  border-color: #fed7aa;
+}
+html[data-theme="light"] .pos-filter-pill {
+  border-color: #dcd2c9;
+  color: #5d4e46;
+  background: #fdfbf9;
+}
+html[data-theme="light"] .pos-filter-pill:hover {
+  color: #24211f;
+  background: #f3ece6;
+  border-color: #bfaea2;
+}
+html[data-theme="light"] .pos-filter-pill--active {
+  border-color: #c2410c;
+  background: #fff7ed;
+  color: #c2410c;
+  font-weight: 700;
+}
+html[data-theme="light"] .pos-cart-item {
+  background: #fff;
+  border-color: #e5ddd5;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
 html[data-theme="light"] .pos-quick-customer { background: #f8f5f2; border-color: #e5ddd5; }
 html[data-theme="light"] .customer-drawer,
 html[data-theme="light"] .customer-drawer-footer { background: #fffdfa; color: #24211f; border-color: #e5ddd5; }

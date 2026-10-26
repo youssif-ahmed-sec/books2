@@ -1390,7 +1390,7 @@ export default function POSPage() {
               ) : (
                 <div className="flex flex-col gap-2">
                   {cart.map(item => (
-                    <div key={item.id} className="bg-white/5 p-4 rounded-xl border border-white/5 flex flex-col gap-3 shadow-sm">
+                    <div key={item.id} className="pos-cart-item p-4 rounded-xl flex flex-col gap-3 shadow-sm">
                       {/* Top Row: Name, Unit Switcher, and Delete */}
                       <div className="flex justify-between items-start gap-2">
                         <div className="min-w-0 flex-1 pl-2">
@@ -1515,7 +1515,7 @@ export default function POSPage() {
             <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label="نوع الأصناف">
               {([{ value: "all", label: "الكل" }, { value: "products", label: "المنتجات" }, { value: "offers", label: "العروض المتاحة" }] as const).map(option =>
                 <button key={option.value} type="button" onClick={() => setProductKind(option.value)} aria-pressed={productKind === option.value}
-                  className={`rounded-xl border px-3 py-2 text-xs font-bold transition-colors ${productKind === option.value ? "border-primary bg-primary/15 text-primary" : "border-white/10 text-[#e2bfb0]/75 hover:text-white"}`}>
+                  className={`rounded-xl px-3 py-2 text-xs font-bold transition-all ${productKind === option.value ? "pos-filter-pill--active" : "pos-filter-pill"}`}>
                   {option.label}
                 </button>)}
             </div>
@@ -1555,53 +1555,61 @@ export default function POSPage() {
                     Number(candidate.price) > 0 && (userRole === "ADMIN" || candidate.price_level === level)));
 
                   return (
-                  <article key={product.id} className="pos-product-card min-w-0 p-4 flex flex-col justify-between">
-                    <div>
-                      <div className="flex min-w-0 items-start justify-between gap-3">
+                  <article key={product.id} className="pos-product-card min-w-0 p-3.5 flex flex-col justify-between transition-all duration-150 hover:shadow-md hover:border-primary/30">
+                    <div className="space-y-2">
+                      <div className="flex min-w-0 items-start justify-between gap-2.5">
                         <div className="min-w-0 flex-1">
-                          <h4 className="truncate text-[15px] font-semibold leading-6 text-on-surface" title={product.name_ar}>{product.name_ar}</h4>
-                          {product.is_bundle && <span className="text-xs font-bold text-primary block mt-0.5">عرض · سعر ثابت</span>}
-                          {product.sku && <span className="text-[11px] font-mono text-on-surface-variant block mt-0.5">{product.sku}</span>}
+                          <h4 className="line-clamp-2 text-[14px] font-semibold leading-5 text-on-surface" title={product.name_ar}>
+                            {product.name_ar}
+                          </h4>
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                            {product.is_bundle && (
+                              <span className="pos-bundle-badge inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded">
+                                عرض
+                              </span>
+                            )}
+                            {product.sku && (
+                              <span className="text-[11px] font-mono text-on-surface-variant">
+                                {product.sku}
+                              </span>
+                            )}
+                          </div>
                         </div>
-                        <span className={`shrink-0 pt-0.5 text-xs font-medium ${product.current_stock > 0 ? "app-muted" : "text-[#ffb4ab]"}`}>
-                          {product.current_stock > 0 ? `${product.current_stock} ${product.base_unit} متاح` : "نفد المخزون"}
+                        <span className={`shrink-0 text-[11px] font-semibold px-2 py-0.5 rounded-md ${
+                          product.current_stock > 0
+                            ? "pos-stock-badge--available"
+                            : "pos-stock-badge--empty"
+                        }`}>
+                          {product.current_stock > 0 ? `${product.current_stock} ${product.base_unit}` : "نفد المخزون"}
                         </span>
                       </div>
 
-                      {/* Pricing breakdown */}
-                      <div className="mt-3 flex flex-wrap gap-1.5 items-center">
-                        {retailPrice != null && Number(retailPrice) > 0 && (
-                          <span className="text-xs px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-on-surface font-medium">
-                            قطاعي: <strong className="text-primary font-bold">{formatCurrency(Number(retailPrice))}</strong>
-                          </span>
-                        )}
-                        {wholesalePrice != null && Number(wholesalePrice) > 0 && (
-                          <span className="text-xs px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-on-surface font-medium">
-                            جملة: <strong className="font-bold text-on-surface">{formatCurrency(Number(wholesalePrice))}</strong>
-                          </span>
-                        )}
-                        {otherUnits.map(unit => {
-                          const unitRetail = unit.prices.find(p => p.price_level === "Retail")?.price || unit.prices[0]?.price;
-                          return (
-                            <span key={unit.id} className="text-xs px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-on-surface font-medium">
-                              {unit.unit_name}: <strong className="font-bold text-on-surface">{unitRetail ? formatCurrency(Number(unitRetail)) : "—"}</strong>
-                            </span>
-                          );
-                        })}
-                      </div>
+                      {otherUnits.length > 0 && (
+                        <div className="text-[11px] text-on-surface-variant flex items-center gap-1 pt-0.5">
+                          <span className="material-symbols-outlined text-xs">layers</span>
+                          <span>متوفر بـ {product.units.length} وحدات قياس</span>
+                        </div>
+                      )}
                     </div>
 
-                    <div className="pos-product-card-footer mt-4 flex flex-wrap items-end justify-between gap-3 pt-3 border-t border-white/5">
+                    <div className="pos-product-card-footer mt-3 flex items-center justify-between gap-3 pt-2.5">
                       <div className="min-w-0">
-                        <span className="app-muted block text-[11px]">السعر المعتمد · {level === "Retail" ? "مستهلك" : level}</span>
-                        <strong className="mt-0.5 block text-lg font-bold leading-6 tabular-nums text-primary">
+                        <span className="app-muted block text-[10px]">
+                          {level === "Retail" ? "قطاعي" : level === "Wholesale" ? "جملة" : level}
+                        </span>
+                        <strong className="block text-base font-bold tabular-nums text-primary leading-tight">
                           {primaryPrice ? formatCurrency(Number(primaryPrice.price)) : "بلا سعر"}
                         </strong>
                       </div>
-                      <button type="button" onClick={() => openProductSelection(product)} disabled={isProcessing || savingCustomer || product.current_stock <= 0 || !hasAvailablePrice}
+                      <button
+                        type="button"
+                        onClick={() => openProductSelection(product)}
+                        disabled={isProcessing || savingCustomer || product.current_stock <= 0 || !hasAvailablePrice}
                         aria-label={`إضافة ${product.name_ar} إلى السلة`}
-                        className="app-primary-button !rounded-xl !px-3.5 !py-2 text-sm font-bold shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
-                        إضافة للسلة
+                        className="app-primary-button !rounded-lg !px-3 !py-1.5 text-xs font-bold shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary flex items-center gap-1"
+                      >
+                        <span className="material-symbols-outlined text-sm">add</span>
+                        <span>إضافة</span>
                       </button>
                     </div>
                   </article>
