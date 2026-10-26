@@ -39,6 +39,12 @@ const salesTabs = [
   { href: "/returns", icon: "assignment_return", label: "المرتجعات", roles: ["ADMIN", "CASHIER_ORDERS"] },
 ];
 
+const inventoryTabs = [
+  { href: "/inventory", icon: "inventory_2", label: "المنتجات", roles: ["ADMIN", "INVENTORY_CONTROLLER"] },
+  { href: "/stock-operations", icon: "swap_horiz", label: "النقل والجرد", roles: ["ADMIN", "INVENTORY_CONTROLLER"] },
+  { href: "/categories", icon: "category", label: "التصنيفات والعلامات", roles: ["ADMIN", "INVENTORY_CONTROLLER"] },
+];
+
 function revealResult(id: string) {
   let attempts = 0;
   const timer = window.setInterval(() => {
@@ -78,6 +84,11 @@ export default function TopNav({ title }: TopNavProps) {
     path => pathname === path || pathname.startsWith(`${path}/`)
   );
   const visibleSalesTabs = salesTabs.filter(tab => !user || tab.roles.includes(user.role));
+
+  const isInventoryRoute = ["/inventory", "/stock-operations", "/categories"].some(
+    path => pathname === path || pathname.startsWith(`${path}/`)
+  );
+  const visibleInventoryTabs = inventoryTabs.filter(tab => !user || tab.roles.includes(user.role));
 
   useEffect(() => {
     getCurrentUser().then((currentUser: CurrentUser) => {
@@ -141,7 +152,7 @@ export default function TopNav({ title }: TopNavProps) {
       {/* Right side: Title & Section Search */}
       <div className="app-top-title shrink-0">
         <h2 className="text-lg font-bold text-primary">
-          {user?.role === "ADMIN" && isApprovalsRoute ? "الموافقات والرقابة" : user?.role === "ADMIN" && isManagementRoute ? "الإدارة والتقارير" : user?.role === "ADMIN" && isSalesRoute ? "المبيعات والصندوق" : title}
+          {user?.role === "ADMIN" && isApprovalsRoute ? "الموافقات والرقابة" : user?.role === "ADMIN" && isManagementRoute ? "الإدارة والتقارير" : user?.role === "ADMIN" && isSalesRoute ? "المبيعات والصندوق" : user?.role === "ADMIN" && isInventoryRoute ? "المخزون" : title}
         </h2>
       </div>
 
@@ -284,7 +295,42 @@ export default function TopNav({ title }: TopNavProps) {
           </nav>
         )}
 
-        {(isApprovalsRoute || isManagementRoute || isSalesRoute) && <div className="h-5 w-px bg-white/10 mx-1 hidden md:block" aria-hidden="true" />}
+        {/* Inventory Tabs */}
+        {user?.role === "ADMIN" && isInventoryRoute && visibleInventoryTabs.length > 0 && (
+          <nav className="hidden md:flex items-center gap-1 sm:gap-2 shrink-0" aria-label="أقسام المخزون">
+            {visibleInventoryTabs.map(tab => {
+              const isActive = pathname === tab.href || pathname.startsWith(`${tab.href}/`);
+              return (
+                <Link
+                  key={tab.href}
+                  href={tab.href}
+                  aria-current={isActive ? "page" : undefined}
+                  className={`app-header-tab group relative flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-semibold transition-all duration-150 whitespace-nowrap ${
+                    isActive ? "font-bold text-primary" : ""
+                  }`}
+                >
+                  <span
+                    className="material-symbols-outlined text-lg transition-transform duration-150 group-hover:scale-110"
+                    aria-hidden="true"
+                    style={isActive ? { fontVariationSettings: "'FILL' 1" } : undefined}
+                  >
+                    {tab.icon}
+                  </span>
+                  <span>{tab.label}</span>
+
+                  {isActive && (
+                    <span
+                      className="absolute -bottom-2 inset-x-2 h-[2.5px] bg-primary rounded-full shadow-[0_0_8px_rgba(255,107,0,0.5)]"
+                      aria-hidden="true"
+                    />
+                  )}
+                </Link>
+              );
+            })}
+          </nav>
+        )}
+
+        {(isApprovalsRoute || isManagementRoute || isSalesRoute || isInventoryRoute) && <div className="h-5 w-px bg-white/10 mx-1 hidden md:block" aria-hidden="true" />}
 
         <NotificationBell />
         <div className="relative" ref={accountRef}>

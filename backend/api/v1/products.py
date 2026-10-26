@@ -48,7 +48,7 @@ def product_search_filter(search: str):
 async def get_categories(db: AsyncSession = Depends(get_db)):
     """Get all active categories."""
     async def load():
-        result = await db.execute(select(Category).where(Category.is_deleted == False))
+        result = await db.execute(select(Category).where(Category.is_deleted == False).order_by(Category.name_ar.asc()))
         return [CategoryResponse.model_validate(row).model_dump(mode="json") for row in result.scalars().all()]
     return await cached_reference("categories", load)
 
@@ -105,7 +105,7 @@ async def delete_category(
 async def get_subcategories(db: AsyncSession = Depends(get_db)):
     """Get all active subcategories."""
     async def load():
-        result = await db.execute(select(Subcategory).where(Subcategory.is_deleted == False))
+        result = await db.execute(select(Subcategory).where(Subcategory.is_deleted == False).order_by(Subcategory.name_ar.asc()))
         return [SubcategoryResponse.model_validate(row).model_dump(mode="json") for row in result.scalars().all()]
     return await cached_reference("subcategories", load)
 
@@ -162,7 +162,7 @@ async def delete_subcategory(
 async def get_brands(db: AsyncSession = Depends(get_db)):
     """Get all active brands."""
     async def load():
-        result = await db.execute(select(Brand).where(Brand.is_deleted == False))
+        result = await db.execute(select(Brand).where(Brand.is_deleted == False).order_by(Brand.name_ar.asc()))
         return [BrandResponse.model_validate(row).model_dump(mode="json") for row in result.scalars().all()]
     return await cached_reference("brands", load)
 
@@ -218,7 +218,7 @@ async def delete_brand(
 @router.get("/suppliers", response_model=List[SupplierResponse])
 async def get_suppliers(db: AsyncSession = Depends(get_db), current_user: User = Depends(require_inventory_access)):
     """Get all active suppliers (for dropdown use)."""
-    query = select(Supplier).where(Supplier.is_deleted == False)
+    query = select(Supplier).where(Supplier.is_deleted == False).order_by(Supplier.name.asc())
     result = await db.execute(query)
     from core.supplier_access import visible_supplier
     return [visible_supplier(supplier, current_user.role) for supplier in result.scalars().all()]

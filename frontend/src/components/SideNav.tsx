@@ -11,8 +11,6 @@ import { warehouseOnlyMode } from "@/lib/warehouseMode";
 // Desktop Inventory sections (placed below approvals as standalone direct buttons)
 const inventoryNavItems = [
   { href: "/inventory", icon: "inventory_2", label: "المخزون", filled: true, roles: ["ADMIN", "INVENTORY_CONTROLLER"] },
-  { href: "/stock-operations", icon: "swap_horiz", label: "النقل والجرد", roles: ["ADMIN", "INVENTORY_CONTROLLER"] },
-  { href: "/categories", icon: "category", label: "التصنيفات والعلامات", roles: ["ADMIN", "INVENTORY_CONTROLLER"] },
   { href: "/offers", icon: "sell", label: "العروض", roles: ["ADMIN", "INVENTORY_CONTROLLER"] },
   { href: "/purchases", icon: "receipt_long", label: "المشتريات", roles: ["ADMIN", "INVENTORY_CONTROLLER"] },
   { href: "/suppliers", icon: "local_shipping", label: "الموردين", roles: ["ADMIN"] },
@@ -94,6 +92,7 @@ export default function SideNav() {
     const isApprovals = item.href === "/product-approvals";
     const isManagement = item.href === "/dashboard";
     const isSales = item.href === "/pos";
+    const isInventory = item.href === "/inventory";
 
     const isActive = isSubItem
       ? (pathname === item.href || pathname.startsWith(`${item.href}/`))
@@ -103,6 +102,8 @@ export default function SideNav() {
       ? ["/dashboard", "/financials", "/reports", "/management"].some(h => pathname === h || pathname.startsWith(`${h}/`))
       : isSales
       ? ["/pos", "/cash-register", "/orders", "/returns", "/sales"].some(h => pathname === h || pathname.startsWith(`${h}/`))
+      : isInventory
+      ? ["/inventory", "/stock-operations", "/categories"].some(h => pathname === h || pathname.startsWith(`${h}/`))
       : (pathname === item.href || pathname.startsWith(`${item.href}/`));
 
     return (

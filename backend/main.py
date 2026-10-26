@@ -103,11 +103,19 @@ async def add_security_headers(request: Request, call_next):
     return response
 
 # ── CORS ─────────────────────────────────────────────────────────────────────
-allowed_origins = [
+DEFAULT_ALLOWED_ORIGINS = [
+    "https://elshafie-library.fastapicloud.dev",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+]
+env_origins = [
     origin.strip().rstrip("/")
     for origin in os.getenv("BACKEND_ALLOWED_ORIGINS", "").split(",")
     if origin.strip()
 ]
+allowed_origins = list(dict.fromkeys(DEFAULT_ALLOWED_ORIGINS + env_origins))
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
