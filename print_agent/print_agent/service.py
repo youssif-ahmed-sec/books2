@@ -139,6 +139,7 @@ async def custom_cors_middleware(request: Request, call_next):
         "http://localhost:3000",
         "http://127.0.0.1:8000",
         "http://localhost:8000",
+        "https://elshafie-library.fastapicloud.dev",
     }
     allowed_origins.update(
         value.strip().rstrip("/")

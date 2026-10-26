@@ -90,3 +90,7 @@ TypeError: CORSMiddleware.__init__() got an unexpected keyword argument 'allow_p
 2026-10-21 23:59:35,146 INFO uvicorn.error: Waiting for application startup.
 2026-10-21 23:59:35,149 INFO uvicorn.error: Application startup complete.
 2026-10-21 23:59:35,152 INFO uvicorn.error: Uvicorn running on http://127.0.0.1:8199 (Press CTRL+C to quit)
+2026-10-26 14:24:50,357 INFO uvicorn.error: Started server process [40392]
+2026-10-26 14:24:50,358 INFO uvicorn.error: Waiting for application startup.
+2026-10-26 14:24:50,358 INFO uvicorn.error: Application startup complete.
+2026-10-26 14:24:50,358 INFO uvicorn.error: Uvicorn running on http://127.0.0.1:8199 (Press CTRL+C to quit)

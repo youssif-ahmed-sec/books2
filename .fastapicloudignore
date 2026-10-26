@@ -1,13 +1,2 @@
-# Windows printing helper and its release builds run on the cashier's machine.
-print_agent/
-
-# Local runtime artifacts and frontend sources are not needed by the API image.
-# The complete static frontend export is packaged in backend/static/.
-.local-run/
-frontend/
-
-# Project notes and local-only checks are not application runtime files.
-docs/
-.agents/
-backend/tests/
-backend/unit_tests/
+!backend/static
+!backend/static/**

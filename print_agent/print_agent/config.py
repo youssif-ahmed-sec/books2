@@ -21,7 +21,9 @@ DEFAULTS = {
     "local_port": 8199,
     "receipt_printer_names": [],
     "barcode_printer_names": [],
-    "allowed_origins": [],
+    "allowed_origins": [
+        "https://elshafie-library.fastapicloud.dev"
+    ],
     "printer_width_mm": 80,
 }
 

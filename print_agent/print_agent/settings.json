@@ -5,6 +5,9 @@
   ],
   "barcode_printer_names": [],
   "printer_width_mm": 80,
+  "allowed_origins": [
+    "https://elshafie-library.fastapicloud.dev"
+  ],
   "printer_names": [
     "OneNote (Desktop)"
   ],
