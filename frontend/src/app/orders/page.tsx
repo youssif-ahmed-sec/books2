@@ -12,21 +12,54 @@ import { useSectionSearchSelection } from "@/lib/useSectionSearchSelection";
 import { toast } from "react-toastify";
 
 type Invoice = { id: string; public_number: number; customer_name: string; status: string; total_amount: number; payment_method: string; payment_status: "paid" | "due" | "untracked"; created_at: string };
-type InvoiceFilters = { dateFrom: string; dateTo: string; paymentStatus: string };
+type InvoiceFilters = { dateFrom: string; dateTo: string; status: string; paymentMethod: string; paymentStatus: string };
 
 const PAGE_SIZE = 50;
-const emptyFilters: InvoiceFilters = { dateFrom: "", dateTo: "", paymentStatus: "" };
+const emptyFilters: InvoiceFilters = { dateFrom: "", dateTo: "", status: "", paymentMethod: "", paymentStatus: "" };
 const paymentStatusLabels = { paid: "مدفوعة", due: "عليها باقي", untracked: "رصيد قديم غير محدد" };
+const paymentMethodLabels: Record<string, string> = {
+  Cash: "نقداً",
+  "Credit Card": "بطاقة دفع",
+  Instapay: "انستاباي",
+  Wallet: "محفظة",
+  "Vodafone Cash": "محفظة",
+  "Deferred Payment": "دفع آجل",
+};
+const statusOptions = [
+  { value: "Delivered", label: "مكتمل" },
+  { value: "Exchange", label: "استبدال" },
+  { value: "Returned", label: "مسترجع" },
+];
+const paymentMethodOptions = [
+  { value: "Cash", label: "نقداً" },
+  { value: "Credit Card", label: "بطاقة دفع" },
+  { value: "Instapay", label: "انستاباي" },
+  { value: "Wallet", label: "محفظة" },
+  { value: "Deferred Payment", label: "دفع آجل" },
+];
+const paymentStatusOptions = [
+  { value: "paid", label: "مدفوعة" },
+  { value: "due", label: "عليها باقي" },
+  { value: "untracked", label: "رصيد قديم غير محدد" },
+];
+
 const money = (value: number) => `${Number(value).toLocaleString("ar-EG", { maximumFractionDigits: 2 })} ج.م`;
 const date = (value: string) => new Date(value).toLocaleString("ar-EG", { dateStyle: "medium", timeStyle: "short" });
 const invoiceUrl = (filters: InvoiceFilters, offset: number) => {
   const query = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) });
   if (filters.dateFrom) query.set("date_from", filters.dateFrom);
   if (filters.dateTo) query.set("date_to", filters.dateTo);
+  if (filters.status) query.set("status", filters.status);
+  if (filters.paymentMethod) query.set("payment_method", filters.paymentMethod);
   if (filters.paymentStatus) query.set("payment_status", filters.paymentStatus);
   return `/orders/invoices?${query}`;
 };
-const noFilters = (filters: InvoiceFilters) => !filters.dateFrom && !filters.dateTo && !filters.paymentStatus;
+const noFilters = (filters: InvoiceFilters) =>
+  !filters.dateFrom &&
+  !filters.dateTo &&
+  !filters.status &&
+  !filters.paymentMethod &&
+  !filters.paymentStatus;
 
 export default function OrdersPage() {
   const [invoices, setInvoices] = useState<Invoice[]>(() => readSectionSnapshot<Invoice[]>("orders-list") || []);
@@ -102,28 +135,86 @@ export default function OrdersPage() {
       <header className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="app-heading">الفواتير</h1>
       </header>
-      <form className="app-panel flex flex-wrap items-end gap-3 p-4" onSubmit={event => { event.preventDefault(); applyFilters(); }} aria-label="تصفية الفواتير">
-        <div className="min-w-36 flex-1 text-sm"><span className="mb-1 block">من تاريخ</span><DatePicker label="من تاريخ" value={draftFilters.dateFrom} onChange={value => setDraftFilters(current => ({ ...current, dateFrom: value }))} max={draftFilters.dateTo || undefined} allowClear /></div>
-        <div className="min-w-36 flex-1 text-sm"><span className="mb-1 block">إلى تاريخ</span><DatePicker label="إلى تاريخ" value={draftFilters.dateTo} onChange={value => setDraftFilters(current => ({ ...current, dateTo: value }))} min={draftFilters.dateFrom || undefined} allowClear /></div>
-        <div className="min-w-40 flex-1 text-sm"><span className="mb-1 block">حالة السداد</span><ProductSelect label="حالة سداد الفاتورة" value={draftFilters.paymentStatus} onChange={value => setDraftFilters(current => ({ ...current, paymentStatus: value }))} placeholder="كل الحالات" compact options={[{ value: "paid", label: "مدفوعة" }, { value: "due", label: "عليها باقي" }, { value: "untracked", label: "رصيد قديم غير محدد" }]} /></div>
-        <button type="submit" className="app-primary-button">تطبيق الفلاتر</button>
-        {!noFilters(activeFilters) && <button type="button" className="app-secondary-button" onClick={clearFilters}>مسح</button>}
+      <form className="app-panel flex flex-col gap-3 p-4" onSubmit={event => { event.preventDefault(); applyFilters(); }} aria-label="تصفية الفواتير">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="min-w-36 flex-1 text-sm">
+            <span className="mb-1 block font-medium">حالة الفاتورة</span>
+            <ProductSelect
+              label="حالة الفاتورة"
+              value={draftFilters.status}
+              onChange={value => setDraftFilters(current => ({ ...current, status: value }))}
+              placeholder="كل الحالات"
+              compact
+              options={statusOptions}
+            />
+          </div>
+          <div className="min-w-36 flex-1 text-sm">
+            <span className="mb-1 block font-medium">طريقة الدفع</span>
+            <ProductSelect
+              label="طريقة الدفع"
+              value={draftFilters.paymentMethod}
+              onChange={value => setDraftFilters(current => ({ ...current, paymentMethod: value }))}
+              placeholder="كل الطرق"
+              compact
+              options={paymentMethodOptions}
+            />
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-end gap-3 pt-2 border-t border-white/5">
+          <div className="min-w-36 flex-1 text-sm">
+            <span className="mb-1 block font-medium">حالة السداد</span>
+            <ProductSelect
+              label="حالة سداد الفاتورة"
+              value={draftFilters.paymentStatus}
+              onChange={value => setDraftFilters(current => ({ ...current, paymentStatus: value }))}
+              placeholder="كل حالات السداد"
+              compact
+              options={paymentStatusOptions}
+            />
+          </div>
+          <div className="min-w-36 flex-1 text-sm">
+            <span className="mb-1 block font-medium">من تاريخ</span>
+            <DatePicker
+              label="من تاريخ"
+              value={draftFilters.dateFrom}
+              onChange={value => setDraftFilters(current => ({ ...current, dateFrom: value }))}
+              max={draftFilters.dateTo || undefined}
+              allowClear
+            />
+          </div>
+          <div className="min-w-36 flex-1 text-sm">
+            <span className="mb-1 block font-medium">إلى تاريخ</span>
+            <DatePicker
+              label="إلى تاريخ"
+              value={draftFilters.dateTo}
+              onChange={value => setDraftFilters(current => ({ ...current, dateTo: value }))}
+              min={draftFilters.dateFrom || undefined}
+              allowClear
+            />
+          </div>
+          <div className="flex items-center gap-2 pt-2 sm:pt-0">
+            <button type="submit" className="app-primary-button">تطبيق الفلاتر</button>
+            {!noFilters(activeFilters) && <button type="button" className="app-secondary-button" onClick={clearFilters}>مسح</button>}
+          </div>
+        </div>
       </form>
       {error && <div role="alert" className="rounded-xl border border-red-500/30 p-3 text-sm text-red-500">{error}</div>}
       <section className="app-panel overflow-hidden" aria-label="سجل الفواتير">
         <div className="hidden max-h-[min(65vh,760px)] overflow-auto md:block">
           <table className="w-full text-right text-sm">
             <thead className="app-table-head sticky top-0 z-10"><tr>
-              {["الفاتورة", "العميل", "التاريخ", "الإجمالي", "السداد", "الحالة", ""].map((label, index) => <th key={index} className="whitespace-nowrap px-4 py-3 font-medium">{label}</th>)}
+              {["الفاتورة", "العميل", "التاريخ", "طريقة الدفع", "الإجمالي", "السداد", "الحالة", ""].map((label, index) => <th key={index} className="whitespace-nowrap px-4 py-3 font-medium">{label}</th>)}
             </tr></thead>
             <tbody>
               {invoices.map(invoice => <tr key={invoice.id} data-search-id={invoice.id} className="app-table-row">
                 <td className="whitespace-nowrap px-4 py-3 font-semibold">{invoice.public_number}</td>
                 <td className="max-w-40 truncate px-4 py-3">{invoice.customer_name}</td>
                 <td className="whitespace-nowrap px-4 py-3 app-muted">{date(invoice.created_at)}</td>
+                <td className="whitespace-nowrap px-4 py-3">{paymentMethodLabels[invoice.payment_method] || invoice.payment_method}</td>
                 <td className="whitespace-nowrap px-4 py-3 font-semibold">{money(invoice.total_amount)}</td>
                 <td className="whitespace-nowrap px-4 py-3">{paymentStatusLabels[invoice.payment_status]}</td>
-                <td className="whitespace-nowrap px-4 py-3">{orderStatusLabels[invoice.status] || invoice.status}</td>
+                <td className="whitespace-nowrap px-4 py-3 font-medium">{orderStatusLabels[invoice.status] || invoice.status}</td>
                 <td className="whitespace-nowrap px-4 py-3"><button type="button" className="text-primary underline-offset-4 hover:underline" onClick={() => openInvoice(invoice.id)}>التفاصيل</button></td>
               </tr>)}
             </tbody>
@@ -133,7 +224,7 @@ export default function OrdersPage() {
           {invoices.map(invoice => <div key={invoice.id} data-search-id={invoice.id} className="flex items-center justify-between gap-3 p-4 text-sm">
             <div className="min-w-0 space-y-1"><p className="font-semibold">فاتورة {invoice.public_number}</p>
               <p className="truncate">{invoice.customer_name}</p>
-              <p className="app-muted">{date(invoice.created_at)} · {paymentStatusLabels[invoice.payment_status]} · {orderStatusLabels[invoice.status]}</p></div>
+              <p className="app-muted">{date(invoice.created_at)} · {paymentMethodLabels[invoice.payment_method] || invoice.payment_method} · {paymentStatusLabels[invoice.payment_status]} · {orderStatusLabels[invoice.status] || invoice.status}</p></div>
             <div className="shrink-0 text-left"><p className="font-semibold">{money(invoice.total_amount)}</p>
               <button type="button" className="mt-2 text-primary" onClick={() => openInvoice(invoice.id)}>التفاصيل</button></div>
           </div>)}

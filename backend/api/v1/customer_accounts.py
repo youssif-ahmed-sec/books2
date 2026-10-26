@@ -160,7 +160,7 @@ async def customer_statement(
     for record, public_number in returns:
         entries.append({"kind": "return", "id": str(record.id), "order_id": str(record.order_id),
                         "public_number": public_number, "at": record.created_at,
-                        "delta": _money(record.charge_amount) - _money(record.refund_amount)})
+                        "delta": _money(record.collection_amount) - _money(record.refund_amount)})
     entries.sort(key=lambda entry: (entry["at"] or datetime.min.replace(tzinfo=ZoneInfo("UTC")),
                                     0 if entry["kind"] == "invoice" else 1, entry["id"]))
     opening = _money(customer.balance) - sum((entry["delta"] for entry in entries), Decimal("0"))

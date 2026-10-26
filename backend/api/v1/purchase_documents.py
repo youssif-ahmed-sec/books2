@@ -35,7 +35,7 @@ async def print_document_data(document_id: UUID, db: AsyncSession = Depends(get_
         raise HTTPException(status_code=404, detail="Purchase document not found")
     employee = (await db.execute(select(User.full_name, User.username, User.email).where(User.id == document.requested_by))).one_or_none()
     return {
-        "id": str(document.id), "created_at": document.created_at,
+        "id": str(document.id), "public_number": document.public_number, "created_at": document.created_at,
         "employee_name": next((name for name in employee if name), "") if employee else "",
         "supplier_name": document.supplier_name, "status": document.status, "note": document.note,
         "lines": [{"product_name": line.product_name, "unit_name": line.unit_name, "quantity": line.quantity}
@@ -55,10 +55,10 @@ async def print_purchase_receipt_data(document_id: UUID, receipt_id: UUID, db: A
     warehouse_name = (await db.execute(select(Warehouse.name).where(Warehouse.id == receipt.warehouse_id))).scalar_one_or_none()
     by_line = {line.id: line for line in document.lines}
     return {
-        "id": str(receipt.id), "created_at": receipt.created_at,
+        "id": str(receipt.id), "public_number": receipt.public_number, "created_at": receipt.created_at,
         "employee_name": next((name for name in employee if name), "") if employee else "",
         "supplier_name": document.supplier_name, "warehouse_name": warehouse_name or "",
-        "supplier_document": f"أمر شراء {document.id}",
+        "supplier_document": f"أمر شراء {document.public_number}",
         "lines": [{"product_name": by_line[line.document_line_id].product_name,
                    "unit_name": by_line[line.document_line_id].base_unit_name,
                    "quantity": line.base_quantity}

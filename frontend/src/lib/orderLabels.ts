@@ -13,6 +13,7 @@ export const orderStatusLabels: Record<string, string> = {
   Cancelled: "ملغي",
   Lost: "مفقود",
   Returned: "مسترجع",
+  Exchange: "استبدال",
 };
 
 export const orderSourceLabels: Record<string, string> = {

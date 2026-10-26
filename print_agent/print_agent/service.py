@@ -6,11 +6,12 @@ import time
 import webbrowser
 from contextlib import asynccontextmanager
 from typing import Literal
+from urllib.parse import urlsplit
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from print_agent.config import LOGS_DIR, config
 from print_agent.printer import thermal_printer
@@ -98,6 +99,22 @@ class PrinterSettings(BaseModel):
     receipt_printer_names: list[str]
     barcode_printer_names: list[str]
     printer_width_mm: int = Field(default=80, ge=58, le=80)
+    allowed_origins: list[str] | None = None
+
+    @field_validator("allowed_origins")
+    @classmethod
+    def validate_allowed_origins(cls, values: list[str] | None) -> list[str] | None:
+        if values is None:
+            return None
+        normalized = []
+        for raw in values:
+            origin = raw.strip().rstrip("/")
+            parsed = urlsplit(origin)
+            if (parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password
+                    or parsed.path or parsed.query or parsed.fragment or "*" in origin):
+                raise ValueError("Use an exact HTTPS site origin, without a path or wildcard")
+            normalized.append(origin.lower())
+        return list(dict.fromkeys(normalized))
 
 
 class PrintJob(BaseModel):
@@ -128,7 +145,9 @@ async def custom_cors_middleware(request: Request, call_next):
         for value in os.getenv("PRINT_AGENT_ALLOWED_ORIGINS", "").split(",")
         if value.strip()
     )
+    allowed_origins.update(config.allowed_origins)
     if origin and origin not in allowed_origins:
+        log.warning("Rejected browser origin for local print request: %s", origin)
         return Response(status_code=403)
     if request.method == "OPTIONS":
         response = Response(content="OK", status_code=200)
@@ -174,12 +193,16 @@ def get_settings():
     return {
         "receipt_printer_names": config.receipt_printer_names,
         "barcode_printer_names": config.barcode_printer_names,
+        "allowed_origins": config.allowed_origins,
         "printer_width_mm": config.printer_width_mm,
     }
 
 
 @app.post("/api/settings")
-def save_settings(settings: PrinterSettings):
+def save_settings(settings: PrinterSettings, request: Request):
+    local_origins = {f"http://127.0.0.1:{config.local_port}", f"http://localhost:{config.local_port}"}
+    if settings.allowed_origins is not None and request.headers.get("origin") not in (None, *local_origins):
+        raise HTTPException(status_code=403, detail="Allowed sites can only be changed from this device's print settings page")
     available = set(thermal_printer.get_printers())
     receipts = list(dict.fromkeys(settings.receipt_printer_names))
     barcodes = list(dict.fromkeys(settings.barcode_printer_names))
@@ -188,16 +211,21 @@ def save_settings(settings: PrinterSettings):
         raise HTTPException(status_code=400, detail=f"Unknown printers: {', '.join(unknown)}")
     if set(receipts) & set(barcodes):
         raise HTTPException(status_code=400, detail="Choose different printers for receipts and barcodes")
-    previous = (config.receipt_printer_names, config.barcode_printer_names, config.printer_width_mm)
+    previous = (config.receipt_printer_names, config.barcode_printer_names,
+                config.printer_width_mm, config.allowed_origins)
     config.set("receipt_printer_names", receipts)
     config.set("barcode_printer_names", barcodes)
     config.set("printer_width_mm", settings.printer_width_mm)
+    if settings.allowed_origins is not None:
+        config.set("allowed_origins", settings.allowed_origins)
     if not config.save():
         config.set("receipt_printer_names", previous[0])
         config.set("barcode_printer_names", previous[1])
         config.set("printer_width_mm", previous[2])
+        config.set("allowed_origins", previous[3])
         raise HTTPException(status_code=500, detail="Could not save settings")
-    return {"ok": True, "receipt_printer_names": receipts, "barcode_printer_names": barcodes}
+    return {"ok": True, "receipt_printer_names": receipts, "barcode_printer_names": barcodes,
+            "allowed_origins": config.allowed_origins}
 
 
 @app.post("/api/print", status_code=202)
@@ -249,18 +277,19 @@ SETTINGS_HTML = """<!doctype html>
 body{font-family:Segoe UI,Tahoma,sans-serif;background:#101114;color:#f4f4f4;margin:0;display:grid;place-items:center;min-height:100vh}
 main{width:min(620px,calc(100% - 32px));background:#1b1d22;border:1px solid #333842;border-radius:18px;padding:28px;box-shadow:0 20px 60px #0008}
 h1{color:#f4b942;margin:0 0 8px}.status{color:#8bd49c;margin-bottom:22px}.printer{display:flex;gap:10px;align-items:center;padding:13px;background:#252830;border-radius:10px;margin:8px 0}
-h3{margin:22px 0 10px}.hint{color:#b7becb;font-size:13px;margin:5px 0 12px}button{border:0;border-radius:9px;padding:11px 18px;font-weight:700;cursor:pointer;margin:4px}.primary{background:#f4b942;color:#171717}.secondary{background:#383d48;color:white}#msg{min-height:24px;margin-top:14px;color:#8bd49c}
+h3{margin:22px 0 10px}.hint{color:#b7becb;font-size:13px;margin:5px 0 12px}.site-origin{box-sizing:border-box;width:100%;padding:12px;border:1px solid #555c69;border-radius:9px;background:#252830;color:white;direction:ltr;text-align:left}button{border:0;border-radius:9px;padding:11px 18px;font-weight:700;cursor:pointer;margin:4px}.primary{background:#f4b942;color:#171717}.secondary{background:#383d48;color:white}#msg{min-height:24px;margin-top:14px;color:#8bd49c}
 </style></head><body><main><h1>Souod El Shafie Print Agent</h1><div class="status">الخدمة تعمل على هذا الجهاز</div>
 <h3>طابعة الفواتير</h3><div id="receipt-printers">جاري تحميل الطابعات...</div>
 <h3>طابعة الباركود</h3><div id="barcode-printers">جاري تحميل الطابعات...</div>
 <p class="hint">اختَر طابعة مختلفة لكل نوع. اضبط مقاس الملصق من إعدادات طابعة الباركود في ويندوز.</p>
+<h3>عنوان موقع النظام المسموح له بالطباعة</h3><input id="allowed-origins" class="site-origin" type="text" placeholder="https://example.com" aria-label="عنوان موقع النظام"><p class="hint">انسخ عنوان الموقع الذي تستخدمه في المتصفح حتى اسم النطاق فقط. افصل بين أكثر من عنوان بفاصلة.</p>
 <p><button class="primary" onclick="save()">حفظ الاختيارات</button><button class="secondary" onclick="testPrint('receipt')">تجربة فاتورة</button><button class="secondary" onclick="testPrint('barcode')">تجربة باركود</button></p><div id="msg" role="status"></div>
 <script>
 const m=document.getElementById('msg');
 function render(group,printers,selected){const box=document.getElementById(group+'-printers');box.replaceChildren();if(!printers.length){box.textContent='لا توجد طابعات معرفة على Windows';return;}for(const name of printers){const label=document.createElement('label'),input=document.createElement('input'),caption=document.createElement('span');label.className='printer';input.type='checkbox';input.name=group;input.value=name;input.checked=selected.includes(name);caption.textContent=name;label.append(input,caption);box.append(label);}}
-async function load(){const r=await fetch('/api/printers');if(!r.ok)throw Error();const d=await r.json();render('receipt',d.printers,d.receipt_selected);render('barcode',d.printers,d.barcode_selected);}
+async function load(){const [r,s]=await Promise.all([fetch('/api/printers'),fetch('/api/settings')]);if(!r.ok||!s.ok)throw Error();const d=await r.json(),settings=await s.json();render('receipt',d.printers,d.receipt_selected);render('barcode',d.printers,d.barcode_selected);document.getElementById('allowed-origins').value=(settings.allowed_origins||[]).join(', ');}
 function chosen(group){return [...document.querySelectorAll('input[name="'+group+'"]:checked')].map(input=>input.value);}
-async function save(){const receipts=chosen('receipt'),barcodes=chosen('barcode');if(receipts.some(name=>barcodes.includes(name))){m.textContent='اختَر طابعة مختلفة للفواتير والباركود';return;}try{const r=await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({receipt_printer_names:receipts,barcode_printer_names:barcodes,printer_width_mm:80})});m.textContent=r.ok?'تم حفظ الطابعات بنجاح':'تعذر حفظ الإعدادات';}catch{m.textContent='تعذر الاتصال بتطبيق الطابعة';}}
+async function save(){const receipts=chosen('receipt'),barcodes=chosen('barcode'),sites=document.getElementById('allowed-origins').value.split(',').map(v=>v.trim()).filter(Boolean);if(receipts.some(name=>barcodes.includes(name))){m.textContent='اختَر طابعة مختلفة للفواتير والباركود';return;}try{const r=await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({receipt_printer_names:receipts,barcode_printer_names:barcodes,printer_width_mm:80,allowed_origins:sites})});m.textContent=r.ok?'تم حفظ الطابعات والموقع بنجاح':r.status===422?'عنوان الموقع غير صالح. أدخل عنوان HTTPS كاملًا بدون مسار أو علامة نجمة':'تعذر حفظ الإعدادات';}catch{m.textContent='تعذر الاتصال بتطبيق الطابعة';}}
 async function testPrint(kind){try{const r=await fetch('/api/test-print?kind='+kind,{method:'POST'});if(r.ok){m.textContent='تم إرسال صفحة الاختبار للطابعة المختارة';}else if(r.status===409){m.textContent='الطابعة المختارة غير متاحة؛ تأكد من توصيلها وحفظ اختيارها';}else{m.textContent='تعذر تجهيز صفحة الاختبار (رمز '+r.status+'). راجع سجل التطبيق';}}catch{m.textContent='تعذر الاتصال بتطبيق الطابعة';}}
 load().catch(()=>{document.getElementById('receipt-printers').textContent='تعذر قراءة الطابعات';document.getElementById('barcode-printers').textContent='تعذر قراءة الطابعات';});
 </script></main></body></html>"""

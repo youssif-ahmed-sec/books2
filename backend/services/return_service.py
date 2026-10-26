@@ -25,7 +25,35 @@ MONEY = Decimal("0.01")
 
 class ReturnService:
     @staticmethod
+    def _settlement_method(order: Order, payload: SalesReturnCreate) -> str:
+        method = payload.settlement_payment_method or order.payment_method
+        outstanding = order.deferred_remaining is None or Decimal(str(order.deferred_remaining)) > 0
+        if order.payment_method == "Deferred Payment" and outstanding and method != "Deferred Payment":
+            raise ValueError("An unpaid deferred invoice must be settled against customer debt; manual review is required for another refund method.")
+        if method == "Deferred Payment" and order.customer_id is None:
+            raise ValueError("Deferred settlement requires a customer account.")
+        return method
+
+    @staticmethod
+    def _return_line_amount(item: OrderItem, quantity: Decimal, already: Decimal,
+                            already_amount: Decimal, discount_factor: Decimal) -> Decimal:
+        # The sold item's snapshots remain authoritative when catalog prices change.
+        discounted_line = (Decimal(str(item.total_price)) * discount_factor).quantize(MONEY, rounding=ROUND_HALF_UP)
+        remaining_value = discounted_line - already_amount
+        if already + quantity == Decimal(str(item.quantity_requested)):
+            return remaining_value
+        return min(remaining_value, (Decimal(str(item.unit_price)) * quantity * discount_factor).quantize(MONEY, rounding=ROUND_HALF_UP))
+
+    @staticmethod
+    def _wallet_fee(charge_amount: Decimal, method: str) -> Decimal:
+        return (charge_amount / Decimal("100")).quantize(MONEY, rounding=ROUND_HALF_UP) if method == "Wallet" and charge_amount > 0 else Decimal("0")
+
+    @staticmethod
     async def process(db: AsyncSession, payload: SalesReturnCreate, user_id: UUID) -> SalesReturn:
+        if not payload.settlement_confirmed:
+            raise ValueError("Confirm the settlement amount before recording the return.")
+        if payload.expected_refund_amount is None or payload.expected_charge_amount is None:
+            raise ValueError("Preview the refund and charge amounts before recording the return.")
         fingerprint = request_fingerprint(payload)
         existing = (await db.execute(select(SalesReturn).where(SalesReturn.id == payload.request_id))).scalar_one_or_none()
         if existing is not None:
@@ -66,7 +94,7 @@ class ReturnService:
         order = (await db.execute(select(Order).where(Order.id == payload.order_id))).scalar_one_or_none()
         if order is None:
             raise ValueError("Original order not found.")
-        if order.status not in (OrderStatusEnum.DELIVERED.value, OrderStatusEnum.CLOSED.value, OrderStatusEnum.RETURNED.value):
+        if order.status not in (OrderStatusEnum.DELIVERED.value, OrderStatusEnum.CLOSED.value, OrderStatusEnum.RETURNED.value, OrderStatusEnum.EXCHANGE.value):
             raise ValueError("Only delivered orders can be returned.")
         if not order.payment_method:
             raise ValueError("Original order has no recorded payment method; settlement needs manual review.")
@@ -101,11 +129,8 @@ class ReturnService:
             ).where(SalesReturnLine.order_item_id == item.id))).one()
             if Decimal(str(already)) + line.quantity > Decimal(str(item.quantity_requested)):
                 raise ValueError("Return quantity exceeds the unreturned quantity.")
-            discounted_line = (Decimal(str(item.total_price)) * discount_factor).quantize(MONEY, rounding=ROUND_HALF_UP)
-            remaining_value = discounted_line - Decimal(str(already_amount))
-            amount = remaining_value if Decimal(str(already)) + line.quantity == Decimal(str(item.quantity_requested)) else min(
-                remaining_value,
-                (Decimal(str(item.unit_price)) * line.quantity * discount_factor).quantize(MONEY, rounding=ROUND_HALF_UP),
+            amount = ReturnService._return_line_amount(
+                item, line.quantity, Decimal(str(already)), Decimal(str(already_amount)), discount_factor,
             )
             returned_total += amount
 
@@ -126,12 +151,17 @@ class ReturnService:
                     raise ValueError("Replacement product, unit, or price is unavailable.")
                 replacement_total += (Decimal(str(price.price)) * replacement.quantity).quantize(MONEY, rounding=ROUND_HALF_UP)
         difference = replacement_total - returned_total
+        settlement_method = ReturnService._settlement_method(order, payload)
+        charge_amount = max(difference, Decimal("0"))
+        wallet_fee = ReturnService._wallet_fee(charge_amount, settlement_method)
         return {
-            "payment_method": order.payment_method,
+            "payment_method": settlement_method,
             "returned_value": returned_total,
             "replacement_value": replacement_total,
             "refund_amount": max(-difference, Decimal("0")),
-            "charge_amount": max(difference, Decimal("0")),
+            "charge_amount": charge_amount,
+            "wallet_fee_amount": wallet_fee,
+            "collection_amount": charge_amount + wallet_fee,
         }
 
     @staticmethod
@@ -139,7 +169,7 @@ class ReturnService:
         order = (await db.execute(select(Order).where(Order.id == payload.order_id).with_for_update())).scalar_one_or_none()
         if order is None:
             raise ValueError("Original order not found.")
-        if order.status not in (OrderStatusEnum.DELIVERED.value, OrderStatusEnum.CLOSED.value, OrderStatusEnum.RETURNED.value):
+        if order.status not in (OrderStatusEnum.DELIVERED.value, OrderStatusEnum.CLOSED.value, OrderStatusEnum.RETURNED.value, OrderStatusEnum.EXCHANGE.value):
             raise ValueError("Only delivered orders can be returned.")
         if not order.payment_method:
             raise ValueError("Original order has no recorded payment method; settlement needs manual review.")
@@ -167,9 +197,10 @@ class ReturnService:
             raise ValueError("Original order has no refundable items.")
         discount_factor = (subtotal - min(Decimal(str(order.discount_amount)), subtotal)) / subtotal
 
+        settlement_method = ReturnService._settlement_method(order, payload)
         result = SalesReturn(
             id=payload.request_id, order_id=order.id, warehouse_id=payload.warehouse_id,
-            user_id=user_id, kind=payload.kind, payment_method=order.payment_method,
+            user_id=user_id, kind=payload.kind, payment_method=settlement_method,
             request_fingerprint=fingerprint, refund_amount=0, charge_amount=0,
             returned_value=0, replacement_value=0,
         )
@@ -189,12 +220,9 @@ class ReturnService:
             ))).one()
             if Decimal(str(already)) + line.quantity > Decimal(str(item.quantity_requested)):
                 raise ValueError("Return quantity exceeds the unreturned quantity.")
-            discounted_line = (Decimal(str(item.total_price)) * discount_factor).quantize(MONEY, rounding=ROUND_HALF_UP)
-            remaining_value = discounted_line - Decimal(str(already_amount))
-            if Decimal(str(already)) + line.quantity == Decimal(str(item.quantity_requested)):
-                amount = remaining_value
-            else:
-                amount = min(remaining_value, (Decimal(str(item.unit_price)) * line.quantity * discount_factor).quantize(MONEY, rounding=ROUND_HALF_UP))
+            amount = ReturnService._return_line_amount(
+                item, line.quantity, Decimal(str(already)), Decimal(str(already_amount)), discount_factor,
+            )
             returned_total += amount
             db.add(SalesReturnLine(return_id=result.id, order_item_id=item.id, quantity=line.quantity, amount=amount))
 
@@ -218,8 +246,8 @@ class ReturnService:
         if payload.replacements:
             await OrderService._check_pricing_policy(db, order.customer_id, payload.replacements, Decimal("0"), user_id)
             exchange_order = Order(
-                customer_id=order.customer_id, user_id=user_id, status=OrderStatusEnum.DELIVERED.value,
-                source=order.source, payment_method=order.payment_method,
+                customer_id=order.customer_id, user_id=user_id, status=OrderStatusEnum.EXCHANGE.value,
+                source=order.source, payment_method=settlement_method,
                 total_amount=0, tax_amount=0, discount_amount=0, shipping_cost=0,
                 notes=f"Exchange for order {order.id}",
             )
@@ -292,11 +320,14 @@ class ReturnService:
         difference = replacement_total - returned_total
         result.returned_value = returned_total
         result.replacement_value = replacement_total
+        # Invariant: Wallet payment fee (order.wallet_fee_amount, 1%) is strictly non-refundable.
+        # returned_total is derived purely from returned merchandise items net of discount,
+        # ensuring the fee collected on wallet payment is never refunded to the customer.
         if difference < 0:
             result.refund_amount = -difference
         elif difference > 0:
             result.charge_amount = difference
-        if order.payment_method == "Deferred Payment":
+        if settlement_method == "Deferred Payment":
             if order.customer_id is None:
                 raise ValueError("Deferred order has no customer.")
             customer = (await db.execute(select(Customer).where(Customer.id == order.customer_id).with_for_update())).scalar_one()
@@ -327,15 +358,20 @@ class ReturnService:
                 excess -= reduction
         else:
             if (result.refund_amount or result.charge_amount) and not payload.settlement_confirmed:
-                raise ValueError("Confirm refund or collection through the original payment method before recording the return.")
-            shift_id = (await open_shift(db, user_id)).id if order.payment_method == "Cash" and (result.refund_amount or result.charge_amount) else None
+                raise ValueError("Confirm refund or collection through the chosen payment method before recording the return.")
+            shift_id = (await open_shift(db, user_id)).id if settlement_method == "Cash" and (result.refund_amount or result.charge_amount) else None
+            wallet_fee = ReturnService._wallet_fee(result.charge_amount, settlement_method)
+            if exchange_order is not None and wallet_fee:
+                exchange_order.wallet_fee_amount = wallet_fee
+                exchange_order.total_amount = replacement_total + wallet_fee
             if result.refund_amount:
                 db.add(Payment(order_id=order.id, customer_id=order.customer_id, user_id=user_id,
-                               shift_id=shift_id, amount=result.refund_amount, method=order.payment_method, kind="REFUND"))
+                               shift_id=shift_id, amount=result.refund_amount, method=settlement_method, kind="REFUND"))
             if result.charge_amount:
                 db.add(Payment(order_id=exchange_order.id if exchange_order else order.id,
                                customer_id=order.customer_id, user_id=user_id,
-                               shift_id=shift_id, amount=result.charge_amount, method=order.payment_method, kind="SALE"))
+                               shift_id=shift_id, amount=result.charge_amount + wallet_fee,
+                               wallet_fee_amount=wallet_fee, method=settlement_method, kind="SALE"))
 
         await db.flush()
         returned_quantities = dict((await db.execute(select(SalesReturnLine.order_item_id, func.sum(SalesReturnLine.quantity)).where(

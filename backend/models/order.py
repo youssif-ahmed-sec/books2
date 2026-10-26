@@ -21,6 +21,7 @@ class OrderStatusEnum(str, enum.Enum):
     CANCELLED = "Cancelled"
     LOST = "Lost"
     RETURNED = "Returned"
+    EXCHANGE = "Exchange"
 
 class OrderSourceEnum(str, enum.Enum):
     WHATSAPP = "WhatsApp"

@@ -18,6 +18,64 @@ from schemas.returns import SalesReturnCreate, SalesReturnPreview, SalesReturnRe
 from services.return_service import ReturnService
 
 router = APIRouter(prefix="/returns", tags=["Returns and Exchanges"])
+RETURNABLE_STATUSES = (
+    OrderStatusEnum.DELIVERED.value, OrderStatusEnum.CLOSED.value,
+    OrderStatusEnum.RETURNED.value, OrderStatusEnum.EXCHANGE.value,
+)
+
+
+@router.get("/search")
+async def search_returnable_invoices(
+    q: str = "",
+    limit: int = 15,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_pos_orders_access),
+):
+    term = q.strip()
+    query = select(Order, Customer.name, Customer.phone).outerjoin(
+        Customer, Customer.id == Order.customer_id
+    ).where(
+        Order.status.in_(RETURNABLE_STATUSES)
+    )
+
+    if term:
+        clean = term.lower()
+        for prefix in ("inv-", "inv#", "inv", "#"):
+            if clean.startswith(prefix):
+                clean = clean[len(prefix):].strip()
+                break
+
+        escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        clean_escaped = clean.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped}%"
+        clean_pattern = f"%{clean_escaped}%"
+
+        conditions = [
+            Customer.name.ilike(pattern, escape="\\"),
+            Customer.phone.ilike(pattern, escape="\\"),
+            cast(Order.id, String).ilike(pattern, escape="\\"),
+        ]
+        if clean.isdigit():
+            conditions.append(cast(Order.public_number, String).ilike(clean_pattern, escape="\\"))
+        else:
+            conditions.append(cast(Order.public_number, String).ilike(pattern, escape="\\"))
+        query = query.where(or_(*conditions))
+
+    rows = (await db.execute(query.order_by(Order.created_at.desc(), Order.id.desc()).limit(min(max(1, limit), 50)))).all()
+    return [
+        {
+            "id": str(order.id),
+            "public_number": order.public_number,
+            "customer_name": cust_name or "عميل نقدي",
+            "customer_phone": cust_phone,
+            "status": order.status,
+            "payment_method": order.payment_method,
+            "total_amount": float(order.total_amount),
+            "wallet_fee_amount": float(order.wallet_fee_amount or 0),
+            "created_at": order.created_at.isoformat() if order.created_at else None,
+        }
+        for order, cust_name, cust_phone in rows
+    ]
 
 
 @router.get("/lookup/{invoice_number}")
@@ -26,31 +84,55 @@ async def lookup_invoice(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_pos_orders_access),
 ):
-    number = invoice_number.strip().lower()
-    if number.startswith("inv") and re.fullmatch(r"inv[1-9][0-9]*", number):
-        number = number[3:]
-    if re.fullmatch(r"[1-9][0-9]*", number):
-        if int(number) > 9223372036854775807:
+    raw = invoice_number.strip().lower()
+    clean = raw
+    for prefix in ("inv-", "inv#", "inv", "#"):
+        if clean.startswith(prefix):
+            clean = clean[len(prefix):].strip()
+            break
+
+    condition = None
+    if clean.isdigit():
+        num = int(clean)
+        if num > 9223372036854775807:
             raise HTTPException(status_code=400, detail="رقم الفاتورة غير صالح")
-        condition = Order.public_number == int(number)
-        if len(number) == 12:
-            condition = or_(condition, cast(Order.id, String).ilike(f"%{number}"))
-    elif re.fullmatch(r"[0-9a-f]{12}", number):
-        condition = cast(Order.id, String).ilike(f"%{number}")
+        condition = Order.public_number == num
+        if len(clean) == 12:
+            condition = or_(condition, cast(Order.id, String).ilike(f"%{clean}"))
+    elif re.fullmatch(r"[0-9a-f]{12}", clean):
+        condition = cast(Order.id, String).ilike(f"%{clean}")
     else:
         try:
-            condition = Order.id == UUID(number)
+            condition = Order.id == UUID(clean)
         except ValueError:
-            raise HTTPException(status_code=400, detail="أدخل رقم الفاتورة الرقمي كما هو مطبوع")
-    rows = (await db.execute(select(Order.id, Order.status).where(
-        condition,
-        Order.status.in_((OrderStatusEnum.DELIVERED.value, OrderStatusEnum.CLOSED.value, OrderStatusEnum.RETURNED.value)),
-    ).limit(2))).all()
-    if not rows:
-        raise HTTPException(status_code=404, detail="لم تُعثر على فاتورة مكتملة بهذا الرقم")
-    if len(rows) > 1:
-        raise HTTPException(status_code=409, detail="الرقم يطابق أكثر من فاتورة؛ أدخل المعرّف الكامل")
-    return {"id": rows[0].id, "status": rows[0].status}
+            pass
+
+    if condition is not None:
+        rows = (await db.execute(select(Order.id, Order.status).where(
+            condition,
+            Order.status.in_(RETURNABLE_STATUSES),
+        ).limit(2))).all()
+        if rows:
+            if len(rows) > 1:
+                raise HTTPException(status_code=409, detail="الرقم يطابق أكثر من فاتورة؛ أدخل المعرّف الكامل")
+            return {"id": rows[0].id, "status": rows[0].status}
+
+    # Fallback to customer phone or exact customer name
+    escaped = raw.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    cust_matches = (await db.execute(
+        select(Order.id, Order.status).outerjoin(Customer, Customer.id == Order.customer_id).where(
+            or_(
+                Customer.phone == raw,
+                Customer.name.ilike(f"%{escaped}%", escape="\\"),
+            ),
+            Order.status.in_(RETURNABLE_STATUSES),
+        ).order_by(Order.created_at.desc()).limit(2)
+    )).all()
+    if not cust_matches:
+        raise HTTPException(status_code=404, detail="لم تُعثر على فاتورة مكتملة بهذا الرقم أو البحث")
+    if len(cust_matches) > 1:
+        raise HTTPException(status_code=409, detail="يوجد أكثر من فاتورة مطابقة؛ استخدم قائمة البحث لاختيار الفاتورة")
+    return {"id": cust_matches[0].id, "status": cust_matches[0].status}
 
 
 @router.get("/eligibility/{order_id}")
@@ -62,7 +144,7 @@ async def return_eligibility(
     order = (await db.execute(select(Order).where(Order.id == order_id))).scalar_one_or_none()
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found")
-    if order.status not in (OrderStatusEnum.DELIVERED.value, OrderStatusEnum.CLOSED.value, OrderStatusEnum.RETURNED.value):
+    if order.status not in RETURNABLE_STATUSES:
         raise HTTPException(status_code=400, detail="Only delivered orders can be returned")
     warehouses = (await db.execute(select(InventoryTransaction.warehouse_id).where(
         InventoryTransaction.reference_document == str(order_id),
@@ -91,11 +173,32 @@ async def return_eligibility(
             "manual_review": item.bundle_components_snapshot is None,
         })
     customer_level = "Retail"
+    customer_name = "عميل نقدي"
+    customer_phone = None
     if order.customer_id:
-        level = (await db.execute(select(Customer.price_level).where(Customer.id == order.customer_id))).scalar_one_or_none()
-        if level is not None:
-            customer_level = level.value
-    return {"warehouse_id": warehouses[0], "payment_method": order.payment_method, "customer_price_level": customer_level, "items": result}
+        cust = (await db.execute(select(Customer.price_level, Customer.name, Customer.phone).where(Customer.id == order.customer_id))).one_or_none()
+        if cust is not None:
+            if cust[0] is not None:
+                customer_level = cust[0].value
+            if cust[1]:
+                customer_name = cust[1]
+            if cust[2]:
+                customer_phone = cust[2]
+    return {
+        "warehouse_id": warehouses[0],
+        "customer_id": str(order.customer_id) if order.customer_id else None,
+        "payment_method": order.payment_method,
+        "customer_price_level": customer_level,
+        "customer_name": customer_name,
+        "customer_phone": customer_phone,
+        "public_number": order.public_number,
+        "total_amount": float(order.total_amount),
+        "discount_amount": float(order.discount_amount or 0),
+        "subtotal_amount": float(sum((item.total_price for item, _, _ in rows), 0)),
+        "deferred_remaining": float(order.deferred_remaining) if order.deferred_remaining is not None else None,
+        "wallet_fee_amount": float(order.wallet_fee_amount or 0),
+        "items": result,
+    }
 
 
 @router.get("", response_model=list[SalesReturnResponse])
@@ -143,7 +246,7 @@ async def return_receipt(
         Order.id == record.order_id,
     ))).one_or_none()
     return {
-        "id": record.id, "order_id": record.order_id,
+        "id": record.id, "public_number": record.public_number, "order_id": record.order_id,
         "order_public_number": invoice_numbers.get(record.order_id),
         "exchange_order_id": record.exchange_order_id,
         "exchange_order_public_number": invoice_numbers.get(record.exchange_order_id),
@@ -156,6 +259,8 @@ async def return_receipt(
         "replacement_value": record.replacement_value,
         "refund_amount": record.refund_amount,
         "charge_amount": record.charge_amount,
+        "wallet_fee_amount": record.wallet_fee_amount,
+        "collection_amount": record.collection_amount,
         "returned_lines": [
             {"product_name": name, "unit_name": unit, "quantity": line.quantity, "amount": line.amount}
             for line, name, unit in returned_rows

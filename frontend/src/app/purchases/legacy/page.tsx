@@ -114,7 +114,6 @@ export default function PurchasesPage() {
                   <button className="app-secondary-button" disabled={busy} onClick={() => act(`/purchases/${purchase.id}/reject`)}>رفض</button>
                 </>}
                 {role === "ADMIN" && purchase.status === "APPROVED" && <button className="app-primary-button" disabled={busy} onClick={() => act(`/purchases/${purchase.id}/place`)}>إصدار أمر الشراء</button>}
-                {role === "ADMIN" && ["ORDERED", "PARTIALLY_RECEIVED"].includes(purchase.status) && <Link className="app-secondary-button inline-flex items-center gap-2" href={`/integrations/whatsapp?legacy_purchase_id=${purchase.id}`}><i className="bi bi-whatsapp" aria-hidden="true" />رسالة واتساب</Link>}
               </div>
               {["ORDERED", "PARTIALLY_RECEIVED"].includes(purchase.status) && <div className="grid gap-2 md:grid-cols-3">
                 {warehouses.length === 1 ? <p className="app-muted self-center text-sm">الاستلام إلى: <strong className="text-[#e5e2e1]">{warehouses[0].name}</strong></p> : warehouses.length > 1 ?

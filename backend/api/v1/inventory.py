@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from uuid import UUID, uuid5
 from typing import List
 
-from models.inventory import InventoryTransaction, InventoryBalance, Warehouse, TransactionTypeEnum as MovementType
+from models.inventory import InventoryTransaction, InventoryBalance, StockReceiptNumber, Warehouse, TransactionTypeEnum as MovementType
 from models.product import Product, ProductUnit, ProductPrice, ProductSupplierLink, Supplier
 from models.user import User, RoleEnum, AuditLog
 from schemas.inventory import InventoryTransactionCreate, InventoryTransactionResponse, InventoryBalanceResponse, InventoryStatsResponse, InventoryTransactionRecentResponse, PaginatedInventoryTransactionResponse, StockReceiptCreate
@@ -36,9 +36,12 @@ async def _receipt_document(db: AsyncSession, receipt_id: UUID):
     if not rows:
         raise HTTPException(status_code=404, detail="Stock receipt not found")
     first = rows[0][0]
+    public_number = (await db.execute(select(StockReceiptNumber.public_number).where(
+        StockReceiptNumber.id == receipt_id,
+    ))).scalar_one()
     employee = (await db.execute(select(User.full_name, User.username, User.email).where(User.id == first.user_id))).one_or_none()
     return {
-        "id": str(receipt_id), "created_at": first.created_at,
+        "id": str(receipt_id), "public_number": public_number, "created_at": first.created_at,
         "employee_name": next((name for name in employee if name), "") if employee else "",
         "supplier_id": str(first.supplier_id), "supplier_name": rows[0][3],
         "warehouse_id": str(first.warehouse_id), "warehouse_name": rows[0][4],
@@ -99,6 +102,7 @@ async def create_stock_receipt(
     if supplier is None:
         raise HTTPException(status_code=404, detail="Supplier not found")
 
+    db.add(StockReceiptNumber(id=payload.request_id))
     for line in payload.lines:
         if (await db.execute(select(ProductSupplierLink.id).where(
             ProductSupplierLink.product_id == line.product_id,

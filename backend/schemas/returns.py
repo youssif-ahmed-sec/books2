@@ -19,6 +19,7 @@ class SalesReturnCreate(BaseModel):
     kind: Literal["REFUND", "EXCHANGE"]
     lines: list[ReturnLineCreate] = Field(min_length=1)
     replacements: list[OrderItemCreate] = Field(default_factory=list)
+    settlement_payment_method: Literal["Cash", "Credit Card", "Instapay", "Wallet", "Deferred Payment"] | None = None
     settlement_confirmed: bool = False
     expected_refund_amount: Decimal | None = Field(default=None, ge=0, allow_inf_nan=False)
     expected_charge_amount: Decimal | None = Field(default=None, ge=0, allow_inf_nan=False)
@@ -39,6 +40,7 @@ class SalesReturnCreate(BaseModel):
 
 class SalesReturnResponse(BaseModel):
     id: UUID
+    public_number: int
     order_id: UUID
     exchange_order_id: UUID | None
     warehouse_id: UUID
@@ -47,6 +49,8 @@ class SalesReturnResponse(BaseModel):
     payment_method: str
     refund_amount: Decimal
     charge_amount: Decimal
+    wallet_fee_amount: Decimal
+    collection_amount: Decimal
     returned_value: Decimal
     replacement_value: Decimal
     created_at: datetime
@@ -60,6 +64,8 @@ class SalesReturnPreview(BaseModel):
     replacement_value: Decimal
     refund_amount: Decimal
     charge_amount: Decimal
+    wallet_fee_amount: Decimal
+    collection_amount: Decimal
 
 
 class ReturnReceiptLine(BaseModel):
@@ -71,8 +77,11 @@ class ReturnReceiptLine(BaseModel):
 
 class SalesReturnReceipt(BaseModel):
     id: UUID
+    public_number: int
     order_id: UUID
+    order_public_number: int | None = None
     exchange_order_id: UUID | None
+    exchange_order_public_number: int | None = None
     kind: str
     payment_method: str
     created_at: datetime
@@ -83,5 +92,7 @@ class SalesReturnReceipt(BaseModel):
     replacement_value: Decimal
     refund_amount: Decimal
     charge_amount: Decimal
+    wallet_fee_amount: Decimal
+    collection_amount: Decimal
     returned_lines: list[ReturnReceiptLine]
     replacement_lines: list[ReturnReceiptLine]

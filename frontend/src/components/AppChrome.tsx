@@ -17,7 +17,6 @@ const pages: Record<string, { title: string; roles: readonly UserRole[] }> = {
   "/customers": { title: "العملاء", roles: salesRoles },
   "/dashboard": { title: "لوحة الإدارة", roles: adminRoles },
   "/financials": { title: "المالية", roles: adminRoles },
-  "/integrations/whatsapp": { title: "تكامل واتساب", roles: adminRoles },
   "/inventory": { title: "إدارة المخزون", roles: inventoryRoles },
   "/inventory/product": { title: "تفاصيل المنتج", roles: inventoryRoles },
   "/offers": { title: "العروض", roles: inventoryRoles },

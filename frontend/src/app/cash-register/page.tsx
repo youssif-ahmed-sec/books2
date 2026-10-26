@@ -131,7 +131,6 @@ export default function CashRegisterPage() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h3 className="font-bold text-base">إغلاق الوردية</h3>
-              <p className="app-muted text-xs mt-0.5">{isAdmin ? "عدّ النقدية في الدرج أولًا. سيُحفظ الفرق بين المبلغ المعدود والمتوقع." : "عدّ النقدية في الدرج وأدخل المبلغ الفعلي قبل الإغلاق."}</p>
             </div>
             <button
               type="button"

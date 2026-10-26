@@ -931,7 +931,7 @@ export default function POSPage() {
     }, !searchQuery.trim() || (catalogRefresh === 0 && (
       catalogCache.current?.key === catalogKey(warehouseId, searchQuery, categoryId, subcategoryId, brandId, productKind) ||
       filterCompleteCatalog(completeCatalogCache.current, searchQuery, catalogKey(warehouseId, "", categoryId, subcategoryId, brandId, productKind)) !== null
-    )) ? 0 : 200);
+    )) ? 0 : 100);
     return () => clearTimeout(delayDebounceFn);
   }, [searchQuery, searchProducts, warehouseId, catalogRefresh, categoryId, subcategoryId, brandId, productKind]);
 
@@ -1370,15 +1370,22 @@ export default function POSPage() {
                   <kbd className="rounded bg-current/10 px-1 py-0.5 text-[10px] font-mono opacity-80">F4</kbd>
                 </button>
                 <button type="button" className="app-secondary-button !px-3 !py-2 text-xs" onClick={() => setHeldOpen(true)}
-                  disabled={!heldCarts.length || isProcessing || Boolean(pendingCheckout)}>المعلّقة {heldCarts.length ? `(${heldCarts.length})` : ""}</button>
+                  disabled={!heldCarts.length || isProcessing || Boolean(pendingCheckout)}>المعلّقة {heldCarts.length ? `· ${heldCarts.length}` : ""}</button>
               </div>
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto p-2 custom-scrollbar">
               {cart.length === 0 ? (
-                <div className="flex min-h-24 flex-col items-center justify-center gap-2 text-on-surface-variant">
-                  <span className="material-symbols-outlined text-6xl">production_quantity_limits</span>
-                  <p>السلة فارغة</p>
+                <div className="flex h-full min-h-[200px] flex-col items-center justify-center p-6 text-center">
+                  <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-[#ff8a3d] shadow-inner">
+                    <span className="material-symbols-outlined text-2xl">shopping_cart</span>
+                  </div>
+                  <h4 className="font-bold text-white text-sm">السلة جاهزة لإضافة الأصناف</h4>
+                  <div className="mt-3.5 flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] text-[#c7aba0]">
+                    <span>اضغط</span>
+                    <kbd className="rounded bg-black/40 px-1.5 py-0.5 font-mono text-[10px] text-white">F1</kbd>
+                    <span>للبحث عن صنف</span>
+                  </div>
                 </div>
               ) : (
                 <div className="flex flex-col gap-2">
@@ -1446,7 +1453,14 @@ export default function POSPage() {
                 <span>إتمام البيع · {formatCurrency(totalAmount)}</span>
                 <kbd className="hidden sm:inline-block rounded bg-black/25 px-2 py-0.5 text-[11px] font-mono tracking-wider text-white/90">F9</kbd>
               </button>
-              {checkoutBlock && <p id="pos-checkout-block" role="status" className="app-checkout-block rounded-xl border px-3 py-2 text-center text-sm font-semibold">{checkoutBlock}</p>}
+              {checkoutBlock && (
+                <div id="pos-checkout-block" role="status" className="app-checkout-block flex items-center justify-center gap-2 rounded-xl border px-3.5 py-2.5 text-center text-xs font-semibold">
+                  <span className="material-symbols-outlined text-base opacity-80" aria-hidden="true">
+                    {cart.length === 0 ? "add_shopping_cart" : "info"}
+                  </span>
+                  <span>{checkoutBlock}</span>
+                </div>
+              )}
             </div>
 
           </div>
@@ -1554,7 +1568,7 @@ export default function POSPage() {
                         </span>
                       </div>
 
-                      {/* Pricing pills breakdown */}
+                      {/* Pricing breakdown */}
                       <div className="mt-3 flex flex-wrap gap-1.5 items-center">
                         {retailPrice != null && Number(retailPrice) > 0 && (
                           <span className="text-xs px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-on-surface font-medium">
@@ -1562,15 +1576,15 @@ export default function POSPage() {
                           </span>
                         )}
                         {wholesalePrice != null && Number(wholesalePrice) > 0 && (
-                          <span className="text-xs px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-medium">
-                            جملة: <strong className="font-bold">{formatCurrency(Number(wholesalePrice))}</strong>
+                          <span className="text-xs px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-on-surface font-medium">
+                            جملة: <strong className="font-bold text-on-surface">{formatCurrency(Number(wholesalePrice))}</strong>
                           </span>
                         )}
                         {otherUnits.map(unit => {
                           const unitRetail = unit.prices.find(p => p.price_level === "Retail")?.price || unit.prices[0]?.price;
                           return (
-                            <span key={unit.id} className="text-xs px-2 py-0.5 rounded-md bg-sky-500/10 border border-sky-500/20 text-sky-300 font-medium">
-                              {unit.unit_name}: <strong>{unitRetail ? formatCurrency(Number(unitRetail)) : "—"}</strong>
+                            <span key={unit.id} className="text-xs px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-on-surface font-medium">
+                              {unit.unit_name}: <strong className="font-bold text-on-surface">{unitRetail ? formatCurrency(Number(unitRetail)) : "—"}</strong>
                             </span>
                           );
                         })}
@@ -1579,7 +1593,7 @@ export default function POSPage() {
 
                     <div className="pos-product-card-footer mt-4 flex flex-wrap items-end justify-between gap-3 pt-3 border-t border-white/5">
                       <div className="min-w-0">
-                        <span className="app-muted block text-[11px]">السعر المعتمد ({level === "Retail" ? "مستهلك" : level})</span>
+                        <span className="app-muted block text-[11px]">السعر المعتمد · {level === "Retail" ? "مستهلك" : level}</span>
                         <strong className="mt-0.5 block text-lg font-bold leading-6 tabular-nums text-primary">
                           {primaryPrice ? formatCurrency(Number(primaryPrice.price)) : "بلا سعر"}
                         </strong>

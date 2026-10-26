@@ -195,8 +195,8 @@ html[data-theme="light"] body { background: #f6f4f1; color: #24211f; }
   background: transparent;
 }
 .app-top-nav { background: #171717; border-color: #272727; }
-.app-checkout-block { border-color: #926a24; background: #3b2a0b; color: #ffdb92; }
-html[data-theme="light"] .app-checkout-block { border-color: #a36816; background: #fff1d0; color: #653c06; }
+.app-checkout-block { border: 1px solid #ff6b00; background: #231e1a; color: #fff; }
+html[data-theme="light"] .app-checkout-block { border: 1px solid #e65100; background: #fdf5f0; color: #8c2d00; }
 .app-search { border-color: #292929; }
 .app-hide-native-search-clear::-webkit-search-cancel-button { display: none; }
 .app-icon-button { display: inline-flex; height: 42px; width: 42px; flex: none; align-items: center; justify-content: center; border-radius: 50%; color: #c7aa9d; }
@@ -822,5 +822,63 @@ html[data-theme="light"] .app-notification .Toastify__close-button { color: #715
     left: .75rem;
     bottom: .75rem;
     width: auto;
+  }
+}
+
+/*Modern Header Navigation Tabs (Vercel/Linear Best Practice) */
+.app-header-tab {
+  color: #c3a99e;
+  border-radius: 0.65rem;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+.app-header-tab:hover {
+  color: #ffffff;
+  background-color: rgba(255, 255, 255, 0.05);
+}
+.app-header-tab[aria-current="page"] {
+  color: var(--color-primary, #ff6b00);
+}
+
+html[data-theme="light"] .app-header-tab {
+  color: #70564a;
+}
+html[data-theme="light"] .app-header-tab:hover {
+  color: #24211f;
+  background-color: rgba(0, 0, 0, 0.04);
+}
+html[data-theme="light"] .app-header-tab[aria-current="page"] {
+  color: var(--color-primary, #ff6b00);
+}
+
+/* ── App SideNav Brand Identity Styling (Harmonized with .app-top-nav #171717 / #272727) ── */
+.app-side-nav {
+  background: #171717 !important;
+  background-color: #171717 !important;
+  border: 1px solid #272727 !important;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.45);
+}
+
+html[data-theme="light"] .app-side-nav {
+  background: #fffdfa !important;
+  background-color: #fffdfa !important;
+  border: 1px solid #e5ddd5 !important;
+  box-shadow: 0 12px 35px rgba(67, 42, 25, 0.08);
+}
+
+@media (max-width: 1279px) {
+  .app-side-nav {
+    background: #171717 !important;
+    background-color: #171717 !important;
+    border-left: 1px solid #272727 !important;
+    border-top: none !important;
+    border-bottom: none !important;
+    border-right: none !important;
+    box-shadow: -12px 0 45px rgba(0, 0, 0, 0.85) !important;
+  }
+  html[data-theme="light"] .app-side-nav {
+    background: #fffdfa !important;
+    background-color: #fffdfa !important;
+    border-left: 1px solid #e5ddd5 !important;
+    box-shadow: -12px 0 45px rgba(67, 42, 25, 0.15) !important;
   }
 }

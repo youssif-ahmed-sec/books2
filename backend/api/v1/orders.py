@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import String, cast, func, or_, select
+from sqlalchemy.orm import aliased
 
 from core.dependencies import require_admin, require_pos_orders_access, get_current_user
 from core.idempotency import IdempotencyConflict
@@ -27,6 +28,8 @@ async def list_invoices(
     search: str = Query("", max_length=80),
     date_from: date | None = None,
     date_to: date | None = None,
+    status: str | None = Query(None),
+    payment_method: str | None = Query(None),
     payment_status: str | None = Query(None, pattern="^(paid|due|untracked)$"),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
@@ -35,8 +38,20 @@ async def list_invoices(
 ):
     if date_from and date_to and date_from > date_to:
         raise HTTPException(status_code=422, detail="تاريخ البداية بعد تاريخ النهاية")
-    query = select(Order, Customer.name).outerjoin(Customer, Customer.id == Order.customer_id).where(
-        Order.status.in_((OrderStatusEnum.DELIVERED.value, OrderStatusEnum.CLOSED.value, OrderStatusEnum.RETURNED.value)),
+    invoice_statuses = (
+        OrderStatusEnum.DELIVERED.value,
+        OrderStatusEnum.CLOSED.value,
+        OrderStatusEnum.RETURNED.value,
+        OrderStatusEnum.EXCHANGE.value,
+    )
+    original_order = aliased(Order)
+    original_due = (select(original_order.deferred_remaining)
+                    .join(SalesReturn, SalesReturn.order_id == original_order.id)
+                    .where(SalesReturn.exchange_order_id == Order.id)
+                    .scalar_subquery())
+    effective_due = func.coalesce(original_due, Order.deferred_remaining)
+    query = select(Order, Customer.name, effective_due).outerjoin(Customer, Customer.id == Order.customer_id).where(
+        Order.status.in_(invoice_statuses),
     )
     term = search.strip()
     if term:
@@ -52,23 +67,48 @@ async def list_invoices(
         query = query.where(Order.created_at >= datetime.combine(date_from, datetime.min.time(), tzinfo=cairo))
     if date_to:
         query = query.where(Order.created_at <= datetime.combine(date_to, datetime.max.time(), tzinfo=cairo))
+    if status:
+        if status == OrderStatusEnum.EXCHANGE.value:
+            query = query.where(or_(
+                Order.status == OrderStatusEnum.EXCHANGE.value,
+                Order.notes.ilike("Exchange for order%"),
+            ))
+        elif status == OrderStatusEnum.DELIVERED.value:
+            query = query.where(
+                Order.status == OrderStatusEnum.DELIVERED.value,
+                or_(Order.notes.is_(None), ~Order.notes.ilike("Exchange for order%")),
+            )
+        elif status in (OrderStatusEnum.RETURNED.value, OrderStatusEnum.CLOSED.value):
+            query = query.where(Order.status == status)
+    if payment_method:
+        query = query.where(Order.payment_method == payment_method)
     is_credit = Order.payment_method == "Deferred Payment"
     if payment_status == "paid":
-        query = query.where(or_(~is_credit, Order.deferred_remaining == 0))
+        query = query.where(or_(~is_credit, effective_due == 0))
     elif payment_status == "due":
-        query = query.where(is_credit, Order.deferred_remaining > 0)
+        query = query.where(is_credit, effective_due > 0)
     elif payment_status == "untracked":
-        query = query.where(is_credit, Order.deferred_remaining.is_(None))
+        query = query.where(is_credit, effective_due.is_(None))
     rows = (await db.execute(query.order_by(Order.created_at.desc(), Order.id.desc()).limit(limit).offset(offset))).all()
-    return [{
-        "id": str(order.id), "public_number": order.public_number,
-        "customer_id": str(order.customer_id) if order.customer_id else None,
-        "customer_name": customer_name or "عميل نقدي", "status": order.status,
-        "total_amount": order.total_amount, "payment_method": order.payment_method,
-        "payment_status": "paid" if order.payment_method != "Deferred Payment" or order.deferred_remaining == 0
-            else "untracked" if order.deferred_remaining is None else "due",
-        "created_at": order.created_at,
-    } for order, customer_name in rows]
+    result = []
+    for order, customer_name, remaining in rows:
+        eff_status = OrderStatusEnum.EXCHANGE.value if (
+            order.status == OrderStatusEnum.EXCHANGE.value or
+            (order.notes and order.notes.startswith("Exchange for order"))
+        ) else order.status
+        result.append({
+            "id": str(order.id),
+            "public_number": order.public_number,
+            "customer_id": str(order.customer_id) if order.customer_id else None,
+            "customer_name": customer_name or "عميل نقدي",
+            "status": eff_status,
+            "total_amount": order.total_amount,
+            "payment_method": order.payment_method,
+            "payment_status": "paid" if order.payment_method != "Deferred Payment" or remaining == 0
+                else "untracked" if remaining is None else "due",
+            "created_at": order.created_at,
+        })
+    return result
 
 
 @router.get("/{order_id}/activity")
@@ -78,7 +118,12 @@ async def invoice_activity(
     _user: User = Depends(require_admin),
 ):
     order = (await db.execute(select(Order).where(Order.id == order_id))).scalar_one_or_none()
-    if order is None or order.status not in (OrderStatusEnum.DELIVERED.value, OrderStatusEnum.CLOSED.value, OrderStatusEnum.RETURNED.value):
+    if order is None or order.status not in (
+        OrderStatusEnum.DELIVERED.value,
+        OrderStatusEnum.CLOSED.value,
+        OrderStatusEnum.RETURNED.value,
+        OrderStatusEnum.EXCHANGE.value,
+    ):
         raise HTTPException(status_code=404, detail="الفاتورة غير موجودة")
     direct_payments = (await db.execute(select(Payment).where(Payment.order_id == order_id)
                                         .order_by(Payment.created_at, Payment.id))).scalars().all()
@@ -314,7 +359,8 @@ async def get_orders(
             OrderStatusEnum.WAITING_APPROVAL.value,
         ),
         "returnable": (
-            OrderStatusEnum.DELIVERED.value, OrderStatusEnum.CLOSED.value, OrderStatusEnum.RETURNED.value,
+            OrderStatusEnum.DELIVERED.value, OrderStatusEnum.CLOSED.value,
+            OrderStatusEnum.RETURNED.value, OrderStatusEnum.EXCHANGE.value,
         ),
     }
     if group == "returnable" and current_user.role != RoleEnum.ADMIN:

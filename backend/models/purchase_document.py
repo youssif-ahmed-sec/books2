@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, Numeric, String, UniqueConstraint
+from sqlalchemy import BigInteger, CheckConstraint, Column, DateTime, ForeignKey, Numeric, String, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -13,9 +13,11 @@ class PurchaseDocument(Base):
     __table_args__ = (
         CheckConstraint("status IN ('REQUESTED', 'APPROVED', 'ORDERED', 'PARTIALLY_RECEIVED', 'RECEIVED', 'REJECTED', 'CANCELLED')", name="ck_purchase_documents_status"),
         UniqueConstraint("request_id", name="uq_purchase_documents_request_id"),
+        UniqueConstraint("public_number", name="uq_purchase_documents_public_number"),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    public_number = Column(BigInteger, server_default=text("nextval('orders_public_number_seq'::regclass)"), nullable=False)
     request_id = Column(UUID(as_uuid=True), nullable=False)
     request_fingerprint = Column(String(64), nullable=False)
     supplier_id = Column(UUID(as_uuid=True), ForeignKey("suppliers.id"), nullable=False)
@@ -55,9 +57,13 @@ class PurchaseDocumentLine(Base):
 
 class PurchaseReceipt(Base):
     __tablename__ = "purchase_receipts"
-    __table_args__ = (UniqueConstraint("request_id", name="uq_purchase_receipts_request_id"),)
+    __table_args__ = (
+        UniqueConstraint("request_id", name="uq_purchase_receipts_request_id"),
+        UniqueConstraint("public_number", name="uq_purchase_receipts_public_number"),
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    public_number = Column(BigInteger, server_default=text("nextval('orders_public_number_seq'::regclass)"), nullable=False)
     document_id = Column(UUID(as_uuid=True), ForeignKey("purchase_documents.id"), nullable=False)
     warehouse_id = Column(UUID(as_uuid=True), ForeignKey("warehouses.id"), nullable=False)
     request_id = Column(UUID(as_uuid=True), nullable=False)

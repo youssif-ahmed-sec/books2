@@ -69,7 +69,8 @@ async def test_credit_refund_exchange_and_cash_shift_are_consistent():
 
             refund_payload = {"request_id": str(uuid4()), "order_id": cash.json()["id"],
                               "warehouse_id": str(warehouse_id), "kind": "REFUND", "settlement_confirmed": True,
-                              "lines": [{"order_item_id": cash.json()["items"][0]["id"], "quantity": 1}]}
+                              "lines": [{"order_item_id": cash.json()["items"][0]["id"], "quantity": 1}],
+                              "expected_refund_amount": 30, "expected_charge_amount": 0}
             refunded = await client.post("/api/v1/returns", json=refund_payload)
             assert refunded.status_code == 201, refunded.text
             assert refunded.json()["refund_amount"] == "30.00"
@@ -83,6 +84,7 @@ async def test_credit_refund_exchange_and_cash_shift_are_consistent():
                 "warehouse_id": str(warehouse_id), "kind": "EXCHANGE", "settlement_confirmed": True,
                 "lines": [{"order_item_id": cash_exchange.json()["items"][0]["id"], "quantity": 1}],
                 "replacements": [{"product_id": str(second_id), "unit_id": str(second_unit), "quantity": 1}],
+                "expected_refund_amount": 0, "expected_charge_amount": 10,
             })
             assert exchanged.status_code == 201, exchanged.text
             assert exchanged.json()["charge_amount"] == "10.00"

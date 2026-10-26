@@ -98,7 +98,12 @@ class OrderService:
         if customer is None or customer.is_deleted:
             raise ValueError("Customer not found.")
         await db.flush()
-        completed = (OrderStatusEnum.DELIVERED.value, OrderStatusEnum.CLOSED.value, OrderStatusEnum.RETURNED.value)
+        completed = (
+            OrderStatusEnum.DELIVERED.value,
+            OrderStatusEnum.CLOSED.value,
+            OrderStatusEnum.RETURNED.value,
+            OrderStatusEnum.EXCHANGE.value,
+        )
         sale_total, purchase_count, last_purchase = (await db.execute(
             select(
                 func.coalesce(func.sum(Order.total_amount), 0),

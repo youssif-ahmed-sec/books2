@@ -87,24 +87,39 @@ async def search_pos_products(
         base_query = base_query.where(has_component, not_(insufficient_component))
     
     if q:
-        search_pattern = f"%{q}%"
-        # Search by product barcode, unit barcode, sku, or names
-        # To search by unit barcode, we can join ProductUnit or use an exists subquery
-        unit_exists = select(ProductUnit.product_id).where(
-            (ProductUnit.product_id == Product.id) & 
-            (ProductUnit.barcode.ilike(search_pattern)) &
-            (ProductUnit.is_deleted == False)
-        ).exists()
-        
-        base_query = base_query.where(
-            or_(
-                Product.sku.ilike(search_pattern),
-                Product.barcode.ilike(search_pattern),
-                Product.name_en.ilike(search_pattern),
-                Product.name_ar.ilike(search_pattern),
-                unit_exists
-            )
-        )
+        clean_q = q.strip()
+        escaped = clean_q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped}%"
+        has_spaces = any(c.isspace() for c in clean_q)
+
+        conditions = [
+            Product.name_ar.ilike(pattern, escape="\\"),
+            Product.name_en.ilike(pattern, escape="\\"),
+        ]
+
+        if not has_spaces and clean_q:
+            conditions.extend([
+                Product.barcode == clean_q,
+                Product.sku == clean_q,
+                Product.barcode.ilike(f"{escaped}%", escape="\\"),
+                Product.sku.ilike(f"{escaped}%", escape="\\"),
+            ])
+            unit_subq = select(ProductUnit.product_id).where(
+                ProductUnit.is_deleted == False,
+                or_(
+                    ProductUnit.barcode == clean_q,
+                    ProductUnit.barcode.ilike(f"{escaped}%", escape="\\"),
+                ),
+            ).scalar_subquery()
+            conditions.append(Product.id.in_(unit_subq))
+        else:
+            unit_subq = select(ProductUnit.product_id).where(
+                ProductUnit.is_deleted == False,
+                ProductUnit.barcode.ilike(pattern, escape="\\"),
+            ).scalar_subquery()
+            conditions.append(Product.id.in_(unit_subq))
+
+        base_query = base_query.where(or_(*conditions))
         
     query = base_query.options(
         selectinload(Product.units.and_(ProductUnit.is_deleted == False)).joinedload(ProductUnit.prices.and_(ProductPrice.is_deleted == False)),

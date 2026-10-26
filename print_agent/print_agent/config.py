@@ -21,6 +21,7 @@ DEFAULTS = {
     "local_port": 8199,
     "receipt_printer_names": [],
     "barcode_printer_names": [],
+    "allowed_origins": [],
     "printer_width_mm": 80,
 }
 
@@ -79,6 +80,11 @@ class PrintAgentConfig:
     def barcode_printer_names(self) -> list[str]:
         names = self.get("barcode_printer_names", [])
         return [str(name) for name in names] if isinstance(names, list) else []
+
+    @property
+    def allowed_origins(self) -> list[str]:
+        values = self.get("allowed_origins", [])
+        return [str(value) for value in values] if isinstance(values, list) else []
 
     def printers_for(self, receipt_type: str) -> list[str]:
         return self.barcode_printer_names if receipt_type == "barcode" else self.receipt_printer_names

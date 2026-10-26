@@ -14,3 +14,13 @@ The browser is the acceptance check for user-facing work. A successful lint, Typ
 4. Run lint and a production build. After a frontend build, run `backend/scripts/package_frontend.py` from the repository root before deployment. After deployment, confirm the live route serves the newly packaged version and inspect it in the browser; a successful upload or health response alone is insufficient.
 
 Fix discrepancies before handoff. Report which routes, widths, themes, roles, and states were actually checked, and name any that could not be checked. Do not claim the entire frontend is error-free from one route or from a build alone.
+
+## Strict Design & Typography Invariants (Mandatory Across All Agents)
+
+- **No Parentheses in UI Texts/Labels:** Never use parentheses `(` `)` in text, labels, counts, badges, or summaries. Use clean separators like `·` or clear phrasing instead (e.g., `متكافئ · 0.00 ج.م` instead of `متكافئ (0.00 ج.م)`, and `عمليات سابقة · 5` instead of `عمليات سابقة (5)`).
+- **Arabic Typography Integrity:** Strictly preserve the system Arabic font (`"Noto Sans Arabic"`). Never wrap Arabic words, sentences, or phrases in `font-mono` or monospace fonts, as this breaks Arabic font rendering. Use `tabular-nums` on numbers only when numeric column alignment is needed, never on Arabic text.
+- **Zero Emojis:** Strictly prohibited. Do not add emojis anywhere in the UI, toasts, badges, or headers.
+- **No Verbose Clutter or English Badges:** Keep pages focused and quiet. Do not invent subtitles, explanatory captions, decorative English badges (like `POS Returns`), or extraneous status pills in page headers unless explicitly requested.
+- **Page Headings:** Main section titles must use `<h1 className="app-heading">` matching `inventory`, `orders`, and `customers`, with no bottom border divider lines (`border-b`) underneath.
+- **Sidebar Organization:** In the mobile drawer, show direct functional links without outer parent category wrappers. On desktop, maintain the brand background without separator lines.
+

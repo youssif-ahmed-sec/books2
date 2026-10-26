@@ -18,7 +18,12 @@ from models.purchase import PurchaseOrder
 from models.returns import SalesReturn, SalesReturnLine
 
 
-COMPLETED = (OrderStatusEnum.DELIVERED.value, OrderStatusEnum.CLOSED.value, OrderStatusEnum.RETURNED.value)
+COMPLETED = (
+    OrderStatusEnum.DELIVERED.value,
+    OrderStatusEnum.CLOSED.value,
+    OrderStatusEnum.RETURNED.value,
+    OrderStatusEnum.EXCHANGE.value,
+)
 
 
 def _period(query, column, start: datetime | None, end: datetime | None):

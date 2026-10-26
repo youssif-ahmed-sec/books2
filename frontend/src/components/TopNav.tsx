@@ -20,6 +20,25 @@ const roleLabels: Record<string, string> = {
   CASHIER_ORDERS: "الكاشير والطلبات",
 };
 
+const approvalsTabs = [
+  { href: "/product-approvals", icon: "rule", label: "طلبات المنتجات", roles: ["ADMIN", "INVENTORY_CONTROLLER"] },
+  { href: "/count-approvals", icon: "fact_check", label: "موافقات الجرد", roles: ["ADMIN"] },
+  { href: "/audit", icon: "history", label: "سجل التدقيق", roles: ["ADMIN"] },
+];
+
+const managementTabs = [
+  { href: "/dashboard", icon: "dashboard", label: "لوحة التحكم", roles: ["ADMIN"] },
+  { href: "/financials", icon: "account_balance_wallet", label: "المالية", roles: ["ADMIN"] },
+  { href: "/reports", icon: "analytics", label: "التقارير", roles: ["ADMIN"] },
+];
+
+const salesTabs = [
+  { href: "/pos", icon: "point_of_sale", label: "نقطة البيع", roles: ["ADMIN", "CASHIER_ORDERS"] },
+  { href: "/cash-register", icon: "payments", label: "الصندوق", roles: ["ADMIN", "CASHIER_ORDERS"] },
+  { href: "/orders", icon: "receipt_long", label: "الفواتير", roles: ["ADMIN"] },
+  { href: "/returns", icon: "assignment_return", label: "المرتجعات", roles: ["ADMIN", "CASHIER_ORDERS"] },
+];
+
 function revealResult(id: string) {
   let attempts = 0;
   const timer = window.setInterval(() => {
@@ -44,6 +63,21 @@ export default function TopNav({ title }: TopNavProps) {
   const [loggingOut, setLoggingOut] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
   const accountRef = useRef<HTMLDivElement>(null);
+
+  const isApprovalsRoute = ["/product-approvals", "/count-approvals", "/audit", "/approvals"].some(
+    path => pathname === path || pathname.startsWith(`${path}/`)
+  );
+  const visibleApprovalsTabs = approvalsTabs.filter(tab => !user || tab.roles.includes(user.role));
+
+  const isManagementRoute = ["/dashboard", "/financials", "/reports", "/management"].some(
+    path => pathname === path || pathname.startsWith(`${path}/`)
+  );
+  const visibleManagementTabs = managementTabs.filter(tab => !user || tab.roles.includes(user.role));
+
+  const isSalesRoute = ["/pos", "/cash-register", "/orders", "/returns", "/sales"].some(
+    path => pathname === path || pathname.startsWith(`${path}/`)
+  );
+  const visibleSalesTabs = salesTabs.filter(tab => !user || tab.roles.includes(user.role));
 
   useEffect(() => {
     getCurrentUser().then((currentUser: CurrentUser) => {
@@ -103,10 +137,14 @@ export default function TopNav({ title }: TopNavProps) {
   };
 
   return (
-    <header className={`app-top-nav fixed left-8 right-[380px] top-8 ${overlaySearch ? "z-[130]" : "z-40"} flex min-h-[76px] items-center gap-6 rounded-full px-7 py-3 lg:px-9`}>
+    <header className={`app-top-nav fixed left-8 right-[380px] top-8 ${overlaySearch ? "z-[130]" : "z-40"} flex min-h-[76px] items-center gap-4 lg:gap-6 rounded-full px-5 py-3 lg:px-9`}>
+      {/* Right side: Title & Section Search */}
       <div className="app-top-title shrink-0">
-        <h2 className="text-lg font-bold text-primary">{title}</h2>
+        <h2 className="text-lg font-bold text-primary">
+          {user?.role === "ADMIN" && isApprovalsRoute ? "الموافقات والرقابة" : user?.role === "ADMIN" && isManagementRoute ? "الإدارة والتقارير" : user?.role === "ADMIN" && isSalesRoute ? "المبيعات والصندوق" : title}
+        </h2>
       </div>
+
       <div className="app-top-search relative min-w-0 w-[min(34vw,480px)]" ref={searchRef}>
         <div ref={setSlot} className={customSearch ? "min-w-0 w-full" : "hidden"} />
         {!customSearch && <div className="app-search app-search-focus flex h-10 items-center gap-2 rounded-full px-4">
@@ -135,8 +173,119 @@ export default function TopNav({ title }: TopNavProps) {
           </div>
         )}
       </div>
+
+      {/* Spacer pushes left section */}
       <div className="app-top-spacer flex-1" aria-hidden="true" />
-      <div className="flex shrink-0 items-center gap-3">
+
+      {/* Left side: Modern sub-nav tabs + Divider + Notifications + User menu */}
+      <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+        {/* Approvals Tabs */}
+        {user?.role === "ADMIN" && isApprovalsRoute && visibleApprovalsTabs.length > 0 && (
+          <nav className="hidden md:flex items-center gap-1 sm:gap-2 shrink-0" aria-label="أقسام الرقابة والموافقات">
+            {visibleApprovalsTabs.map(tab => {
+              const isActive = pathname === tab.href || pathname.startsWith(`${tab.href}/`);
+              return (
+                <Link
+                  key={tab.href}
+                  href={tab.href}
+                  aria-current={isActive ? "page" : undefined}
+                  className={`app-header-tab group relative flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-semibold transition-all duration-150 whitespace-nowrap ${
+                    isActive ? "font-bold text-primary" : ""
+                  }`}
+                >
+                  <span
+                    className="material-symbols-outlined text-lg transition-transform duration-150 group-hover:scale-110"
+                    aria-hidden="true"
+                    style={isActive ? { fontVariationSettings: "'FILL' 1" } : undefined}
+                  >
+                    {tab.icon}
+                  </span>
+                  <span>{tab.label}</span>
+
+                  {isActive && (
+                    <span
+                      className="absolute -bottom-2 inset-x-2 h-[2.5px] bg-primary rounded-full shadow-[0_0_8px_rgba(255,107,0,0.5)]"
+                      aria-hidden="true"
+                    />
+                  )}
+                </Link>
+              );
+            })}
+          </nav>
+        )}
+
+        {/* Management Tabs */}
+        {user?.role === "ADMIN" && isManagementRoute && visibleManagementTabs.length > 0 && (
+          <nav className="hidden md:flex items-center gap-1 sm:gap-2 shrink-0" aria-label="أقسام الإدارة والتقارير">
+            {visibleManagementTabs.map(tab => {
+              const isActive = pathname === tab.href || pathname.startsWith(`${tab.href}/`);
+              return (
+                <Link
+                  key={tab.href}
+                  href={tab.href}
+                  aria-current={isActive ? "page" : undefined}
+                  className={`app-header-tab group relative flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-semibold transition-all duration-150 whitespace-nowrap ${
+                    isActive ? "font-bold text-primary" : ""
+                  }`}
+                >
+                  <span
+                    className="material-symbols-outlined text-lg transition-transform duration-150 group-hover:scale-110"
+                    aria-hidden="true"
+                    style={isActive ? { fontVariationSettings: "'FILL' 1" } : undefined}
+                  >
+                    {tab.icon}
+                  </span>
+                  <span>{tab.label}</span>
+
+                  {isActive && (
+                    <span
+                      className="absolute -bottom-2 inset-x-2 h-[2.5px] bg-primary rounded-full shadow-[0_0_8px_rgba(255,107,0,0.5)]"
+                      aria-hidden="true"
+                    />
+                  )}
+                </Link>
+              );
+            })}
+          </nav>
+        )}
+
+        {/* Sales & Cash Register Tabs */}
+        {user?.role === "ADMIN" && isSalesRoute && visibleSalesTabs.length > 0 && (
+          <nav className="hidden md:flex items-center gap-1 sm:gap-2 shrink-0" aria-label="أقسام المبيعات والصندوق">
+            {visibleSalesTabs.map(tab => {
+              const isActive = pathname === tab.href || pathname.startsWith(`${tab.href}/`);
+              return (
+                <Link
+                  key={tab.href}
+                  href={tab.href}
+                  aria-current={isActive ? "page" : undefined}
+                  className={`app-header-tab group relative flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-semibold transition-all duration-150 whitespace-nowrap ${
+                    isActive ? "font-bold text-primary" : ""
+                  }`}
+                >
+                  <span
+                    className="material-symbols-outlined text-lg transition-transform duration-150 group-hover:scale-110"
+                    aria-hidden="true"
+                    style={isActive ? { fontVariationSettings: "'FILL' 1" } : undefined}
+                  >
+                    {tab.icon}
+                  </span>
+                  <span>{tab.label}</span>
+
+                  {isActive && (
+                    <span
+                      className="absolute -bottom-2 inset-x-2 h-[2.5px] bg-primary rounded-full shadow-[0_0_8px_rgba(255,107,0,0.5)]"
+                      aria-hidden="true"
+                    />
+                  )}
+                </Link>
+              );
+            })}
+          </nav>
+        )}
+
+        {(isApprovalsRoute || isManagementRoute || isSalesRoute) && <div className="h-5 w-px bg-white/10 mx-1 hidden md:block" aria-hidden="true" />}
+
         <NotificationBell />
         <div className="relative" ref={accountRef}>
           <button type="button" aria-label="الحساب" aria-expanded={accountOpen} onClick={() => setAccountOpen(!accountOpen)} className="app-icon-button app-account-button">

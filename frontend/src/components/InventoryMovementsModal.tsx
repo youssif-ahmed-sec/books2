@@ -20,7 +20,7 @@ interface InventoryTransaction {
 }
 
 interface StockReceipt {
-  id: string; created_at: string; supplier_name: string; warehouse_name: string;
+  id: string; public_number: number; created_at: string; supplier_name: string; warehouse_name: string;
   employee_name?: string;
   supplier_document?: string | null;
   lines: Array<{ product_id: string; product_name: string; unit_name: string; quantity: number; unit_cost: number | null }>;
@@ -248,7 +248,7 @@ export default function InventoryMovementsModal({ onClose }: InventoryMovementsM
       </div>
       {receipt && <div className="motion-overlay fixed inset-0 z-[60] flex items-center justify-center bg-black/75 p-4" dir="rtl">
         <div className="motion-dialog app-panel w-full max-w-xl max-h-[85vh] overflow-y-auto p-6 space-y-4">
-          <div className="flex justify-between gap-3"><div><h3 className="text-xl font-bold">فاتورة استلام المخزون</h3><p className="app-muted text-xs">{receipt.id}</p></div>
+          <div className="flex justify-between gap-3"><div><h3 className="text-xl font-bold">فاتورة استلام المخزون</h3><p className="app-muted text-xs">{receipt.public_number}</p></div>
             <button type="button" onClick={() => setReceipt(null)} className="app-muted hover:text-white">إغلاق</button></div>
           <div className="grid gap-2 sm:grid-cols-2 text-sm"><p>المورد: {receipt.supplier_name}</p><p>المخزن: {receipt.warehouse_name}</p>
             <p>التاريخ: {new Date(receipt.created_at).toLocaleString("ar-EG")}</p>

@@ -45,6 +45,7 @@ export function sectionSearchLabel(pathname: string): string | null {
   if (pathname === "/offers") return "عرض";
   if (pathname === "/customers") return "عميل بالاسم أو الهاتف أو المدينة";
   if (pathname === "/orders") return "فاتورة برقمها أو اسم العميل أو هاتفه";
+  if (pathname === "/returns") return "فاتورة للاسترجاع برقمها أو اسم العميل أو هاتفه";
   if (pathname === "/purchases") return "أمر شراء برقم الأمر أو المورد أو الصنف";
   if (pathname === "/purchases/legacy") return "أمر شراء قديم برقم الأمر";
   if (pathname === "/audit") return "عملية في سجل التدقيق";
@@ -142,6 +143,21 @@ export async function searchSection(pathname: string, query: string, signal?: Ab
     const data = rows(await fetchApi(`/orders/invoices?search=${encodeURIComponent(q)}&limit=20`, { signal, silentErrors: true }));
     return [...completedInvoice, ...data.filter(item => !completedInvoice.some(found => found.id === text(item.id)))
       .map(item => ({ id: text(item.id), label: `فاتورة ${text(item.public_number)}`, detail: text(item.customer_name), href: target("/orders", text(item.id)) }))];
+  }
+  if (pathname === "/returns") {
+    const data = rows(await fetchApi(`/returns/search?q=${encodeURIComponent(q)}&limit=15`, { signal, silentErrors: true }));
+    return data.map(item => {
+      const details: string[] = [];
+      if (item.customer_name) details.push(text(item.customer_name));
+      if (item.customer_phone) details.push(text(item.customer_phone));
+      return {
+        id: text(item.id),
+        label: `فاتورة ${text(item.public_number)}`,
+        detail: details.join(" · "),
+        priceTag: Number(item.total_amount) > 0 ? formatCurrency(Number(item.total_amount)) : undefined,
+        href: target("/returns", text(item.id)),
+      };
+    });
   }
   if (pathname === "/purchases" || pathname === "/purchases/legacy") {
     const endpoint = pathname === "/purchases" ? "/purchase-documents" : "/purchases";

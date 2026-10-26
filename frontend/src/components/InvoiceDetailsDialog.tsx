@@ -17,7 +17,7 @@ type InvoiceDetail = {
 };
 type InvoiceActivity = { remaining: number | null; events: { id: string; kind: string; at: string; amount: number; method: string; related_invoice: string | null }[] };
 
-const completed = new Set(["Delivered", "Closed", "Returned"]);
+const completed = new Set(["Delivered", "Closed", "Returned", "Exchange"]);
 const paymentLabels: Record<string, string> = { Cash: "نقدي", "Credit Card": "فيزا", Instapay: "إنستاباي", Wallet: "محفظة", "Vodafone Cash": "محفظة", "Deferred Payment": "آجل" };
 const money = (value: number) => `${Number(value).toLocaleString("ar-EG", { maximumFractionDigits: 2 })} ج.م`;
 const date = (value: string) => new Date(value).toLocaleString("ar-EG", { dateStyle: "medium", timeStyle: "short" });

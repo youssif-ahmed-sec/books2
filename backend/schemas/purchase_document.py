@@ -58,6 +58,7 @@ class PurchaseReceiptLineResponse(BaseModel):
 
 class PurchaseReceiptResponse(BaseModel):
     id: UUID
+    public_number: int
     warehouse_id: UUID
     received_by: UUID
     created_at: datetime
@@ -67,6 +68,7 @@ class PurchaseReceiptResponse(BaseModel):
 
 class PurchaseDocumentResponse(BaseModel):
     id: UUID
+    public_number: int
     supplier_id: UUID
     supplier_name: str
     status: str

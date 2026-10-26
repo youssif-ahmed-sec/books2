@@ -142,6 +142,30 @@ class PrinterManager:
             y += 32 * scale
         return y
 
+    def _document_footer(self, image: Image.Image, y: int, number: Any, scale: int) -> int:
+        draw = _PrintDraw(image)
+        fonts = self._get_fonts(scale)
+        margin = self.MARGIN * scale
+        width = image.width
+        y += 14 * scale
+        draw.line((margin, y, width - margin, y), fill="black", width=scale)
+        y += 18 * scale
+        draw.text((width // 2, y), "احتفظ بهذا المستند للرجوع إليه", fill="black",
+                  font=fonts["footer"], anchor="ma", direction="rtl")
+        y += 42 * scale
+        y = self._document_barcode(image, y, number, scale, large=True, show_text=False)
+        draw.text((width // 2, y), f"رقم المستند: {number}", fill="black",
+                  font=fonts["tiny"], anchor="ma", direction="rtl")
+        y += 36 * scale
+        draw.line((margin, y, width - margin, y), fill="black", width=scale)
+        y += 18 * scale
+        draw.text((width // 2, y), "مكتبة سعود الشافعي", fill="black",
+                  font=fonts["small"], anchor="ma", direction="rtl")
+        y += 38 * scale
+        draw.text((width // 2, y), "ش المكاتب بجوار مسجد الشافعي - الزقازيق - الشرقية",
+                  fill="black", font=fonts["tiny"], anchor="ma", direction="rtl")
+        return y + 38 * scale
+
     def _quantity_table(self, image: Image.Image, y: int, rows: List[Dict[str, Any]], scale: int) -> int:
         draw = _PrintDraw(image)
         fonts = self._get_fonts(scale)
@@ -402,12 +426,13 @@ class PrinterManager:
         scale = self.RENDER_SCALE
         width = self.PAPER_WIDTH_PX * scale
         margin = self.MARGIN * scale
-        rows = self._items(receipt)
+        rows = receipt.get("lines") or self._items(receipt)
         fonts = self._get_fonts(scale)
         image = Image.new("RGB", (width, (850 + len(rows) * 100) * scale), "white")
         draw = _PrintDraw(image)
         right = width - margin
-        y = self._document_header(image, margin, "فاتورة استلام مخزون", f"RCV-{receipt.get('id', '')}",
+        number = receipt.get("public_number") or f"RCV-{receipt.get('id', '')}"
+        y = self._document_header(image, margin, "فاتورة استلام مخزون", number,
                                   receipt.get("created_at"), receipt.get("employee_name"), scale)
 
         def write(value, font=fonts["small"], step=36):
@@ -427,9 +452,7 @@ class PrinterManager:
         y = self._quantity_table(image, y, rows, scale)
         write(f"عدد الأصناف: {len(rows)}", fonts["small"])
         write("هذا المستند للكميات فقط؛ المديونية تُسجل من حساب المورد.", fonts["small"])
-        y += 14 * scale
-        draw.line((margin, y, right, y), fill="black", width=scale)
-        y = self._document_barcode(image, y + 18 * scale, f"RCV-{receipt.get('id', '')}", scale)
+        y = self._document_footer(image, y, number, scale)
         return image.crop((0, 0, width, min(image.height, y + margin)))
 
     def _generate_purchase_document_image(self, document: Dict[str, Any]) -> Image.Image:
@@ -441,7 +464,8 @@ class PrinterManager:
         fonts = self._get_fonts(scale)
         image = Image.new("RGB", (width, (850 + len(rows) * 110) * scale), "white")
         draw = _PrintDraw(image)
-        y = self._document_header(image, margin, "أمر شراء", f"PUR-{document.get('id', '')}",
+        number = document.get("public_number") or f"PUR-{document.get('id', '')}"
+        y = self._document_header(image, margin, "أمر شراء", number,
                                   document.get("created_at"), document.get("employee_name"), scale)
 
         def write(value: Any, step: int = 38):
@@ -458,7 +482,7 @@ class PrinterManager:
         if document.get("note"):
             write(f"ملاحظة: {document['note']}")
         write("هذا المستند للكميات فقط؛ لا يثبت مديونية المورد.")
-        y = self._document_barcode(image, y + 14 * scale, f"PUR-{document.get('id', '')}", scale)
+        y = self._document_footer(image, y, number, scale)
         return image.crop((0, 0, width, min(image.height, y + margin)))
 
     def _generate_sales_return_image(self, receipt: Dict[str, Any]) -> Image.Image:
@@ -472,7 +496,8 @@ class PrinterManager:
         image = Image.new("RGB", (width, (1000 + 180 * (len(returned) + len(replacements))) * scale), "white")
         draw = _PrintDraw(image)
         kind = "استبدال" if receipt.get("kind") == "EXCHANGE" else "استرجاع"
-        y = self._document_header(image, margin, f"إيصال {kind}", f"RET-{receipt.get('id', '')}",
+        number = receipt.get("public_number") or f"RET-{receipt.get('id', '')}"
+        y = self._document_header(image, margin, f"إيصال {kind}", number,
                                   receipt.get("created_at"), receipt.get("employee_name"), scale)
 
         def write(value: Any, font=None, step: int = 36):
@@ -490,9 +515,9 @@ class PrinterManager:
         def money(value: Any) -> str:
             return f"{self._number(value):.2f} ج.م"
 
-        write(f"الفاتورة الأصلية: {receipt.get('order_id', '')}")
+        write(f"الفاتورة الأصلية: {receipt.get('order_public_number') or receipt.get('order_id', '')}")
         if receipt.get("exchange_order_id"):
-            write(f"فاتورة البديل: {receipt['exchange_order_id']}")
+            write(f"فاتورة البديل: {receipt.get('exchange_order_public_number') or receipt['exchange_order_id']}")
         if receipt.get("customer_name"):
             write(f"العميل: {receipt['customer_name']}")
         if receipt.get("customer_phone"):
@@ -518,14 +543,19 @@ class PrinterManager:
         refund = self._number(receipt.get("refund_amount", 0))
         charge = self._number(receipt.get("charge_amount", 0))
         if refund:
-            write(f"المبلغ المرتد للعميل: {money(refund)}", fonts["grand"], 50)
+            label = "المخصوم من رصيد العميل" if receipt.get("payment_method") == "Deferred Payment" else "المبلغ المرتد للعميل"
+            write(f"{label}: {money(refund)}", fonts["grand"], 50)
         elif charge:
-            write(f"المبلغ المحصّل من العميل: {money(charge)}", fonts["grand"], 50)
+            label = "المضاف إلى رصيد العميل" if receipt.get("payment_method") == "Deferred Payment" else "المبلغ المحصّل من العميل"
+            write(f"{label}: {money(charge)}", fonts["grand"], 50)
         else:
             write("لا يوجد فرق مالي", fonts["grand"], 50)
+        wallet_fee = self._number(receipt.get("wallet_fee_amount", 0))
+        if wallet_fee:
+            write(f"رسوم المحفظة: {money(wallet_fee)}")
+            write(f"إجمالي المحصّل: {money(receipt.get('collection_amount', charge + wallet_fee))}", fonts["grand"], 50)
         divider()
-        write("احتفظ بهذا الإيصال للرجوع إليه", fonts["footer"])
-        y = self._document_barcode(image, y + 14 * scale, f"RET-{receipt.get('id', '')}", scale)
+        y = self._document_footer(image, y, number, scale)
         return image.crop((0, 0, width, min(image.height, y + margin)))
 
     def _generate_receipt_image(self, order: Dict[str, Any], receipt_type: str = "customer") -> Image.Image:

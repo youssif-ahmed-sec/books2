@@ -1,4 +1,6 @@
-from sqlalchemy import Column, DateTime, ForeignKey, Numeric, String, CheckConstraint, Index
+from decimal import Decimal, ROUND_HALF_UP
+
+from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Numeric, String, CheckConstraint, Index, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 import uuid
@@ -13,9 +15,11 @@ class SalesReturn(Base):
         Index("ix_sales_returns_created_at", "created_at"),
         Index("ix_sales_returns_order_id", "order_id"),
         Index("ix_sales_returns_exchange_order_id", "exchange_order_id"),
+        UniqueConstraint("public_number", name="uq_sales_returns_public_number"),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    public_number = Column(BigInteger, server_default=text("nextval('orders_public_number_seq'::regclass)"), nullable=False)
     order_id = Column(UUID(as_uuid=True), ForeignKey("orders.id"), nullable=False)
     exchange_order_id = Column(UUID(as_uuid=True), ForeignKey("orders.id"), nullable=True)
     warehouse_id = Column(UUID(as_uuid=True), ForeignKey("warehouses.id"), nullable=False)
@@ -28,6 +32,18 @@ class SalesReturn(Base):
     returned_value = Column(Numeric(12, 2), nullable=False, default=0)
     replacement_value = Column(Numeric(12, 2), nullable=False, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    @property
+    def wallet_fee_amount(self) -> Decimal:
+        if self.payment_method != "Wallet":
+            return Decimal("0.00")
+        return (Decimal(str(self.charge_amount or 0)) / Decimal("100")).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP,
+        )
+
+    @property
+    def collection_amount(self) -> Decimal:
+        return Decimal(str(self.charge_amount or 0)) + self.wallet_fee_amount
 
 
 class SalesReturnLine(Base):

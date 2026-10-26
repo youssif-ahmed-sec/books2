@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Enum, Numeric, UniqueConstraint, CheckConstraint, Index
+from sqlalchemy import BigInteger, Column, String, Boolean, DateTime, ForeignKey, Enum, Numeric, UniqueConstraint, CheckConstraint, Index, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 import enum
@@ -56,6 +56,14 @@ class InventoryTransaction(Base):
     request_id = Column(UUID(as_uuid=True), nullable=True)
     request_fingerprint = Column(String(64), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class StockReceiptNumber(Base):
+    __tablename__ = "stock_receipt_numbers"
+
+    id = Column(UUID(as_uuid=True), primary_key=True)
+    public_number = Column(BigInteger, server_default=text("nextval('orders_public_number_seq'::regclass)"), nullable=False, unique=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class InventoryCount(Base):
