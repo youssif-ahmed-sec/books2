@@ -10,13 +10,25 @@ env/
 .coverage
 htmlcov/
 
-# Node / Frontend
+# Node / Frontend Build
 node_modules/
 dist/
 build/
 .next/
 out/
 .npm/
+
+# Packaged Frontend Static Build
+backend/static/
+
+# Cloud & Deployment artifacts
+.fastapicloud/
+
+# Print Agent Build
+print_agent/dist/
+print_agent/build/
+*.spec
+*.exe
 
 # IDEs and OS
 .vscode/
