@@ -1,2 +1,10 @@
+.local-run/
+frontend/
+print_agent/
+docs/
+backend/tests/
+backend/unit_tests/
+
+# The frontend export is built locally and served from this directory.
 !backend/static
 !backend/static/**
