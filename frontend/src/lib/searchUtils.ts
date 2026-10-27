@@ -12,6 +12,8 @@ export function normalizeSearchText(text: unknown): string {
     .replace(/[أإآء]/g, "ا") // normalize alef with hamza
     .replace(/[ة]/g, "ه") // normalize taa marbouta to haa
     .replace(/[ى]/g, "ي") // normalize alef maqsoura to yaa
+    .replace(/[٠-٩]/g, d => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)))
+    .replace(/[#＃]/g, "")
     .trim();
 }
 

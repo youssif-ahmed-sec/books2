@@ -7,13 +7,14 @@ import { cachedCurrentUser, getCurrentUser } from "@/lib/currentUser";
 import { errorMessage } from "@/lib/errors";
 import BrandMark from "./BrandMark";
 import { warehouseOnlyMode } from "@/lib/warehouseMode";
+import { useBadgeCounts } from "@/lib/badgeCounts";
 
 // Desktop Inventory sections (placed below approvals as standalone direct buttons)
 const inventoryNavItems = [
   { href: "/inventory", icon: "inventory_2", label: "المخزون", filled: true, roles: ["ADMIN", "INVENTORY_CONTROLLER"] },
   { href: "/offers", icon: "sell", label: "العروض", roles: ["ADMIN", "INVENTORY_CONTROLLER"] },
-  { href: "/purchases", icon: "receipt_long", label: "المشتريات", roles: ["ADMIN", "INVENTORY_CONTROLLER"] },
   { href: "/suppliers", icon: "local_shipping", label: "الموردين", roles: ["ADMIN"] },
+  { href: "/audit", icon: "history", label: "سجل التدقيق", roles: ["ADMIN"] },
 ];
 
 // Mobile flat navigation: Parent wrappers removed, all actual sub-pages listed directly
@@ -32,18 +33,18 @@ const mobileNavItems = [
   // العملاء
   { href: "/customers", icon: "group", label: "العملاء", roles: ["ADMIN", "CASHIER_ORDERS"] },
 
-  // ما بداخل الموافقات والرقابة
+  // ما بداخل المشتريات والرقابة
+  { href: "/purchases", icon: "receipt_long", label: "المشتريات", roles: ["ADMIN", "INVENTORY_CONTROLLER"] },
   { href: "/product-approvals", icon: "rule", label: "طلبات المنتجات", roles: ["ADMIN", "INVENTORY_CONTROLLER"] },
   { href: "/count-approvals", icon: "fact_check", label: "موافقات الجرد", roles: ["ADMIN"] },
-  { href: "/audit", icon: "history", label: "سجل التدقيق", roles: ["ADMIN"] },
 
-  // أقسام المخزون والمشتريات
+  // أقسام المخزون
   { href: "/inventory", icon: "inventory_2", label: "المخزون", filled: true, roles: ["ADMIN", "INVENTORY_CONTROLLER"] },
   { href: "/stock-operations", icon: "swap_horiz", label: "النقل والجرد", roles: ["ADMIN", "INVENTORY_CONTROLLER"] },
   { href: "/categories", icon: "category", label: "التصنيفات والعلامات", roles: ["ADMIN", "INVENTORY_CONTROLLER"] },
   { href: "/offers", icon: "sell", label: "العروض", roles: ["ADMIN", "INVENTORY_CONTROLLER"] },
-  { href: "/purchases", icon: "receipt_long", label: "المشتريات", roles: ["ADMIN", "INVENTORY_CONTROLLER"] },
   { href: "/suppliers", icon: "local_shipping", label: "الموردين", roles: ["ADMIN"] },
+  { href: "/audit", icon: "history", label: "سجل التدقيق", roles: ["ADMIN"] },
 ];
 
 let rememberedNavScrollTop = 0;
@@ -56,6 +57,7 @@ export default function SideNav() {
   const [mobileMenu, setMobileMenu] = useState({ path: pathname, open: false });
   const mobileOpen = mobileMenu.path === pathname && mobileMenu.open;
   const scrollRef = useRef<HTMLDivElement>(null);
+  const badgeCounts = useBadgeCounts();
 
   useLayoutEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = rememberedNavScrollTop;
@@ -85,11 +87,11 @@ export default function SideNav() {
   const renderNavLink = (item: { href: string; icon: string; label: string; filled?: boolean; roles?: string[] }, isSubItem = false) => {
     if (item.roles && !canAccess(item.roles)) return null;
 
-    if (warehouseOnlyMode && !["/inventory", "/stock-operations", "/product-approvals", "/suppliers", "/purchases", "/categories", "/offers"].includes(item.href)) {
+    if (warehouseOnlyMode && !["/inventory", "/stock-operations", "/product-approvals", "/suppliers", "/purchases", "/categories", "/offers", "/audit"].includes(item.href)) {
       return null;
     }
 
-    const isApprovals = item.href === "/product-approvals";
+    const isApprovals = item.href === "/purchases" || item.href === "/product-approvals";
     const isManagement = item.href === "/dashboard";
     const isSales = item.href === "/pos";
     const isInventory = item.href === "/inventory";
@@ -97,14 +99,20 @@ export default function SideNav() {
     const isActive = isSubItem
       ? (pathname === item.href || pathname.startsWith(`${item.href}/`))
       : isApprovals
-      ? ["/product-approvals", "/count-approvals", "/audit", "/approvals"].some(h => pathname === h || pathname.startsWith(`${h}/`))
+      ? ["/purchases", "/product-approvals", "/count-approvals", "/approvals"].some(h => pathname === h || pathname.startsWith(`${h}/`))
       : isManagement
       ? ["/dashboard", "/financials", "/reports", "/management"].some(h => pathname === h || pathname.startsWith(`${h}/`))
       : isSales
       ? ["/pos", "/cash-register", "/orders", "/returns", "/sales"].some(h => pathname === h || pathname.startsWith(`${h}/`))
       : isInventory
-      ? ["/inventory", "/stock-operations", "/categories"].some(h => pathname === h || pathname.startsWith(`${h}/`))
+      ? ["/inventory", "/stock-operations", "/categories", "/audit"].some(h => pathname === h || pathname.startsWith(`${h}/`))
       : (pathname === item.href || pathname.startsWith(`${item.href}/`));
+
+    const count = item.href === "/purchases"
+      ? (badgeCounts.purchases + badgeCounts.product_approvals)
+      : item.href === "/product-approvals"
+      ? badgeCounts.product_approvals
+      : 0;
 
     return (
       <Link
@@ -124,6 +132,15 @@ export default function SideNav() {
           {item.icon}
         </span>
         <span>{warehouseOnlyMode && item.href === "/stock-operations" ? "الجرد" : item.label}</span>
+        {count > 0 && (
+          <span
+            className={`mr-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-bold ${
+              isActive ? "bg-white text-primary" : "bg-primary text-white shadow-sm"
+            }`}
+          >
+            {count}
+          </span>
+        )}
       </Link>
     );
   };
@@ -194,10 +211,10 @@ export default function SideNav() {
                 {/* 3. العملاء */}
                 {renderNavLink({ href: "/customers", icon: "group", label: "العملاء" })}
 
-                {/* 4. الموافقات والرقابة */}
-                {renderNavLink({ href: "/product-approvals", icon: "fact_check", label: "الموافقات والرقابة" })}
+                {/* 4. المشتريات والرقابة */}
+                {renderNavLink({ href: "/purchases", icon: "fact_check", label: "المشتريات والرقابة" })}
 
-                {/* 5. أقسام المخزون والمشتريات (مباشرة بالأسفل بعد الموافقات والرقابة) */}
+                {/* 5. أقسام المخزون (مباشرة بالأسفل بعد المشتريات والرقابة) */}
                 {inventoryNavItems.map((item) => renderNavLink(item, false))}
                 </>}
               </div>

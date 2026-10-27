@@ -15,6 +15,9 @@ const nextConfig: NextConfig = {
     ],
     unoptimized: true,
   },
+  experimental: {
+    cpus: 2,
+  },
 };
 
 export default nextConfig;

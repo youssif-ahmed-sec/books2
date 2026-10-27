@@ -30,8 +30,11 @@ class PurchaseDocumentService:
         return (await db.execute(PurchaseDocumentService.query().where(PurchaseDocument.id == document_id))).scalar_one_or_none()
 
     @staticmethod
-    async def list_documents(db: AsyncSession) -> list[PurchaseDocument]:
-        return (await db.execute(PurchaseDocumentService.query().order_by(PurchaseDocument.created_at.desc()))).scalars().unique().all()
+    async def list_documents(db: AsyncSession, requester_id: uuid.UUID | None = None) -> list[PurchaseDocument]:
+        query = PurchaseDocumentService.query()
+        if requester_id is not None:
+            query = query.where(PurchaseDocument.requested_by == requester_id)
+        return (await db.execute(query.order_by(PurchaseDocument.created_at.desc()))).scalars().unique().all()
 
     @staticmethod
     async def build_lines(db: AsyncSession, document_id: uuid.UUID, payload: PurchaseDocumentInput) -> list[PurchaseDocumentLine]:
@@ -90,8 +93,10 @@ class PurchaseDocumentService:
         db.add_all(lines)
         db.add(AuditLog(user_id=user_id, action="REQUEST_PURCHASE_DOCUMENT", entity_type="PurchaseDocument", entity_id=str(document_id),
                         new_value={"supplier_id": str(payload.supplier_id), "lines": [line.model_dump(mode="json") for line in payload.lines]}))
-        await notify_roles(db, (RoleEnum.ADMIN,), kind="purchase_request", title="طلب شراء جديد",
-                           message=f"طلب يضم {len(lines)} صنف", href="/purchases")
+        requester_role = (await db.execute(select(User.role).where(User.id == user_id))).scalar_one_or_none()
+        if requester_role != RoleEnum.ADMIN:
+            await notify_roles(db, (RoleEnum.ADMIN,), kind="purchase_request", title="طلب شراء جديد",
+                               message=f"طلب يضم {len(lines)} صنف", href="/purchases")
         try:
             await db.commit()
         except IntegrityError:
@@ -103,14 +108,36 @@ class PurchaseDocumentService:
         return document_id
 
     @staticmethod
+    async def update_supplier(db: AsyncSession, document_id: uuid.UUID, supplier_id: uuid.UUID, user_id: uuid.UUID) -> PurchaseDocument:
+        document = (await db.execute(select(PurchaseDocument).where(
+            PurchaseDocument.id == document_id,
+        ).with_for_update())).scalar_one_or_none()
+        if document is None:
+            raise LookupError("Purchase document not found")
+        if document.status not in ("REQUESTED", "APPROVED", "ORDERED"):
+            raise ValueError("لا يمكن تغيير المورد بعد استلام البضاعة أو إلغاء الأمر")
+        supplier = (await db.execute(select(Supplier).where(Supplier.id == supplier_id, Supplier.is_deleted == False))).scalar_one_or_none()
+        if supplier is None:
+            raise ValueError("المورد المحدد غير متاح")
+        document.supplier_id = supplier_id
+        document.supplier_name = supplier.name
+        db.add(AuditLog(user_id=user_id, action="UPDATE_PURCHASE_SUPPLIER", entity_type="PurchaseDocument",
+                        entity_id=str(document_id), new_value={"supplier_id": str(supplier_id), "supplier_name": supplier.name}))
+        if document.requested_by != user_id:
+            notify_user(db, document.requested_by, kind="purchase_updated", title="تم تغيير مورد طلب الشراء",
+                        message=f"غيّر المدير المورد في طلب الشراء رقم {document.public_number} إلى {supplier.name}.", href="/purchases")
+        await db.commit()
+        return await PurchaseDocumentService.get(db, document_id)
+
+    @staticmethod
     async def edit(db: AsyncSession, document_id: uuid.UUID, payload: PurchaseDocumentInput, user_id: uuid.UUID) -> None:
         document = (await db.execute(select(PurchaseDocument).where(
             PurchaseDocument.id == document_id,
         ).with_for_update())).scalar_one_or_none()
         if document is None:
             raise LookupError("Purchase document not found")
-        if document.status != "REQUESTED":
-            raise ValueError("Only a requested purchase can be edited")
+        if document.status not in ("REQUESTED", "APPROVED"):
+            raise ValueError("لا يمكن تعديل أمر الشراء في هذه الحالة")
         lines = await PurchaseDocumentService.build_lines(db, document_id, payload)
         previous = (await db.execute(select(PurchaseDocumentLine).where(
             PurchaseDocumentLine.document_id == document_id,
@@ -124,6 +151,9 @@ class PurchaseDocumentService:
         db.add_all(lines)
         db.add(AuditLog(user_id=user_id, action="EDIT_PURCHASE_DOCUMENT", entity_type="PurchaseDocument", entity_id=str(document_id),
                         new_value={"supplier_id": str(payload.supplier_id), "lines": [line.model_dump(mode="json") for line in payload.lines]}))
+        if document.requested_by != user_id:
+            notify_user(db, document.requested_by, kind="purchase_updated", title="تم تعديل طلب الشراء",
+                        message=f"عدّل المدير تفاصيل طلب الشراء رقم {document.public_number}.", href="/purchases")
         await db.commit()
 
     @staticmethod
@@ -143,16 +173,33 @@ class PurchaseDocumentService:
         }.get((document.status, action))
         if next_state is None:
             raise ValueError("This purchase action is unavailable in its current state")
+        if action == "approve":
+            lines = (await db.execute(select(PurchaseDocumentLine).where(
+                PurchaseDocumentLine.document_id == document_id,
+            ))).scalars().all()
+            if document.supplier_id is None or not lines or any(
+                line.quantity is None or line.base_quantity is None for line in lines
+            ):
+                raise ValueError("حدد المورد والكميات قبل الموافقة على طلب الشراء")
         document.status = next_state
         if action == "approve":
             document.approved_by = user_id
-            notify_user(db, document.requested_by, kind="purchase_approved", title="تمت الموافقة على طلب الشراء",
-                        message="يمكن متابعة الطلب من قسم المشتريات.", href="/purchases")
+            if document.requested_by != user_id:
+                notify_user(db, document.requested_by, kind="purchase_approved", title="تمت الموافقة على طلب الشراء",
+                            message=f"وافق المدير على طلب الشراء رقم {document.public_number}. يمكنك استلام الأصناف في المخزن الآن.", href="/purchases")
         elif action == "reject":
-            notify_user(db, document.requested_by, kind="purchase_rejected", title="تم رفض طلب الشراء",
-                        message="راجع الطلب في قسم المشتريات.", href="/purchases")
+            if document.requested_by != user_id:
+                notify_user(db, document.requested_by, kind="purchase_rejected", title="تم رفض طلب الشراء",
+                            message=f"رفض المدير طلب الشراء رقم {document.public_number}.", href="/purchases")
+        elif action == "cancel":
+            if document.requested_by != user_id:
+                notify_user(db, document.requested_by, kind="purchase_cancelled", title="تم إلغاء أمر الشراء",
+                            message=f"ألغى المدير أمر الشراء رقم {document.public_number}.", href="/purchases")
         elif action == "place":
             document.ordered_at = datetime.now(timezone.utc)
+            if document.requested_by != user_id:
+                notify_user(db, document.requested_by, kind="purchase_ordered", title="تم إصدار أمر الشراء",
+                            message=f"تم إصدار أمر الشراء رقم {document.public_number} للمورد.", href="/purchases")
         db.add(AuditLog(user_id=user_id, action=f"{action.upper()}_PURCHASE_DOCUMENT", entity_type="PurchaseDocument",
                         entity_id=str(document_id), new_value={"status": next_state}))
         await db.commit()
@@ -172,7 +219,7 @@ class PurchaseDocumentService:
             if prior.document_id != document_id or prior.request_fingerprint != fingerprint or prior.received_by != user_id:
                 raise ValueError("Request ID was already used for another receipt")
             return prior.id
-        if document.status not in ("ORDERED", "PARTIALLY_RECEIVED"):
+        if document.status not in ("APPROVED", "ORDERED", "PARTIALLY_RECEIVED"):
             raise ValueError("Purchase document is not ready for receiving")
         warehouse = (await db.execute(select(Warehouse).where(
             Warehouse.id == payload.warehouse_id, Warehouse.is_active == True,

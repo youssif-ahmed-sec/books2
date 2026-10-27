@@ -87,6 +87,17 @@ async def list_requests(
     return [present(row, requester.full_name or requester.username or requester.email) for row, requester in rows]
 
 
+@router.get("/pending-product-ids", response_model=list[str])
+async def list_pending_product_ids(
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_inventory_access),
+):
+    rows = (await db.execute(
+        select(ProductApproval.product_id).where(ProductApproval.status == "PENDING")
+    )).scalars().all()
+    return list({str(pid) for pid in rows})
+
+
 @router.get("/{request_id}")
 async def get_request(
     request_id: UUID, db: AsyncSession = Depends(get_db),
@@ -153,8 +164,9 @@ async def approve_request(
     row.status = "APPROVED"
     row.reviewed_by = manager.id
     row.reviewed_at = datetime.now(timezone.utc)
+    action_text = "تعديل" if row.action == "UPDATE" else "حذف"
     notify_user(db, row.requested_by, kind="product_approved", title="تمت الموافقة على طلب المنتج",
-                message=row.product_name, href="/product-approvals")
+                message=f"اعتمد المدير طلب {action_text} المنتج {row.product_name}.", href="/product-approvals")
     try:
         if row.action == "UPDATE":
             await ProductService.update_product(db, row.product_id, ProductUpdate.model_validate(row.proposed), manager.id)
@@ -183,7 +195,8 @@ async def reject_request(
     if len(payload.reason.strip()) < 3:
         raise HTTPException(status_code=422, detail="اكتب سبب الرفض من ٣ أحرف على الأقل.")
     row.rejection_reason = payload.reason.strip()
+    action_text = "تعديل" if row.action == "UPDATE" else "حذف"
     notify_user(db, row.requested_by, kind="product_rejected", title="رُفض طلب المنتج",
-                message=row.product_name, href="/product-approvals")
+                message=f"رفض المدير طلب {action_text} المنتج {row.product_name} - السبب: {row.rejection_reason}", href="/product-approvals")
     await db.commit()
     return present(row)

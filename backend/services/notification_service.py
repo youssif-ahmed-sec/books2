@@ -42,7 +42,7 @@ async def notify_stock_alert_after_product_edit(
     if previous is not None or current is None:
         return
     kind, title = ("out_of_stock", "نفاد مخزون") if current == "out" else ("low_stock", "مخزون منخفض")
-    await notify_roles(db, (RoleEnum.ADMIN, RoleEnum.INVENTORY_CONTROLLER),
+    await notify_roles(db, (RoleEnum.INVENTORY_CONTROLLER,),
                        kind=kind, title=title,
                        message=f"{product.name_ar} · الرصيد {current_stock} {product.base_unit}", href="/inventory")
 
@@ -50,12 +50,12 @@ async def notify_stock_alert_after_product_edit(
 async def notify_low_stock_crossing(db: AsyncSession, product, before: Decimal, after: Decimal) -> None:
     minimum = Decimal(str(product.min_stock_level or 0))
     if after == 0 and before > 0:
-        await notify_roles(db, (RoleEnum.ADMIN, RoleEnum.INVENTORY_CONTROLLER),
+        await notify_roles(db, (RoleEnum.INVENTORY_CONTROLLER,),
                            kind="out_of_stock", title="نفاد مخزون",
                            message=f"{product.name_ar} · الرصيد صفر {product.base_unit}", href="/inventory")
         return
     crossed = (before > minimum and after <= minimum) if minimum > 0 else (before >= 5 and after < 5)
     if after < before and crossed:
-        await notify_roles(db, (RoleEnum.ADMIN, RoleEnum.INVENTORY_CONTROLLER),
+        await notify_roles(db, (RoleEnum.INVENTORY_CONTROLLER,),
                            kind="low_stock", title="مخزون منخفض",
                            message=f"{product.name_ar} · الرصيد {after} {product.base_unit}", href="/inventory")

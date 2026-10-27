@@ -43,9 +43,9 @@ class PurchaseLineResponse(BaseModel):
     product_name: str
     unit_name: str
     base_unit_name: str
-    quantity: Decimal
+    quantity: Decimal | None
     conversion_factor: Decimal
-    base_quantity: Decimal
+    base_quantity: Decimal | None
     received_base_quantity: Decimal
     model_config = ConfigDict(from_attributes=True)
 
@@ -69,7 +69,7 @@ class PurchaseReceiptResponse(BaseModel):
 class PurchaseDocumentResponse(BaseModel):
     id: UUID
     public_number: int
-    supplier_id: UUID
+    supplier_id: UUID | None
     supplier_name: str
     status: str
     note: str | None

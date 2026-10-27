@@ -150,8 +150,85 @@ function ProductApprovalsContent() {
             <div><h2 className="text-xl font-bold">{selected.action === "UPDATE" ? "تعديل" : "حذف"} {selected.product_name}</h2>
               <p className="app-muted mt-1 text-sm">{selected.action === "DELETE" ? "الحذف أرشفة للمنتج بعد التحقق من خلو رصيده وعدم وجود أمر شراء مفتوح." : "التعديلات المقترحة لا تُطبّق قبل موافقة المدير."}</p></div>
             {selected.action === "UPDATE" && <>
-              <div className="space-y-2">{changes.length ? changes.map(([key, value]) => <div key={key} className="app-table-row grid gap-2 py-3 text-sm sm:grid-cols-3"><strong>{labels[key]}</strong><span className="app-muted break-all">الحالي: {displayField(key, selected.baseline.fields[key])}</span><span className="break-all">المقترح: {displayField(key, value)}</span></div>) : <p className="app-muted text-sm">لا يوجد تغيير في البيانات الأساسية.</p>}</div>
-              {hasProposedUnits && <div className="border-t border-white/10 pt-4"><h3 className="font-bold">الوحدات والأسعار</h3><div className="mt-3 grid gap-4 xl:grid-cols-2"><div><p className="app-muted mb-2 text-sm">الحالي</p><div className="space-y-2 text-sm">{(selected.baseline.units as Array<{ unit_name: string; conversion_factor: string; barcode?: string; prices?: Array<{ level: string; price: string }> }>).map((unit, index) => <div key={index} className="app-table-row p-3"><strong>{unit.unit_name}</strong><p className="app-muted">التحويل: {unit.conversion_factor} · الباركود: {unit.barcode || "بدون"}</p><p>{unit.prices?.map(price => `${price.level}: ${price.price} ج.م`).join(" · ")}</p></div>)}</div></div><div><p className="app-muted mb-2 text-sm">المقترح</p><div className="space-y-2 text-sm">{(selected.proposed?.units as Array<{ unit_name: string; conversion_factor: number; barcode?: string; prices?: Array<{ price_level: string; price: number }> }> || []).map((unit, index) => <div key={index} className="app-table-row p-3"><strong>{unit.unit_name}</strong><p className="app-muted">التحويل: {unit.conversion_factor} · الباركود: {unit.barcode || "بدون"}</p><p>{unit.prices?.map(price => `${price.price_level}: ${price.price} ج.م`).join(" · ")}</p></div>)}</div></div></div></div>}
+              <div className="space-y-3">
+                {changes.length ? changes.map(([key, value]) => (
+                  <div key={key} className="rounded-2xl border border-white/10 bg-white/[0.02] p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-bold text-white">{labels[key] || key}</span>
+                      <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">تعديل</span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                      <div className="rounded-xl border border-rose-500/20 bg-rose-950/20 p-3 text-right">
+                        <p className="text-[11px] font-bold text-rose-300/80 mb-1">القيمة السابقة</p>
+                        <p className="font-semibold text-rose-200 break-words">{displayField(key, selected.baseline.fields[key])}</p>
+                      </div>
+                      <div className="rounded-xl border border-emerald-500/20 bg-emerald-950/20 p-3 text-right">
+                        <p className="text-[11px] font-bold text-emerald-300/80 mb-1">القيمة الجديدة المقترحة</p>
+                        <p className="font-semibold text-emerald-200 break-words">{displayField(key, value)}</p>
+                      </div>
+                    </div>
+                  </div>
+                )) : <p className="app-muted text-sm">لا يوجد تغيير في البيانات الأساسية.</p>}
+              </div>
+
+              {hasProposedUnits && (
+                <div className="border-t border-white/10 pt-5 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-base font-bold text-white">مقارنة الوحدات والأسعار</h3>
+                    <span className="text-xs font-bold text-primary">تغيير في تسعير الوحدات</span>
+                  </div>
+                  <div className="grid gap-4 xl:grid-cols-2">
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2">
+                        <span className="inline-block w-2.5 h-2.5 rounded-full bg-rose-400" />
+                        <h4 className="text-xs font-bold text-rose-300">الوحدات والأسعار الحالية</h4>
+                      </div>
+                      <div className="space-y-2">
+                        {(selected.baseline.units as Array<{ unit_name: string; conversion_factor: string; barcode?: string; prices?: Array<{ level: string; price: string }> }>).map((unit, index) => (
+                          <div key={index} className="rounded-xl border border-rose-500/20 bg-rose-950/20 p-3.5 text-sm space-y-2">
+                            <div className="flex items-center justify-between">
+                              <strong className="text-rose-100">{unit.unit_name}</strong>
+                              <span className="text-xs text-rose-300/80">معامل التحويل {unit.conversion_factor}</span>
+                            </div>
+                            {unit.barcode && <p className="text-xs text-rose-200/70 font-mono" dir="ltr">باركود: {unit.barcode}</p>}
+                            <div className="flex flex-wrap gap-2 pt-1 border-t border-rose-500/10">
+                              {unit.prices?.map(price => (
+                                <span key={price.level} className="text-xs rounded-md bg-rose-900/30 px-2 py-1 text-rose-200 font-medium">
+                                  {price.level}: {price.price} ج.م
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2">
+                        <span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-400" />
+                        <h4 className="text-xs font-bold text-emerald-300">الوحدات والأسعار المقترحة</h4>
+                      </div>
+                      <div className="space-y-2">
+                        {((selected.proposed?.units as Array<{ unit_name: string; conversion_factor: number; barcode?: string; prices?: Array<{ price_level: string; price: number }> }>) || []).map((unit, index) => (
+                          <div key={index} className="rounded-xl border border-emerald-500/20 bg-emerald-950/20 p-3.5 text-sm space-y-2">
+                            <div className="flex items-center justify-between">
+                              <strong className="text-emerald-100">{unit.unit_name}</strong>
+                              <span className="text-xs text-emerald-300/80">معامل التحويل {unit.conversion_factor}</span>
+                            </div>
+                            {unit.barcode && <p className="text-xs text-emerald-200/70 font-mono" dir="ltr">باركود: {unit.barcode}</p>}
+                            <div className="flex flex-wrap gap-2 pt-1 border-t border-emerald-500/10">
+                              {unit.prices?.map(price => (
+                                <span key={price.price_level} className="text-xs rounded-md bg-emerald-900/30 px-2 py-1 text-emerald-200 font-medium">
+                                  {price.price_level}: {price.price} ج.م
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </>}
             {selected.rejection_reason && <p className="text-sm text-red-300">سبب الرفض: {selected.rejection_reason}</p>}
             {isAdmin && selected.status === "PENDING" && <div className="flex gap-3 border-t border-white/10 pt-5"><button type="button" className="app-primary-button" onClick={() => setDecision("approve")}>موافقة وتطبيق</button><button type="button" className="app-secondary-button" onClick={() => setDecision("reject")}>رفض الطلب</button></div>}

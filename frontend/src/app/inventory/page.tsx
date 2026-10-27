@@ -83,6 +83,9 @@ export default function InventoryPage() {
   const [purchaseNeeded, setPurchaseNeeded] = useState<PurchaseNeeded[]>(() => readSectionSnapshot<InventorySnapshot>("inventory")?.purchaseNeeded || []);
   const [purchaseNeededLoading, setPurchaseNeededLoading] = useState(() => !readSectionSnapshot<InventorySnapshot>("inventory"));
   const [loading, setLoading] = useState(() => !readSectionSnapshot<InventorySnapshot>("inventory"));
+  const [pendingApprovalIds, setPendingApprovalIds] = useState<Set<string>>(new Set());
+  const [submittingPurchaseId, setSubmittingPurchaseId] = useState<string | null>(null);
+  const [requestedProductIds, setRequestedProductIds] = useState<Set<string>>(new Set());
   const hydrated = useHydrated();
   const userRole: UserRole | null = hydrated ? getUserRole() : null;
   const hasInventoryAccess = userRole === "ADMIN" || userRole === "INVENTORY_CONTROLLER";
@@ -299,11 +302,45 @@ export default function InventoryPage() {
     return () => window.clearTimeout(timer);
   }, [loadPurchaseNeeded]);
 
+  const loadPendingApprovals = useCallback(async () => {
+    if (!userRole) return;
+    try {
+      const ids = (await fetchApi("/product-approvals/pending-product-ids", { silentErrors: true })) as string[];
+      if (Array.isArray(ids)) {
+        setPendingApprovalIds(new Set(ids));
+      }
+    } catch {
+      // silent
+    }
+  }, [userRole]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void loadPendingApprovals(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadPendingApprovals]);
+
+  const handleQuickPurchaseRequest = async (productId: string, productName: string) => {
+    setSubmittingPurchaseId(productId);
+    try {
+      const res = (await fetchApi("/purchase-documents/quick-request", {
+        method: "POST",
+        body: JSON.stringify({ product_id: productId }),
+      })) as { message?: string; already_exists?: boolean };
+      setRequestedProductIds(previous => new Set(previous).add(productId));
+      notifySuccess(res?.message || `تم إرسال طلب شراء للمدير للصنف ${productName} بنجاح`);
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : "تعذر إرسال طلب الشراء للمدير");
+    } finally {
+      setSubmittingPurchaseId(null);
+    }
+  };
+
   const refreshData = useCallback(() => {
     auxiliaryData.current = null;
     void loadData(false);
     void loadPurchaseNeeded();
-  }, [loadData, loadPurchaseNeeded]);
+    void loadPendingApprovals();
+  }, [loadData, loadPurchaseNeeded, loadPendingApprovals]);
 
   const handleDelete = async (item: InventoryItem) => {
     const needsApproval = userRole === "INVENTORY_CONTROLLER";
@@ -487,6 +524,7 @@ export default function InventoryPage() {
                         <InventoryTableRow
                           key={item.id}
                           item={item}
+                          hasPendingApproval={pendingApprovalIds.has(item.id)}
                           onEdit={() => {
                             setSelectedItem(item);
                             setShowEditPanel(true);
@@ -617,14 +655,14 @@ export default function InventoryPage() {
                   purchaseNeeded.map((item) => (
                     <div
                       key={item.id}
-                      className="flex min-w-0 items-center justify-between p-4 rounded-2xl bg-white/5 border border-white/5"
+                      className="flex min-w-0 items-center justify-between gap-3 p-4 rounded-2xl bg-white/5 border border-white/5"
                     >
-                      <div className="flex min-w-0 items-center gap-4">
-                        <div className="w-12 h-12 shrink-0 rounded-2xl bg-surface flex items-center justify-center border border-white/5 overflow-hidden">
+                      <div className="flex min-w-0 items-center gap-3">
+                        <div className="w-11 h-11 shrink-0 rounded-2xl bg-surface flex items-center justify-center border border-white/5 overflow-hidden">
                           {item.image ? (
-                            <Image src={item.image} alt={item.name} width={32} height={32} className="w-8 h-8 object-contain" unoptimized />
+                            <Image src={item.image} alt={item.name} width={32} height={32} className="w-7 h-7 object-contain" unoptimized />
                           ) : (
-                            <span className="material-symbols-outlined text-on-surface-variant">inventory</span>
+                            <span className="material-symbols-outlined text-on-surface-variant text-[20px]">inventory</span>
                           )}
                         </div>
                         <div className="min-w-0">
@@ -632,6 +670,23 @@ export default function InventoryPage() {
                           <p className="text-xs text-[#ffb4ab]">مخزون: {item.stock}</p>
                         </div>
                       </div>
+                      {userRole === "INVENTORY_CONTROLLER" && <button
+                        type="button"
+                        onClick={() => void handleQuickPurchaseRequest(item.id, item.name)}
+                        disabled={submittingPurchaseId === item.id || requestedProductIds.has(item.id)}
+                        className={`h-9 px-3 rounded-full flex items-center gap-1.5 text-xs font-bold transition-all shrink-0 ${
+                          requestedProductIds.has(item.id)
+                            ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
+                            : "glass hover:bg-white/10 text-primary border border-primary/20 hover:border-primary/40"
+                        } disabled:opacity-50`}
+                        title={requestedProductIds.has(item.id) ? "تم إرسال طلب شراء لهذا المنتج للمدير" : "إرسال طلب شراء للمدير"}
+                        aria-label={`طلب شراء ${item.name}`}
+                      >
+                        <span className="material-symbols-outlined text-[17px]">
+                          {requestedProductIds.has(item.id) ? "check" : "add_shopping_cart"}
+                        </span>
+                        <span>{requestedProductIds.has(item.id) ? "تم الإرسال" : "طلب شراء"}</span>
+                      </button>}
                     </div>
                   ))
                 )}

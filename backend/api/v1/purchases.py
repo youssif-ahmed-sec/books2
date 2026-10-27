@@ -24,16 +24,19 @@ router = APIRouter(prefix="/purchases", tags=["Purchases"])
 @router.get("", response_model=list[PurchaseOrderResponse])
 async def list_purchase_orders(
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_inventory_access),
+    user: User = Depends(require_inventory_access),
 ):
-    return (await db.execute(select(PurchaseOrder).order_by(PurchaseOrder.created_at.desc()))).scalars().all()
+    query = select(PurchaseOrder)
+    if user.role != RoleEnum.ADMIN:
+        query = query.where(PurchaseOrder.requested_by == user.id)
+    return (await db.execute(query.order_by(PurchaseOrder.created_at.desc()))).scalars().all()
 
 
 @router.post("", response_model=PurchaseOrderResponse, status_code=status.HTTP_201_CREATED)
 async def request_purchase(
     payload: PurchaseRequestCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_inventory_access),
+    user: User = Depends(require_admin),
 ):
     product = (await db.execute(select(Product).where(
         Product.id == payload.product_id, Product.is_deleted == False, Product.is_bundle == False,
@@ -129,10 +132,13 @@ async def receive_purchase(
     if prior is not None:
         if prior.request_fingerprint != fingerprint or prior.reference_document != str(purchase_id) or prior.user_id != user.id:
             raise HTTPException(status_code=409, detail="Request ID was already used for a different receipt")
-        return (await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == purchase_id))).scalar_one()
+        order = (await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == purchase_id))).scalar_one_or_none()
+        if order is None or (user.role != RoleEnum.ADMIN and order.requested_by != user.id):
+            raise HTTPException(status_code=404, detail="Purchase order not found")
+        return order
 
     order = (await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == purchase_id).with_for_update())).scalar_one_or_none()
-    if order is None:
+    if order is None or (user.role != RoleEnum.ADMIN and order.requested_by != user.id):
         raise HTTPException(status_code=404, detail="Purchase order not found")
     if order.status not in ("ORDERED", "PARTIALLY_RECEIVED"):
         raise HTTPException(status_code=409, detail="Purchase order is not ready for receiving")

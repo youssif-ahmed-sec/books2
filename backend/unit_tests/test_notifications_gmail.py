@@ -64,13 +64,13 @@ def test_notification_cursor_requires_both_parts():
     assert raised.value.status_code == 422
 
 
-def test_low_stock_crossing_creates_notifications_for_admin_and_inventory():
+def test_low_stock_crossing_creates_notifications_for_inventory_controller():
     class Db:
         def __init__(self):
             self.added = []
 
         async def execute(self, query):
-            return Result([uuid4(), uuid4()])
+            return Result([uuid4()])
 
         def add_all(self, rows):
             self.added.extend(rows)
@@ -78,7 +78,7 @@ def test_low_stock_crossing_creates_notifications_for_admin_and_inventory():
     db = Db()
     product = SimpleNamespace(name_ar="كتاب", base_unit="قطعة", min_stock_level=5)
     asyncio.run(notify_low_stock_crossing(db, product, Decimal("6"), Decimal("4")))
-    assert len(db.added) == 2
+    assert len(db.added) == 1
     assert all(notice.kind == "low_stock" for notice in db.added)
     db.added.clear()
     asyncio.run(notify_low_stock_crossing(db, product, Decimal("4"), Decimal("3")))
@@ -123,7 +123,7 @@ def test_gmail_without_credentials_stays_disabled(monkeypatch):
 def test_shift_summary_snapshots_cash_breakdown_and_difference():
     class ShiftDb:
         def __init__(self):
-            self.results = [Result(SimpleNamespace(username="cashier1", email="cashier@example.com")),
+            self.results = [Result(SimpleNamespace(full_name=None, username="cashier1", email="cashier@example.com")),
                             Result([("SALE", 2, Decimal("120")), ("COLLECTION", 1, Decimal("30")),
                                     ("REFUND", 1, Decimal("10"))]),
                             Result([SimpleNamespace(amount=Decimal("-5"), reason="مصروف توصيل")])]

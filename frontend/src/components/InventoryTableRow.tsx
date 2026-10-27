@@ -34,9 +34,10 @@ interface InventoryTableRowProps {
   onEdit: (item: StockItem) => void;
   onDelete: (item: StockItem) => void;
   userRole: UserRole | null;
+  hasPendingApproval?: boolean;
 }
 
-export function InventoryTableRow({ item, onEdit, onDelete, userRole }: InventoryTableRowProps) {
+export function InventoryTableRow({ item, onEdit, onDelete, userRole, hasPendingApproval }: InventoryTableRowProps) {
   const [showBarcodeModal, setShowBarcodeModal] = useState(false);
   const barcodeUnits: BarcodePrintUnit[] = item.units.filter(unit => unit.barcode).map(unit => ({
     id: unit.id, name: unit.unit_name, barcode: unit.barcode, price: unit.retailPrice, copies: 1,
@@ -67,7 +68,14 @@ export function InventoryTableRow({ item, onEdit, onDelete, userRole }: Inventor
             )}
           </div>
           <div className="text-right">
-            <span className="font-bold text-[#e5e2e1] group-hover:text-primary group-focus:text-primary">{item.nameAr}</span>
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-[#e5e2e1] group-hover:text-primary group-focus:text-primary">{item.nameAr}</span>
+              {hasPendingApproval && (
+                <span className="inline-flex items-center rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold text-amber-300 border border-amber-500/25">
+                  قيد المراجعة
+                </span>
+              )}
+            </div>
             <p className="text-[10px] text-on-surface-variant">{item.nameEn}</p>
             {item.brand && <p className="text-xs text-[#e2bfb0]/70">{item.brand}</p>}
             {item.supplier && <p className="text-xs text-on-surface-variant">المورد: {item.supplier}</p>}
@@ -148,8 +156,10 @@ export function InventoryTableRow({ item, onEdit, onDelete, userRole }: Inventor
           {canEditProduct(userRole) && (
             <button
               type="button"
+              disabled={hasPendingApproval}
               onClick={() => onEdit(item)}
-              className="h-9 px-3 rounded-full glass flex items-center justify-center text-xs font-bold text-[#e2bfb0] hover:text-primary hover:border-primary/30 transition-all"
+              className="h-9 px-3 rounded-full glass flex items-center justify-center text-xs font-bold text-[#e2bfb0] hover:text-primary hover:border-primary/30 transition-all disabled:opacity-40 disabled:hover:text-[#e2bfb0] disabled:hover:border-transparent"
+              title={hasPendingApproval ? "يوجد طلب تعديل أو حذف معلّق لهذا المنتج بانتظار قرار المدير" : `تعديل ${item.nameAr}`}
               aria-label={`تعديل ${item.nameAr}`}
             >
               تعديل

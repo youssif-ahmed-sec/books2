@@ -50,6 +50,51 @@ async def list_notifications(
             "unread_count": unread, "has_more": len(rows) > limit}
 
 
+@router.get("/badge-counts")
+async def get_badge_counts(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    from models.product_approval import ProductApproval
+    from models.purchase_document import PurchaseDocument
+    from models.user import RoleEnum
+
+    counts = {
+        "product_approvals": 0,
+        "purchases": 0,
+    }
+
+    if user.role == RoleEnum.ADMIN:
+        approvals_count = (await db.execute(
+            select(func.count(ProductApproval.id)).where(ProductApproval.status == "PENDING")
+        )).scalar_one()
+        counts["product_approvals"] = int(approvals_count or 0)
+
+        purchases_count = (await db.execute(
+            select(func.count(PurchaseDocument.id)).where(PurchaseDocument.status == "REQUESTED")
+        )).scalar_one()
+        counts["purchases"] = int(purchases_count or 0)
+
+    elif user.role == RoleEnum.INVENTORY_CONTROLLER:
+        ready_purchases_count = (await db.execute(
+            select(func.count(PurchaseDocument.id)).where(
+                PurchaseDocument.requested_by == user.id,
+                PurchaseDocument.status.in_(("APPROVED", "ORDERED", "PARTIALLY_RECEIVED"))
+            )
+        )).scalar_one()
+        counts["purchases"] = int(ready_purchases_count or 0)
+
+        approvals_count = (await db.execute(
+            select(func.count(ProductApproval.id)).where(
+                ProductApproval.requested_by == user.id,
+                ProductApproval.status == "PENDING",
+            )
+        )).scalar_one()
+        counts["product_approvals"] = int(approvals_count or 0)
+
+    return counts
+
+
 @router.get("/email/status")
 async def gmail_status(user: User = Depends(require_admin)):
     return {"configured": gmail_configured()}

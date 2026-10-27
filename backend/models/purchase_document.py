@@ -12,6 +12,7 @@ class PurchaseDocument(Base):
     __tablename__ = "purchase_documents"
     __table_args__ = (
         CheckConstraint("status IN ('REQUESTED', 'APPROVED', 'ORDERED', 'PARTIALLY_RECEIVED', 'RECEIVED', 'REJECTED', 'CANCELLED')", name="ck_purchase_documents_status"),
+        CheckConstraint("status IN ('REQUESTED', 'REJECTED', 'CANCELLED') OR supplier_id IS NOT NULL", name="ck_purchase_documents_approved_supplier"),
         UniqueConstraint("request_id", name="uq_purchase_documents_request_id"),
         UniqueConstraint("public_number", name="uq_purchase_documents_public_number"),
     )
@@ -20,7 +21,7 @@ class PurchaseDocument(Base):
     public_number = Column(BigInteger, server_default=text("nextval('orders_public_number_seq'::regclass)"), nullable=False)
     request_id = Column(UUID(as_uuid=True), nullable=False)
     request_fingerprint = Column(String(64), nullable=False)
-    supplier_id = Column(UUID(as_uuid=True), ForeignKey("suppliers.id"), nullable=False)
+    supplier_id = Column(UUID(as_uuid=True), ForeignKey("suppliers.id"), nullable=True)
     supplier_name = Column(String(200), nullable=False)
     status = Column(String(24), nullable=False, default="REQUESTED")
     note = Column(String(500), nullable=True)
@@ -47,9 +48,9 @@ class PurchaseDocumentLine(Base):
     product_name = Column(String(200), nullable=False)
     unit_name = Column(String(100), nullable=False)
     base_unit_name = Column(String(100), nullable=False)
-    quantity = Column(Numeric(18, 2), nullable=False)
+    quantity = Column(Numeric(18, 2), nullable=True)
     conversion_factor = Column(Numeric(18, 2), nullable=False)
-    base_quantity = Column(Numeric(18, 2), nullable=False)
+    base_quantity = Column(Numeric(18, 2), nullable=True)
     received_base_quantity = Column(Numeric(18, 2), nullable=False, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     document = relationship("PurchaseDocument", back_populates="lines")

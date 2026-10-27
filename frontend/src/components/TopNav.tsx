@@ -10,6 +10,7 @@ import ThemeToggle from "@/components/ThemeToggle";
 import NotificationBell from "@/components/NotificationBell";
 import { notifyError } from "@/lib/notifications";
 import { useTopNavSearchSlot } from "@/lib/topNavSearchPortal";
+import { useBadgeCounts } from "@/lib/badgeCounts";
 
 interface TopNavProps { title: string }
 interface CurrentUser { email: string | null; username?: string | null; full_name?: string | null; role: string }
@@ -21,9 +22,9 @@ const roleLabels: Record<string, string> = {
 };
 
 const approvalsTabs = [
+  { href: "/purchases", icon: "receipt_long", label: "المشتريات", roles: ["ADMIN", "INVENTORY_CONTROLLER"] },
   { href: "/product-approvals", icon: "rule", label: "طلبات المنتجات", roles: ["ADMIN", "INVENTORY_CONTROLLER"] },
   { href: "/count-approvals", icon: "fact_check", label: "موافقات الجرد", roles: ["ADMIN"] },
-  { href: "/audit", icon: "history", label: "سجل التدقيق", roles: ["ADMIN"] },
 ];
 
 const managementTabs = [
@@ -43,6 +44,7 @@ const inventoryTabs = [
   { href: "/inventory", icon: "inventory_2", label: "المنتجات", roles: ["ADMIN", "INVENTORY_CONTROLLER"] },
   { href: "/stock-operations", icon: "swap_horiz", label: "النقل والجرد", roles: ["ADMIN", "INVENTORY_CONTROLLER"] },
   { href: "/categories", icon: "category", label: "التصنيفات والعلامات", roles: ["ADMIN", "INVENTORY_CONTROLLER"] },
+  { href: "/audit", icon: "history", label: "سجل التدقيق", roles: ["ADMIN"] },
 ];
 
 function revealResult(id: string) {
@@ -69,8 +71,9 @@ export default function TopNav({ title }: TopNavProps) {
   const [loggingOut, setLoggingOut] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
   const accountRef = useRef<HTMLDivElement>(null);
+  const badgeCounts = useBadgeCounts();
 
-  const isApprovalsRoute = ["/product-approvals", "/count-approvals", "/audit", "/approvals"].some(
+  const isApprovalsRoute = ["/purchases", "/product-approvals", "/count-approvals", "/approvals"].some(
     path => pathname === path || pathname.startsWith(`${path}/`)
   );
   const visibleApprovalsTabs = approvalsTabs.filter(tab => !user || tab.roles.includes(user.role));
@@ -85,7 +88,7 @@ export default function TopNav({ title }: TopNavProps) {
   );
   const visibleSalesTabs = salesTabs.filter(tab => !user || tab.roles.includes(user.role));
 
-  const isInventoryRoute = ["/inventory", "/stock-operations", "/categories"].some(
+  const isInventoryRoute = ["/inventory", "/stock-operations", "/categories", "/audit"].some(
     path => pathname === path || pathname.startsWith(`${path}/`)
   );
   const visibleInventoryTabs = inventoryTabs.filter(tab => !user || tab.roles.includes(user.role));
@@ -115,7 +118,7 @@ export default function TopNav({ title }: TopNavProps) {
 
   useEffect(() => {
     const value = query.trim();
-    if (customSearch || value.length < 2 || !searchLabel) return;
+    if (customSearch || value.length < 1 || !searchLabel) return;
     let active = true;
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
@@ -152,7 +155,7 @@ export default function TopNav({ title }: TopNavProps) {
       {/* Right side: Title & Section Search */}
       <div className="app-top-title shrink-0">
         <h2 className="text-lg font-bold text-primary">
-          {user?.role === "ADMIN" && isApprovalsRoute ? "الموافقات والرقابة" : user?.role === "ADMIN" && isManagementRoute ? "الإدارة والتقارير" : user?.role === "ADMIN" && isSalesRoute ? "المبيعات والصندوق" : user?.role === "ADMIN" && isInventoryRoute ? "المخزون" : title}
+          {user?.role === "ADMIN" && isApprovalsRoute ? "المشتريات والرقابة" : user?.role === "ADMIN" && isManagementRoute ? "الإدارة والتقارير" : user?.role === "ADMIN" && isSalesRoute ? "المبيعات والصندوق" : user?.role === "ADMIN" && isInventoryRoute ? "المخزون" : title}
         </h2>
       </div>
 
@@ -166,7 +169,7 @@ export default function TopNav({ title }: TopNavProps) {
             className="app-hide-native-search-clear min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:opacity-60" />
           {query && <button type="button" onClick={() => { setQuery(""); setResults([]); }} aria-label="مسح البحث" className="app-muted text-xs hover:text-white">✕</button>}
         </div>}
-        {!customSearch && searchOpen && query.trim().length >= 2 && (
+        {!customSearch && searchOpen && query.trim().length >= 1 && (
           <div className="app-menu absolute left-0 right-0 top-[calc(100%+8px)] max-h-80 overflow-y-auto rounded-2xl p-2 shadow-2xl z-50">
             {searching ? <p className="app-muted p-3 text-sm">جاري البحث...</p> : searchError ? <p className="p-3 text-sm text-[#ffb4ab]">تعذر البحث حاليًا. حاول مرة أخرى.</p> : results.length ? results.map((result) => (
               <Link key={result.id} href={result.href} onClick={() => { setSearchOpen(false); setQuery(""); window.dispatchEvent(new CustomEvent("section-search-focus", { detail: result.id })); revealResult(result.id); }} className="app-search-result flex items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-sm hover:bg-white/5 transition-colors">
@@ -192,7 +195,7 @@ export default function TopNav({ title }: TopNavProps) {
       <div className="flex shrink-0 items-center gap-2 sm:gap-3">
         {/* Approvals Tabs */}
         {user?.role === "ADMIN" && isApprovalsRoute && visibleApprovalsTabs.length > 0 && (
-          <nav className="hidden md:flex items-center gap-1 sm:gap-2 shrink-0" aria-label="أقسام الرقابة والموافقات">
+          <nav className="hidden md:flex items-center gap-1 sm:gap-2 shrink-0" aria-label="أقسام المشتريات والرقابة">
             {visibleApprovalsTabs.map(tab => {
               const isActive = pathname === tab.href || pathname.startsWith(`${tab.href}/`);
               return (
@@ -212,6 +215,16 @@ export default function TopNav({ title }: TopNavProps) {
                     {tab.icon}
                   </span>
                   <span>{tab.label}</span>
+                  {tab.href === "/purchases" && badgeCounts.purchases > 0 && (
+                    <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-white shadow-sm">
+                      {badgeCounts.purchases}
+                    </span>
+                  )}
+                  {tab.href === "/product-approvals" && badgeCounts.product_approvals > 0 && (
+                    <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-white shadow-sm">
+                      {badgeCounts.product_approvals}
+                    </span>
+                  )}
 
                   {isActive && (
                     <span

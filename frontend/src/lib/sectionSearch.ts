@@ -47,7 +47,6 @@ export function sectionSearchLabel(pathname: string): string | null {
   if (pathname === "/orders") return "فاتورة برقمها أو اسم العميل أو هاتفه";
   if (pathname === "/returns") return "فاتورة للاسترجاع برقمها أو اسم العميل أو هاتفه";
   if (pathname === "/purchases") return "أمر شراء برقم الأمر أو المورد أو الصنف";
-  if (pathname === "/purchases/legacy") return "أمر شراء قديم برقم الأمر";
   if (pathname === "/audit") return "عملية في سجل التدقيق";
   if (pathname === "/settings") return "مستخدم بالبريد أو الاسم";
   if (pathname === "/financials") return "حركة مالية بالوصف أو التصنيف";
@@ -162,8 +161,18 @@ export async function searchSection(pathname: string, query: string, signal?: Ab
   if (pathname === "/purchases" || pathname === "/purchases/legacy") {
     const endpoint = pathname === "/purchases" ? "/purchase-documents" : "/purchases";
     const data = pathname === "/purchases" ? await list("purchase-documents", endpoint, snapshot => (snapshot as { documents: unknown }).documents) : await list("purchases", endpoint, snapshot => (snapshot as { purchases: unknown }).purchases);
-    return data.filter(item => matches(q, item.id, item.supplier_name, ...rows(item.lines).map(line => line.product_name)))
-      .map(item => ({ id: text(item.id), label: text(item.supplier_name) || `أمر ${text(item.id).slice(0, 8)}`, detail: text(item.id).slice(0, 8), href: target(pathname, text(item.id)) }));
+    return data.filter(item => {
+      const publicNum = text(item.public_number);
+      const supplier = text(item.supplier_name);
+      const lines = rows(item.lines).map(line => text(line.product_name));
+      const receipts = rows(item.receipts).map(r => text(r.public_number));
+      return matches(q, publicNum, `أمر ${publicNum}`, `فاتورة ${publicNum}`, item.id, supplier, ...lines, ...receipts);
+    }).map(item => ({
+      id: text(item.id),
+      label: `أمر شراء ${text(item.public_number) || text(item.id).slice(0, 8)}`,
+      detail: `${text(item.supplier_name)} · ${rows(item.lines).length} أصناف`,
+      href: target(pathname, text(item.id)),
+    }));
   }
   if (pathname === "/audit") {
     return rows(await fetchApi(`/audit?search=${encodeURIComponent(q)}&limit=20`, { signal, silentErrors: true }))
