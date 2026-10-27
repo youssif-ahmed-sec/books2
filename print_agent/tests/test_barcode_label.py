@@ -2,7 +2,7 @@ from fastapi import HTTPException
 import pytest
 
 from print_agent.config import config
-from print_agent.printer import PrinterManager
+from print_agent.printer import PrinterManager, _PrintDraw
 from print_agent.service import PrintJob, print_order, thermal_printer
 
 
@@ -18,12 +18,28 @@ def test_barcode_label_has_scannable_width_and_quiet_zones():
     manager = PrinterManager.__new__(PrinterManager)
     image = manager._generate_barcode_image(SAMPLE)
     assert image.width == manager.PAPER_WIDTH_PX * manager.RENDER_SCALE
-    assert 300 < image.height < 430
-    barcode_band = image.crop((0, 150, image.width, 220))
-    dark_columns = [x for x in range(barcode_band.width) if barcode_band.getpixel((x, 35))[0] < 128]
+    scale = manager.RENDER_SCALE
+    assert 200 * scale < image.height < 320 * scale
+    barcode_band = image.crop((0, 100 * scale, image.width, 150 * scale))
+    dark_columns = [x for x in range(barcode_band.width) if barcode_band.getpixel((x, 25 * scale))[0] < 128]
     assert len(dark_columns) > 100
     assert min(dark_columns) > 50
     assert max(dark_columns) < image.width - 50
+
+
+def test_barcode_label_renders_the_selected_unit_price(monkeypatch):
+    drawn = []
+    original = _PrintDraw.text
+
+    def capture(self, xy, value, *args, **kwargs):
+        drawn.append(str(value))
+        return original(self, xy, value, *args, **kwargs)
+
+    monkeypatch.setattr(_PrintDraw, "text", capture)
+    manager = PrinterManager.__new__(PrinterManager)
+    manager._generate_barcode_image({**SAMPLE, "name_ar": "بالون", "unit_name": "كيس", "sell_price": "45.00"})
+    assert any("بالون" in value and "كيس" in value for value in drawn)
+    assert any("45.00" in value for value in drawn)
 
 
 @pytest.mark.parametrize("code", ["", "اسم عربي", "A\nB", "X" * 64])

@@ -10,7 +10,7 @@ import { refreshNotificationBell } from "@/lib/notificationEvents";
 
 type Approval = {
   id: string; product_id: string; product_name: string; action: "UPDATE" | "DELETE";
-  status: "PENDING" | "APPROVED" | "REJECTED"; requester?: string;
+  status: "PENDING" | "APPROVED" | "REJECTED" | "CANCELLED"; requester?: string;
   baseline: { fields: Record<string, string | null>; units: unknown[] };
   proposed?: Record<string, unknown> | null; created_at: string; rejection_reason?: string | null;
 };
@@ -59,7 +59,7 @@ function ProductApprovalsContent() {
   const [rows, setRows] = useState<Approval[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Approval | null>(null);
-  const [decision, setDecision] = useState<"approve" | "reject" | null>(null);
+  const [decision, setDecision] = useState<"approve" | "reject" | "cancel" | null>(null);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [hasMore, setHasMore] = useState(false);
@@ -112,7 +112,7 @@ function ProductApprovalsContent() {
       await fetchApi(`/product-approvals/${selected.id}/${decision}`, {
         method: "POST", body: JSON.stringify(decision === "reject" ? { reason: reason.trim() } : {}),
       });
-      notifySuccess(decision === "approve" ? "اتطبّق قرار الموافقة على المنتج" : "اترفض الطلب واتبلغ أمين المخزن");
+      notifySuccess(decision === "approve" ? "اتطبّق قرار الموافقة على المنتج" : decision === "cancel" ? "تم إلغاء الطلب" : "اترفض الطلب واتبلغ أمين المخزن");
       refreshNotificationBell();
       setDecision(null); setReason("");
       await load();
@@ -137,18 +137,18 @@ function ProductApprovalsContent() {
 
     <main className="app-main space-y-6">
       <h1 className="app-heading">{isAdmin ? "مراجعة طلبات المنتجات" : "طلباتي على المنتجات"}</h1>
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
-        <section className="app-panel min-w-0 overflow-hidden" aria-label="قائمة الطلبات">
+      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
+        <section className="app-panel min-w-0 max-h-[70vh] overflow-y-auto overscroll-contain custom-scrollbar" aria-label="قائمة الطلبات">
           {loading ? <p className="app-muted p-6">جارٍ تحميل الطلبات…</p> : rows.length === 0 ?
             <p className="app-muted p-6">لا توجد طلبات حتى الآن.</p> : rows.map(row =>
               <button key={row.id} type="button" onClick={() => setSelected(row)}
                 className={`app-table-row flex w-full items-center justify-between gap-4 px-5 py-4 text-right ${selected?.id === row.id ? "bg-primary/10" : ""}`}>
                 <span><strong className="block">{row.product_name}</strong><span className="app-muted text-xs">{row.action === "UPDATE" ? "تعديل" : "حذف"} · {row.requester || "أمين المخزن"} · {new Date(row.created_at).toLocaleString("ar-EG")}</span></span>
-                <span className="shrink-0 text-xs font-bold text-primary">{row.status === "PENDING" ? "بانتظار المدير" : row.status === "APPROVED" ? "معتمد" : "مرفوض"}</span>
+                <span className="shrink-0 text-xs font-bold text-primary">{row.status === "PENDING" ? "بانتظار المدير" : row.status === "APPROVED" ? "معتمد" : row.status === "CANCELLED" ? "ملغي" : "مرفوض"}</span>
               </button>)}
           {hasMore && <button type="button" className="app-secondary-button m-4" onClick={() => void loadMore()}>عرض المزيد</button>}
         </section>
-        <section className="app-panel min-w-0 p-6" aria-label="تفاصيل الطلب">
+        <section className="app-panel min-w-0 max-h-[70vh] overflow-y-auto overscroll-contain p-6 custom-scrollbar" aria-label="تفاصيل الطلب">
           {!selected ? <p className="app-muted">اختر طلبًا لعرض تفاصيله.</p> : <div className="space-y-5">
             <div><h2 className="text-xl font-bold">{selected.action === "UPDATE" ? "تعديل" : "حذف"} {selected.product_name}</h2>
               <p className="app-muted mt-1 text-sm">{selected.action === "DELETE" ? "الحذف أرشفة للمنتج مع حفظ سجله، بعد التحقق من خلو جميع المخازن من رصيده وعدم وجود أمر شراء مفتوح." : "التعديلات المقترحة لا تُطبّق قبل موافقة المدير."}</p></div>
@@ -235,11 +235,12 @@ function ProductApprovalsContent() {
             </>}
             {selected.rejection_reason && <p className="text-sm text-red-300">سبب الرفض: {selected.rejection_reason}</p>}
             {isAdmin && selected.status === "PENDING" && <div className="flex gap-3 border-t border-white/10 pt-5"><button type="button" className="app-primary-button" onClick={() => setDecision("approve")}>موافقة وتطبيق</button><button type="button" className="app-secondary-button" onClick={() => setDecision("reject")}>رفض الطلب</button></div>}
+            {!isAdmin && selected.status === "PENDING" && <div className="border-t border-white/10 pt-5"><button type="button" className="app-secondary-button" onClick={() => setDecision("cancel")}>إلغاء الطلب</button></div>}
           </div>}
         </section>
       </div>
     </main>
-    {decision && selected && <div className="motion-overlay fixed inset-0 z-[120] flex items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true"><div className="motion-dialog app-panel w-full max-w-md space-y-4 p-6"><h2 className="text-lg font-bold">{decision === "approve" ? "تأكيد الموافقة؟" : "رفض الطلب؟"}</h2><p className="app-muted text-sm">{decision === "approve" ? "سيُفحص المنتج مرة أخرى قبل تطبيق التغيير. إذا تغيّر منذ تقديم الطلب سيتوقف الاعتماد." : "لن يتغير المنتج، وسيصل سبب الرفض لأمين المخزن."}</p>{decision === "reject" && <label className="block text-sm">سبب الرفض<textarea className="app-field mt-2 min-h-24" value={reason} maxLength={500} onChange={event => setReason(event.target.value)} /></label>}<div className="flex gap-3"><button type="button" className="app-primary-button" disabled={busy || (decision === "reject" && reason.trim().length < 3)} onClick={() => void decide()}>{busy ? "جارٍ الحفظ…" : "تأكيد"}</button><button type="button" className="app-secondary-button" disabled={busy} onClick={() => setDecision(null)}>إلغاء</button></div></div></div>}
+    {decision && selected && <div className="motion-overlay fixed inset-0 z-[120] flex items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true"><div className="motion-dialog app-panel w-full max-w-md space-y-4 p-6"><h2 className="text-lg font-bold">{decision === "approve" ? "تأكيد الموافقة؟" : decision === "cancel" ? "إلغاء الطلب؟" : "رفض الطلب؟"}</h2><p className="app-muted text-sm">{decision === "approve" ? "سيُفحص المنتج مرة أخرى قبل تطبيق التغيير. إذا تغيّر منذ تقديم الطلب سيتوقف الاعتماد." : decision === "cancel" ? "لن يتغير المنتج، وسيبقى الطلب في السجل بحالة ملغي." : "لن يتغير المنتج، وسيصل سبب الرفض لأمين المخزن."}</p>{decision === "reject" && <label className="block text-sm">سبب الرفض<textarea className="app-field mt-2 min-h-24" value={reason} maxLength={500} onChange={event => setReason(event.target.value)} /></label>}<div className="flex gap-3"><button type="button" className="app-primary-button" disabled={busy || (decision === "reject" && reason.trim().length < 3)} onClick={() => void decide()}>{busy ? "جارٍ الحفظ…" : "تأكيد"}</button><button type="button" className="app-secondary-button" disabled={busy} onClick={() => setDecision(null)}>إلغاء</button></div></div></div>}
   </div>;
 }
 

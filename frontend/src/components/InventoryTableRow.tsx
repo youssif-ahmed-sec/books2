@@ -1,11 +1,8 @@
 "use client";
 
-import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import BarcodePrintDialog, { type BarcodePrintUnit } from "@/components/BarcodePrintDialog";
-import { UserRole, canViewCost, canEditProduct } from "@/utils/auth";
-import { useHydrated } from "@/lib/useHydrated";
+import { UserRole, canViewCost } from "@/utils/auth";
 
 interface StockItem {
   id: string;
@@ -31,18 +28,12 @@ interface StockItem {
 
 interface InventoryTableRowProps {
   item: StockItem;
-  onEdit: (item: StockItem) => void;
   onDelete: (item: StockItem) => void;
   userRole: UserRole | null;
   hasPendingApproval?: boolean;
 }
 
-export function InventoryTableRow({ item, onEdit, onDelete, userRole, hasPendingApproval }: InventoryTableRowProps) {
-  const [showBarcodeModal, setShowBarcodeModal] = useState(false);
-  const barcodeUnits: BarcodePrintUnit[] = item.units.filter(unit => unit.barcode).map(unit => ({
-    id: unit.id, name: unit.unit_name, barcode: unit.barcode, price: unit.retailPrice, copies: 1,
-  }));
-  const mounted = useHydrated();
+export function InventoryTableRow({ item, onDelete, userRole, hasPendingApproval }: InventoryTableRowProps) {
   const stockColor =
     item.stockStatus === "critical"
       ? "bg-[#ffb4ab]"
@@ -145,30 +136,6 @@ export function InventoryTableRow({ item, onEdit, onDelete, userRole, hasPending
       {/* Actions */}
       <td className="px-8 py-6">
         <div className="flex items-center justify-center gap-2 shrink-0">
-          <button
-            type="button"
-            onClick={() => setShowBarcodeModal(true)}
-            disabled={!barcodeUnits.length}
-            className="h-9 px-3 rounded-full glass flex items-center justify-center text-xs font-bold text-[#e2bfb0] hover:text-primary hover:border-primary/30 transition-all disabled:opacity-40"
-            title={barcodeUnits.length ? "طباعة باركودات الوحدات" : "لا توجد باركودات للوحدات"}
-            aria-label={`طباعة باركود ${item.nameAr}`}
-          >
-            باركود
-          </button>
-
-          {canEditProduct(userRole) && (
-            <button
-              type="button"
-              disabled={hasPendingApproval}
-              onClick={() => onEdit(item)}
-              className="h-9 px-3 rounded-full glass flex items-center justify-center text-xs font-bold text-[#e2bfb0] hover:text-primary hover:border-primary/30 transition-all disabled:opacity-40 disabled:hover:text-[#e2bfb0] disabled:hover:border-transparent"
-              title={hasPendingApproval ? "يوجد طلب تعديل أو حذف معلّق لهذا المنتج بانتظار قرار المدير" : `تعديل ${item.nameAr}`}
-              aria-label={`تعديل ${item.nameAr}`}
-            >
-              تعديل
-            </button>
-          )}
-
           <Link href={`/inventory/product?id=${encodeURIComponent(String(item.id))}`}
             className="h-9 px-3 rounded-full glass flex items-center justify-center text-xs font-bold text-[#e2bfb0] hover:text-primary hover:border-primary/30 transition-all"
             aria-label={`تفاصيل وسجل ${item.nameAr}`}>
@@ -189,10 +156,6 @@ export function InventoryTableRow({ item, onEdit, onDelete, userRole, hasPending
         </div>
       </td>
 
-      {/* Barcode Modal */}
-      {showBarcodeModal && mounted && <BarcodePrintDialog productName={item.nameAr}
-        units={barcodeUnits} selectByDefault={false} onClose={() => setShowBarcodeModal(false)}
-        quantityHint="حدد الوحدات وعدد الملصقات؛ الرصيد الإجمالي لا يحدد عدد كل نوع وحدة." />}
     </tr>
   );
 }

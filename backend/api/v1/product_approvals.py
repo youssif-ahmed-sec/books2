@@ -73,7 +73,7 @@ async def list_requests(
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db), user: User = Depends(require_inventory_access),
 ):
-    if status not in (None, "PENDING", "APPROVED", "REJECTED"):
+    if status not in (None, "PENDING", "APPROVED", "REJECTED", "CANCELLED"):
         raise HTTPException(status_code=422, detail="Invalid status")
     query = select(ProductApproval, User).join(User, User.id == ProductApproval.requested_by)
     if user.role != RoleEnum.ADMIN:
@@ -144,6 +144,25 @@ async def request_change(
     return present(request)
 
 
+@router.post("/{request_id}/cancel")
+async def cancel_request(
+    request_id: UUID, db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_inventory_access),
+):
+    row = (await db.execute(select(ProductApproval).where(ProductApproval.id == request_id)
+                            .with_for_update())).scalar_one_or_none()
+    if row is None or row.requested_by != user.id or user.role != RoleEnum.INVENTORY_CONTROLLER:
+        raise HTTPException(status_code=404, detail="الطلب غير موجود.")
+    if row.status != "PENDING":
+        raise HTTPException(status_code=409, detail="لا يمكن إلغاء طلب تم اتخاذ قرار بشأنه.")
+    row.status = "CANCELLED"
+    row.reviewed_at = datetime.now(timezone.utc)
+    await notify_roles(db, (RoleEnum.ADMIN,), kind="product_cancelled", title="أُلغي طلب منتج",
+                       message="ألغى أمين المخزن طلبًا للمنتج.", href="/product-approvals")
+    await db.commit()
+    return present(row)
+
+
 @router.post("/{request_id}/approve")
 async def approve_request(
     request_id: UUID, db: AsyncSession = Depends(get_db), manager: User = Depends(require_admin),
@@ -154,6 +173,8 @@ async def approve_request(
         raise HTTPException(status_code=404, detail="Request not found")
     if row.status != "PENDING":
         raise HTTPException(status_code=409, detail="Request was already reviewed")
+    if row.action == "UPDATE":
+        await ProductService.lock_barcodes(db)
     product = (await db.execute(select(Product).where(Product.id == row.product_id)
                                 .with_for_update())).scalar_one_or_none()
     if product is None or product.is_deleted:

@@ -7,7 +7,6 @@ import Image from "next/image";
 import { InventoryTableRow } from "@/components/InventoryTableRow";
 import { ProductSelect } from "@/components/ProductSelect";
 import { AddProductPanel } from "@/components/AddProductPanel";
-import { EditProductPanel } from "@/components/EditProductPanel";
 import InventoryMovementsModal from "@/components/InventoryMovementsModal";
 import ReceiveStockPanel from "@/components/ReceiveStockPanel";
 import { fetchApi } from "@/lib/api";
@@ -68,10 +67,8 @@ interface InventorySnapshot {
 export default function InventoryPage() {
   const confirmAction = useConfirmAction();
   const [showAddPanel, setShowAddPanel] = useState(false);
-  const [showEditPanel, setShowEditPanel] = useState(false);
   const [showMovementsModal, setShowMovementsModal] = useState(false);
   const [showReceivePanel, setShowReceivePanel] = useState(false);
-  const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
 
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>(() => readSectionSnapshot<InventorySnapshot>("inventory")?.items || []);
   const [statCards, setStatCards] = useState<StatCard[]>(() => readSectionSnapshot<InventorySnapshot>("inventory")?.stats || [
@@ -349,11 +346,9 @@ export default function InventoryPage() {
         if (needsApproval) {
           await fetchApi("/product-approvals", { method: "POST", body: JSON.stringify({ product_id: item.id, action: "DELETE" }) });
           notifySuccess("اترسل طلب الحذف للمدير. المنتج متاح لحد ما يوافق.");
-          setShowEditPanel(false);
           return;
         }
         await fetchApi(`/products/${item.id}`, { method: 'DELETE' });
-        setShowEditPanel(false);
         auxiliaryData.current = null;
         if (inventoryItems.length === 1 && page > 1) setPage(page - 1);
         else await loadData(false);
@@ -525,10 +520,6 @@ export default function InventoryPage() {
                           key={item.id}
                           item={item}
                           hasPendingApproval={pendingApprovalIds.has(item.id)}
-                          onEdit={() => {
-                            setSelectedItem(item);
-                            setShowEditPanel(true);
-                          }}
                           onDelete={handleDelete}
                           userRole={userRole}
                         />
@@ -698,15 +689,6 @@ export default function InventoryPage() {
 
       {/* Panels */}
       {hasInventoryAccess && showAddPanel && <AddProductPanel onClose={() => setShowAddPanel(false)} onSaved={refreshData} />}
-      {showEditPanel && selectedItem && (
-        <EditProductPanel
-          productId={selectedItem.id}
-          onClose={() => setShowEditPanel(false)}
-          onSuccess={refreshData}
-          approvalRequired={userRole === "INVENTORY_CONTROLLER"}
-          onDelete={() => handleDelete(selectedItem)}
-        />
-      )}
       {/* Modals */}
       {hasInventoryAccess && showMovementsModal && <InventoryMovementsModal onClose={() => setShowMovementsModal(false)} />}
       {hasInventoryAccess && showReceivePanel && <ReceiveStockPanel onClose={() => setShowReceivePanel(false)} onSaved={refreshData} />}

@@ -11,6 +11,7 @@ import { ProductSelect } from "@/components/ProductSelect";
 import UnitBarcodeField from "@/components/UnitBarcodeField";
 import { ZeroHintNumberInput } from "@/components/ZeroHintNumberInput";
 import BarcodePrintDialog, { type BarcodePrintUnit } from "@/components/BarcodePrintDialog";
+import { barcodePrintUnits } from "@/lib/barcodePrintUnits";
 import { productFormErrors, productSaveError } from "@/lib/productFormErrors";
 import { getUserRole } from "@/utils/auth";
 import { useHydrated } from "@/lib/useHydrated";
@@ -388,10 +389,9 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
 
       onSaved();
       if (printBarcode) {
-        const choices: BarcodePrintUnit[] = (savedProduct.units || []).map((savedUnit: { id: string; unit_name: string; barcode: string }) => {
-          const entered = units.find(unit => unit.name === savedUnit.unit_name);
-          return { id: savedUnit.id, name: savedUnit.unit_name, barcode: savedUnit.barcode,
-            price: entered?.retailPrice || "0", copies: Math.max(0, Math.trunc(entered?.stock || 0)) };
+        const choices = barcodePrintUnits(savedProduct.units || []).map(savedUnit => {
+          const entered = units.find(unit => unit.name === savedUnit.name);
+          return { ...savedUnit, copies: Math.max(0, Math.trunc(entered?.stock || 0)) };
         });
         if (choices.length) setPrintProduct({ name: savedProduct.name_ar, units: choices });
         else { notifyError("تم حفظ المنتج، لكن تعذر تحميل باركودات الوحدات للطباعة."); onClose(); }

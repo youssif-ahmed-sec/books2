@@ -2,9 +2,16 @@
 
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { fetchApi } from "@/lib/api";
 import { getOptimizedImageUrl } from "@/lib/cloudinary";
+import { getCurrentUser } from "@/lib/currentUser";
+import { notifyError, notifySuccess } from "@/lib/notifications";
+import { refreshNotificationBell } from "@/lib/notificationEvents";
+import { useConfirmAction } from "@/components/ConfirmationProvider";
+import { EditProductPanel } from "@/components/EditProductPanel";
+import BarcodePrintDialog from "@/components/BarcodePrintDialog";
+import { barcodePrintUnits } from "@/lib/barcodePrintUnits";
 
 type Price = { price_level: string; price: string };
 type Unit = { id: string; unit_name: string; conversion_factor: string; barcode?: string; prices: Price[] };
@@ -36,12 +43,19 @@ const movementNames: Record<string, string> = {
 
 function ProductDetails() {
   const id = useSearchParams().get("id");
+  const router = useRouter();
+  const confirmAction = useConfirmAction();
   const [product, setProduct] = useState<Product | null>(null);
   const [balances, setBalances] = useState<Balance[]>([]);
   const [movements, setMovements] = useState<Movement[]>([]);
   const [history, setHistory] = useState<History[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [role, setRole] = useState("");
+  const [pending, setPending] = useState(false);
+  const [revision, setRevision] = useState(0);
+  const [editing, setEditing] = useState(false);
+  const [printing, setPrinting] = useState(false);
 
   useEffect(() => {
     if (!id) { const timer = window.setTimeout(() => { setError("لم يُحدد منتج لعرضه"); setLoading(false); }, 0); return () => window.clearTimeout(timer); }
@@ -51,16 +65,42 @@ function ProductDetails() {
       fetchApi("/inventory/balances"),
       fetchApi(`/inventory/transactions?product_id=${encodeURIComponent(id)}&limit=100&recent_days=90`),
       fetchApi(`/products/${id}/history`),
-    ]).then(([item, stock, transactions, events]) => {
+      fetchApi("/product-approvals/pending-product-ids"),
+      getCurrentUser(),
+    ]).then(([item, stock, transactions, events, pendingIds, user]) => {
       if (!active) return;
       setProduct(item);
       setBalances((stock as Balance[]).filter(balance => balance.product_id === id));
       setMovements(transactions.data || []);
       setHistory(events || []);
+      setPending((pendingIds as string[]).includes(id));
+      setRole(user.role);
     }).catch(reason => active && setError(reason instanceof Error ? reason.message : "تعذر تحميل تفاصيل المنتج"))
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [id]);
+  }, [id, revision]);
+
+  const deleteProduct = async () => {
+    if (!product) return;
+    const needsApproval = role === "INVENTORY_CONTROLLER";
+    if (!await confirmAction({ title: `حذف «${product.name_ar}»؟`,
+      message: needsApproval ? "سيصل الطلب للمدير. يشترط عدم وجود رصيد أو أمر شراء مفتوح عند الموافقة." : "سيبقى سجل المنتج محفوظًا. لا يمكن أرشفته إذا كان له رصيد أو أمر شراء مفتوح.",
+      confirmLabel: needsApproval ? "إرسال للمدير" : "حذف المنتج", tone: "danger" })) return;
+    try {
+      if (needsApproval) {
+        await fetchApi("/product-approvals", { method: "POST", body: JSON.stringify({ product_id: product.id, action: "DELETE" }) });
+        notifySuccess("اترسل طلب الحذف للمدير.");
+        setEditing(false); setRevision(value => value + 1); refreshNotificationBell();
+      } else {
+        await fetchApi(`/products/${product.id}`, { method: "DELETE" });
+        notifySuccess("تم حذف المنتج."); router.push("/inventory");
+      }
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : "";
+      notifyError(message.includes("warehouse stock") ? "لا يمكن حذف منتج له رصيد في المخزن." :
+        message.includes("open purchase order") ? "لا يمكن حذف منتج له أمر شراء مفتوح." : message || "تعذر حذف المنتج.");
+    }
+  };
 
   const timeline = [
     ...movements.map(item => ({ id: item.id, date: item.created_at,
@@ -91,6 +131,12 @@ function ProductDetails() {
           <span className={`rounded-full px-4 py-2 text-sm font-bold ${product.is_active ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-300"}`}>
             {product.is_active ? "نشط" : "غير نشط"}
           </span>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="app-secondary-button" onClick={() => setPrinting(true)}
+              disabled={!barcodePrintUnits(product.units).length}>طباعة باركود</button>
+            {(role === "ADMIN" || role === "INVENTORY_CONTROLLER") && <button type="button" className="app-primary-button"
+              disabled={pending} title={pending ? "يوجد طلب معلّق لهذا المنتج" : undefined} onClick={() => setEditing(true)}>تعديل</button>}
+          </div>
         </header>
         <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4" aria-label="بيانات المنتج">
           {[["التصنيف", product.category?.name_ar], ["الفئة الفرعية", product.subcategory?.name_ar],
@@ -133,6 +179,11 @@ function ProductDetails() {
         </section>
       </>}
     </main>
+    {product && editing && <EditProductPanel productId={product.id} approvalRequired={role === "INVENTORY_CONTROLLER"}
+      onClose={() => { setEditing(false); setRevision(value => value + 1); }}
+      onSuccess={() => setRevision(value => value + 1)} onDelete={() => void deleteProduct()} />}
+    {product && printing && <BarcodePrintDialog productName={product.name_ar} units={barcodePrintUnits(product.units)}
+      selectByDefault={false} onClose={() => setPrinting(false)} quantityHint="حدد الوحدات والسعر وعدد الملصقات." />}
   </div>;
 }
 

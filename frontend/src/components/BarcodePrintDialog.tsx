@@ -11,6 +11,8 @@ export interface BarcodePrintUnit {
   name: string;
   barcode: string;
   price: string;
+  priceLevel?: string;
+  prices?: { level: string; price: string }[];
   copies: number;
 }
 
@@ -76,6 +78,17 @@ export default function BarcodePrintDialog({ productName, units, onClose, quanti
                 onChange={event => update(choice.id, { selected: event.target.checked })} />
               <button type="button" onClick={() => setPreviewId(choice.id)} className="min-w-28 text-right font-semibold hover:text-primary">{choice.name}</button>
               <span dir="ltr" className="min-w-0 flex-1 truncate text-xs text-[#e2bfb0]">{choice.barcode}</span>
+              {choice.prices && choice.prices.length > 0 && <label className="flex items-center gap-2 text-sm">السعر
+                <select aria-label={`سعر ${choice.name}`} value={choice.priceLevel || ""}
+                  onChange={event => {
+                    const price = choice.prices?.find(item => item.level === event.target.value);
+                    if (price) update(choice.id, { price: price.price, priceLevel: price.level });
+                  }} className="app-field max-w-44 text-sm">
+                  {choice.prices.map(price => <option key={price.level} value={price.level}>
+                    {({ Retail: "مستهلك", "Semi Wholesale": "نصف جملة", Wholesale: "جملة", "Super Wholesale": "سوبر جملة", VIP: "كبار العملاء" } as Record<string, string>)[price.level] || price.level}: {price.price}
+                  </option>)}
+                </select>
+              </label>}
               <label className="flex items-center gap-2 text-sm">العدد
                 <ZeroHintNumberInput min="0" step="1" value={choice.copies} aria-label={`عدد ملصقات ${choice.name}`}
                   onChange={event => update(choice.id, { copies: Math.max(0, Math.trunc(Number(event.target.value) || 0)) })}

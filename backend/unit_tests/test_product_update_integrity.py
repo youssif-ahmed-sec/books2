@@ -3,7 +3,8 @@ from uuid import UUID, uuid4
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import event, select
+from sqlalchemy import event, select, text
+from fastapi import HTTPException
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.ext.compiler import compiles
@@ -16,7 +17,7 @@ from models.inventory import InventoryBalance, InventoryTransaction, Warehouse
 from models.inventory import TransactionTypeEnum
 from models.financial import CashShift
 from api.v1.reports import get_inventory_report, get_sales_report
-from api.v1.product_approvals import RequestInput, approve_request, request_change
+from api.v1.product_approvals import RequestInput, approve_request, cancel_request, request_change
 from models.product_approval import ProductApproval
 from models.notification import Notification
 from schemas.order import OrderCreate, OrderDraftCreate, OrderStatusUpdate, OrderPreparation
@@ -164,6 +165,50 @@ async def test_controller_requests_box_barcode_and_manager_approves(monkeypatch)
         assert (await db.execute(select(Product.barcode).where(Product.id == product["id"]))).scalar_one() == "BOX-SCANNED"
         assert (await db.execute(select(Notification).where(Notification.user_id == controller.id))).scalars().first()
         assert (await db.execute(select(ProductApproval.status))).scalar_one() == "APPROVED"
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_controller_cancels_own_pending_request_and_can_submit_again(monkeypatch):
+    async def no_name_conflict(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(ProductService, "name_match", no_name_conflict)
+    engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+    async with engine.begin() as connection:
+        tables = [table for table in Base.metadata.sorted_tables if table.name in {
+            "users", "audit_logs", "categories", "subcategories", "brands", "suppliers", "products",
+            "product_units", "product_prices", "product_supplier_links", "product_supplier_prices",
+            "product_bundle_components", "warehouses", "inventory_balances", "purchase_orders",
+            "product_approvals", "notifications",
+        }]
+        await connection.run_sync(lambda sync: Base.metadata.create_all(sync, tables=tables))
+        await connection.execute(text("DROP INDEX uq_product_approvals_pending_product"))
+        await connection.execute(text("CREATE UNIQUE INDEX uq_product_approvals_pending_product ON product_approvals (product_id) WHERE status = 'PENDING'"))
+    async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+        admin = User(id=uuid4(), role=RoleEnum.ADMIN, is_active=True, is_deleted=False)
+        owner = User(id=uuid4(), role=RoleEnum.INVENTORY_CONTROLLER, is_active=True, is_deleted=False)
+        other = User(id=uuid4(), role=RoleEnum.INVENTORY_CONTROLLER, is_active=True, is_deleted=False)
+        db.add_all([admin, owner, other])
+        await db.commit()
+        catalog = await seed_product_catalog(db)
+        product = await ProductService.create_product(db, ProductCreate(
+            sku="CANCEL-REQ", name_ar="إلغاء للتجربة", base_unit="قطعة", **catalog,
+        ), admin.id)
+        payload = RequestInput(product_id=product["id"], action="UPDATE", proposed=ProductUpdate(barcode="BOX-TEST"))
+        request = await request_change(payload, db, owner)
+        with pytest.raises(HTTPException) as denied:
+            await cancel_request(UUID(request["id"]), db, other)
+        assert denied.value.status_code == 404
+        result = await cancel_request(UUID(request["id"]), db, owner)
+        assert result["status"] == "CANCELLED"
+        assert (await db.execute(select(Product.barcode).where(Product.id == product["id"]))).scalar_one() is None
+        with pytest.raises(HTTPException) as repeated:
+            await cancel_request(UUID(request["id"]), db, owner)
+        assert repeated.value.status_code == 409
+        second = await request_change(payload, db, owner)
+        assert second["status"] == "PENDING"
+        assert (await db.execute(select(ProductApproval.status).where(ProductApproval.id == UUID(request["id"])))).scalar_one() == "CANCELLED"
     await engine.dispose()
 
 
