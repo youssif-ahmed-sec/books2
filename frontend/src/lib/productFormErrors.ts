@@ -3,6 +3,7 @@ import type { ZodIssue } from "zod";
 const productFieldNames: Record<string, string> = {
   nameAr: "اسم المنتج بالعربي",
   nameEn: "اسم المنتج بالإنجليزي",
+  barcode: "باركود العلبة",
   category_id: "التصنيف",
   subCategory_id: "الفئة الفرعية",
   brand_id: "العلامة التجارية",
@@ -55,7 +56,7 @@ export function productFormErrors(issues: ZodIssue[], units: Array<{ id: string;
 export function productSaveError(error: unknown): string {
   const message = error instanceof Error ? error.message : "";
   if (/duplicate|already exists|unique constraint/i.test(message)) {
-    return "كود المنتج أو باركود إحدى الوحدات مستخدم بالفعل. راجعه ثم حاول مرة أخرى.";
+    return "كود المنتج أو باركود العلبة أو إحدى الوحدات مستخدم بالفعل. راجعه ثم حاول مرة أخرى.";
   }
   if (/forbidden|not authorized|permission/i.test(message)) {
     return "ليس لديك صلاحية لحفظ المنتجات.";

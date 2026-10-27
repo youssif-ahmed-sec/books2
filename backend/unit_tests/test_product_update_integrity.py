@@ -1,5 +1,5 @@
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from pydantic import ValidationError
@@ -16,6 +16,9 @@ from models.inventory import InventoryBalance, InventoryTransaction, Warehouse
 from models.inventory import TransactionTypeEnum
 from models.financial import CashShift
 from api.v1.reports import get_inventory_report, get_sales_report
+from api.v1.product_approvals import RequestInput, approve_request, request_change
+from models.product_approval import ProductApproval
+from models.notification import Notification
 from schemas.order import OrderCreate, OrderDraftCreate, OrderStatusUpdate, OrderPreparation
 from schemas.product import ProductCreate, ProductUpdate
 from services.order_service import OrderService
@@ -38,6 +41,130 @@ async def seed_product_catalog(db):
     await db.commit()
     return dict(category_id=category_id, subcategory_id=subcategory_id,
                 brand_id=brand_id, supplier_id=supplier_id)
+
+
+@pytest.mark.asyncio
+async def test_barcodes_cannot_be_reused_by_a_different_product(monkeypatch):
+    async def no_name_conflict(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(ProductService, "name_match", no_name_conflict)
+    engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+    async with engine.begin() as connection:
+        tables = [table for table in Base.metadata.sorted_tables if table.name in {
+            "users", "audit_logs", "categories", "subcategories", "brands", "suppliers", "products",
+            "product_units", "product_prices", "product_supplier_links", "product_supplier_prices",
+            "product_bundle_components", "warehouses", "inventory_balances", "purchase_orders",
+        }]
+        await connection.run_sync(lambda sync: Base.metadata.create_all(sync, tables=tables))
+    async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+        user_id = uuid4()
+        db.add(User(id=user_id, role=RoleEnum.ADMIN))
+        await db.commit()
+        catalog = await seed_product_catalog(db)
+        first = await ProductService.create_product(db, ProductCreate(
+            sku="FIRST", name_ar="أول", base_unit="قطعة", barcode="BOX-A", **catalog,
+            units=[{"unit_name": "قطعة", "conversion_factor": 1, "barcode": "UNIT-A"}],
+        ), user_id)
+        second = await ProductService.create_product(db, ProductCreate(
+            sku="SECOND", name_ar="ثاني", base_unit="قطعة", **catalog,
+        ), user_id)
+        with pytest.raises(ValueError, match="Duplicate barcode"):
+            await ProductService.create_product(db, ProductCreate(
+                sku="THIRD", name_ar="ثالث", base_unit="قطعة", barcode="UNIT-A", **catalog,
+            ), user_id)
+        await db.rollback()
+        with pytest.raises(ValueError, match="Duplicate barcode"):
+            await ProductService.create_product(db, ProductCreate(
+                sku="THIRD", name_ar="ثالث", base_unit="قطعة", **catalog,
+                units=[{"unit_name": "قطعة", "conversion_factor": 1, "barcode": "BOX-A"}],
+            ), user_id)
+        await db.rollback()
+        with pytest.raises(ValueError, match="Duplicate barcode"):
+            await ProductService.update_product(db, second["id"], ProductUpdate(barcode="UNIT-A"), user_id)
+        await db.rollback()
+        with pytest.raises(ValueError, match="Duplicate barcode"):
+            await ProductService.update_product(db, second["id"], ProductUpdate(
+                units=[{"unit_name": "قطعة", "conversion_factor": 1, "barcode": "BOX-A"}],
+            ), user_id)
+        await db.rollback()
+        assert (await db.execute(select(Product.barcode).where(Product.id == first["id"]))).scalar_one() == "BOX-A"
+        assert (await db.execute(select(Product.barcode).where(Product.id == second["id"]))).scalar_one() is None
+        same_owner = await ProductService.create_product(db, ProductCreate(
+            sku="SAME", name_ar="رابع", base_unit="قطعة", barcode="SAME-CODE", **catalog,
+            units=[{"unit_name": "قطعة", "conversion_factor": 1, "barcode": "SAME-CODE"}],
+        ), user_id)
+        assert same_owner["units"][0]["barcode"] == same_owner["barcode"]
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_archiving_rejects_stock_in_any_warehouse():
+    engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+    async with engine.begin() as connection:
+        tables = [table for table in Base.metadata.sorted_tables if table.name in {
+            "users", "audit_logs", "categories", "subcategories", "brands", "suppliers", "products",
+            "product_units", "product_prices", "product_supplier_links", "product_supplier_prices",
+            "product_bundle_components", "warehouses", "inventory_balances", "purchase_orders",
+        }]
+        await connection.run_sync(lambda sync: Base.metadata.create_all(sync, tables=tables))
+    async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+        user_id, product_id, warehouse_id = uuid4(), uuid4(), uuid4()
+        db.add_all([
+            User(id=user_id, role=RoleEnum.ADMIN),
+            Product(id=product_id, sku="ARCHIVE-STOCK", name_ar="صنف", name_en="", base_unit="Piece"),
+            Warehouse(id=warehouse_id, name="Inactive", is_active=False),
+            InventoryBalance(product_id=product_id, warehouse_id=warehouse_id, current_stock=2),
+        ])
+        await db.commit()
+        with pytest.raises(ValueError, match="warehouse stock"):
+            await ProductService.delete_product(db, product_id, user_id)
+        await db.rollback()
+        assert not (await db.execute(select(Product.is_deleted).where(Product.id == product_id))).scalar_one()
+        balance = (await db.execute(select(InventoryBalance).where(InventoryBalance.product_id == product_id))).scalar_one()
+        balance.current_stock = 0
+        await db.commit()
+        assert await ProductService.delete_product(db, product_id, user_id)
+        assert (await db.execute(select(Product.is_deleted).where(Product.id == product_id))).scalar_one()
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_controller_requests_box_barcode_and_manager_approves(monkeypatch):
+    async def no_name_conflict(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(ProductService, "name_match", no_name_conflict)
+    engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+    async with engine.begin() as connection:
+        tables = [table for table in Base.metadata.sorted_tables if table.name in {
+            "users", "audit_logs", "categories", "subcategories", "brands", "suppliers", "products",
+            "product_units", "product_prices", "product_supplier_links", "product_supplier_prices",
+            "product_bundle_components", "warehouses", "inventory_balances", "purchase_orders",
+            "product_approvals", "notifications",
+        }]
+        await connection.run_sync(lambda sync: Base.metadata.create_all(sync, tables=tables))
+    async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+        admin = User(id=uuid4(), role=RoleEnum.ADMIN, is_active=True, is_deleted=False)
+        controller = User(id=uuid4(), role=RoleEnum.INVENTORY_CONTROLLER, is_active=True, is_deleted=False)
+        db.add_all([admin, controller])
+        await db.commit()
+        catalog = await seed_product_catalog(db)
+        product = await ProductService.create_product(db, ProductCreate(
+            sku="BOX-REQUEST", name_ar="صنف للتجربة", base_unit="قطعة", **catalog,
+            units=[{"unit_name": "قطعة", "conversion_factor": 1, "barcode": "UNIT-ORIGINAL"}],
+        ), admin.id)
+        request = await request_change(RequestInput(
+            product_id=product["id"], action="UPDATE", proposed=ProductUpdate(barcode="BOX-SCANNED"),
+        ), db, controller)
+        assert request["status"] == "PENDING"
+        assert (await db.execute(select(Product.barcode).where(Product.id == product["id"]))).scalar_one() is None
+        result = await approve_request(UUID(request["id"]), db, admin)
+        assert result["status"] == "APPROVED"
+        assert (await db.execute(select(Product.barcode).where(Product.id == product["id"]))).scalar_one() == "BOX-SCANNED"
+        assert (await db.execute(select(Notification).where(Notification.user_id == controller.id))).scalars().first()
+        assert (await db.execute(select(ProductApproval.status))).scalar_one() == "APPROVED"
+    await engine.dispose()
 
 
 @pytest.mark.asyncio

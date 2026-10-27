@@ -3,6 +3,7 @@ from decimal import Decimal
 from typing import List, Dict, Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql import func
 from sqlalchemy.orm import selectinload
@@ -17,6 +18,24 @@ from services.notification_service import notify_stock_alert_after_product_edit
 
 
 class ProductService:
+    @staticmethod
+    async def lock_barcodes(db: AsyncSession) -> None:
+        # Serialize catalog barcode writes across API workers until commit/rollback.
+        if db.get_bind().dialect.name == "postgresql":
+            await db.execute(text("SELECT pg_advisory_xact_lock(724191830)"))
+
+    @staticmethod
+    async def validate_barcode_owner(db: AsyncSession, barcode: str | None, product_id: uuid.UUID | None) -> None:
+        if not barcode:
+            return
+        product_query = select(Product.id).where(Product.barcode == barcode)
+        unit_query = select(ProductUnit.product_id).where(ProductUnit.barcode == barcode)
+        if product_id is not None:
+            product_query = product_query.where(Product.id != product_id)
+            unit_query = unit_query.where(ProductUnit.product_id != product_id)
+        if (await db.execute(product_query.limit(1))).first() or (await db.execute(unit_query.limit(1))).first():
+            raise ValueError("Duplicate barcode: already exists for another product or unit")
+
     @staticmethod
     async def name_match(db: AsyncSession, name: str, exclude_id: uuid.UUID | None = None) -> Product | None:
         normalized = " ".join(name.split()).casefold()
@@ -168,6 +187,7 @@ class ProductService:
 
     @staticmethod
     async def create_product(db: AsyncSession, product_in: ProductCreate, user_id: uuid.UUID) -> Dict[str, Any]:
+        await ProductService.lock_barcodes(db)
         await ProductService.validate_catalog_links(db, product_in.category_id, product_in.subcategory_id, product_in.brand_id, product_in.supplier_id)
         if not product_in.is_bundle and await ProductService.name_match(db, product_in.name_ar):
             raise ValueError("يوجد صنف بنفس الاسم. افتحه وأضف المورد إليه بدل إنشاء صنف مكرر.")
@@ -180,6 +200,9 @@ class ProductService:
             
             if not product_dict.get("barcode"):
                 product_dict["barcode"] = None
+            else:
+                product_dict["barcode"] = product_dict["barcode"].strip() or None
+            await ProductService.validate_barcode_owner(db, product_dict["barcode"], None)
                 
             if not product_dict.get("sku") or str(product_dict.get("sku")).startswith("INV-"):
                 product_dict["sku"] = f"INV-{uuid.uuid4().hex[:8].upper()}"
@@ -196,6 +219,9 @@ class ProductService:
                 unit_dict = unit_in.model_dump(exclude={"prices", "id"})
                 if not unit_dict.get("barcode") or str(unit_dict.get("barcode")).startswith("SKU-001-"):
                     unit_dict["barcode"] = f"UNIT-{uuid.uuid4().hex[:8].upper()}"
+                else:
+                    unit_dict["barcode"] = unit_dict["barcode"].strip() or f"UNIT-{uuid.uuid4().hex[:8].upper()}"
+                await ProductService.validate_barcode_owner(db, unit_dict["barcode"], new_product.id)
                     
                 new_unit = ProductUnit(product_id=new_product.id, **unit_dict)
                 db.add(new_unit)
@@ -277,6 +303,7 @@ class ProductService:
 
     @staticmethod
     async def update_product(db: AsyncSession, product_id: uuid.UUID, product_in: ProductUpdate, user_id: uuid.UUID) -> Optional[Product]:
+        await ProductService.lock_barcodes(db)
         query = select(Product).where(Product.id == product_id, Product.is_deleted == False).with_for_update()
         result = await db.execute(query)
         product = result.scalar_one_or_none()
@@ -316,6 +343,8 @@ class ProductService:
             update_data["barcode"] = (update_data["barcode"] or "").strip() or None
             if product.barcode and update_data["barcode"] != product.barcode:
                 raise ValueError("A saved product barcode cannot be changed")
+            if update_data["barcode"] != product.barcode:
+                await ProductService.validate_barcode_owner(db, update_data["barcode"], product_id)
         
         for key, value in update_data.items():
             setattr(product, key, value)
@@ -370,10 +399,13 @@ class ProductService:
                 if unit_in.id is not None:
                     new_unit = existing_units[unit_in.id]
                     unit_dict["barcode"] = new_unit.barcode or (unit_dict.get("barcode") or "").strip() or f"UNIT-{uuid.uuid4().hex[:8].upper()}"
+                    if unit_dict["barcode"] != new_unit.barcode:
+                        await ProductService.validate_barcode_owner(db, unit_dict["barcode"], product_id)
                     for key, value in unit_dict.items():
                         setattr(new_unit, key, value)
                 else:
                     unit_dict["barcode"] = (unit_dict.get("barcode") or "").strip() or f"UNIT-{uuid.uuid4().hex[:8].upper()}"
+                    await ProductService.validate_barcode_owner(db, unit_dict["barcode"], product_id)
                     new_unit = ProductUnit(product_id=product_id, **unit_dict)
                     db.add(new_unit)
                 await db.flush()
@@ -439,10 +471,10 @@ class ProductService:
         if not product or (require_bundle and not product.is_bundle):
             return False
 
-        stock = (await db.execute(select(func.coalesce(func.sum(InventoryBalance.current_stock), 0)).where(
-            InventoryBalance.product_id == product_id,
-        ))).scalar_one()
-        if Decimal(str(stock)) != 0:
+        has_stock = (await db.execute(select(InventoryBalance.product_id).where(
+            InventoryBalance.product_id == product_id, InventoryBalance.current_stock != 0,
+        ).limit(1))).first()
+        if has_stock:
             raise ValueError("Cannot archive a product while it has warehouse stock")
         open_purchase = (await db.execute(select(PurchaseOrder.id).where(
             PurchaseOrder.product_id == product_id,

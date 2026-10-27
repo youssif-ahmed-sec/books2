@@ -88,6 +88,9 @@ export function InventoryTableRow({ item, onEdit, onDelete, userRole, hasPending
         <div className="flex flex-col items-center gap-1">
           <span className="font-mono text-primary font-bold text-xs" dir="ltr">{item.units.find(unit => unit.unit_name === item.baseUnit)?.barcode || item.barcode || "—"}</span>
           <span className="text-[10px] opacity-60">باركود {item.baseUnit}</span>
+          {item.barcode && item.barcode !== item.units.find(unit => unit.unit_name === item.baseUnit)?.barcode && (
+            <span className="font-mono text-[10px] text-amber-300/80 font-medium" dir="ltr" title="باركود العلبة (المصنعي)">علبة: {item.barcode}</span>
+          )}
           <span className="font-mono text-[10px] opacity-50" dir="ltr">كود الصنف: {item.sku}</span>
         </div>
       </td>

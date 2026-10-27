@@ -10,6 +10,7 @@ const emptyCounts: BadgeCounts = { product_approvals: 0, purchases: 0 };
 let cachedCounts = emptyCounts;
 let cachedToken: string | null = null;
 let pending: { token: string; promise: Promise<BadgeCounts> } | null = null;
+let refreshAfterPending = false;
 const listeners = new Set<(counts: BadgeCounts) => void>();
 let interval: number | null = null;
 
@@ -55,11 +56,21 @@ export async function refreshBadgeCounts(): Promise<BadgeCounts> {
   try {
     return await promise;
   } finally {
-    if (pending?.promise === promise) pending = null;
+    if (pending?.promise === promise) {
+      pending = null;
+      if (refreshAfterPending) {
+        refreshAfterPending = false;
+        void refreshBadgeCounts();
+      }
+    }
   }
 }
 
 function onRefresh(): void {
+  if (pending?.token === currentToken()) {
+    refreshAfterPending = true;
+    return;
+  }
   void refreshBadgeCounts();
 }
 

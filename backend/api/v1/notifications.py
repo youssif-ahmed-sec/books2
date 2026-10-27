@@ -66,12 +66,14 @@ async def get_badge_counts(
 
     if user.role == RoleEnum.ADMIN:
         approvals_count = (await db.execute(
-            select(func.count(ProductApproval.id)).where(ProductApproval.status == "PENDING")
+            select(func.count(ProductApproval.id))
         )).scalar_one()
         counts["product_approvals"] = int(approvals_count or 0)
 
         purchases_count = (await db.execute(
-            select(func.count(PurchaseDocument.id)).where(PurchaseDocument.status == "REQUESTED")
+            select(func.count(PurchaseDocument.id)).where(
+                PurchaseDocument.status.in_(("REQUESTED", "APPROVED", "ORDERED", "PARTIALLY_RECEIVED"))
+            )
         )).scalar_one()
         counts["purchases"] = int(purchases_count or 0)
 
@@ -79,7 +81,7 @@ async def get_badge_counts(
         ready_purchases_count = (await db.execute(
             select(func.count(PurchaseDocument.id)).where(
                 PurchaseDocument.requested_by == user.id,
-                PurchaseDocument.status.in_(("APPROVED", "ORDERED", "PARTIALLY_RECEIVED"))
+                PurchaseDocument.status.in_(("REQUESTED", "APPROVED", "ORDERED", "PARTIALLY_RECEIVED"))
             )
         )).scalar_one()
         counts["purchases"] = int(ready_purchases_count or 0)
@@ -87,7 +89,6 @@ async def get_badge_counts(
         approvals_count = (await db.execute(
             select(func.count(ProductApproval.id)).where(
                 ProductApproval.requested_by == user.id,
-                ProductApproval.status == "PENDING",
             )
         )).scalar_one()
         counts["product_approvals"] = int(approvals_count or 0)

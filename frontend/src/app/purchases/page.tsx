@@ -9,6 +9,7 @@ import { fetchApi } from "@/lib/api";
 import { printPurchaseDocument, printPurchaseReceipt } from "@/lib/localPrint";
 import { errorMessage } from "@/lib/errors";
 import { notifyError, notifySuccess } from "@/lib/notifications";
+import { refreshNotificationBell } from "@/lib/notificationEvents";
 import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
 import { getUserRole } from "@/utils/auth";
 import { TopNavSearchPortal } from "@/lib/topNavSearchPortal";
@@ -262,6 +263,7 @@ export default function PurchasesPage() {
     }
     try {
       await fetchApi(`/purchase-documents/${document.id}/status/${action}`, { method: "POST" });
+      refreshNotificationBell();
       await load();
       if (action === "approve") {
         if (whatsappWindow) {
@@ -585,7 +587,7 @@ export default function PurchasesPage() {
           initial={editing === "new" ? null : editing}
           suppliers={suppliers}
           onClose={() => setEditing(null)}
-          onSaved={load}
+          onSaved={async () => { refreshNotificationBell(); await load(); }}
         />
       )}
 
@@ -594,7 +596,7 @@ export default function PurchasesPage() {
           document={receiving}
           warehouses={warehouses}
           onClose={() => setReceiving(null)}
-          onSaved={load}
+          onSaved={async () => { refreshNotificationBell(); await load(); }}
         />
       )}
     </div>

@@ -126,8 +126,8 @@ async def create_stock_receipt(
         db.add(AuditLog(user_id=current_user.id, action="RECEIVE_STOCK", entity_type="Product",
                         entity_id=str(line.product_id),
                         new_value={"quantity": str(line.quantity), "receipt_id": str(payload.request_id)}))
-    await notify_roles(db, (RoleEnum.ADMIN,), kind="stock_received", title="تم استلام بضاعة",
-                       message=f"فاتورة استلام بها {len(payload.lines)} صنف · {supplier.name}", href="/stock-operations")
+    await notify_roles(db, (RoleEnum.ADMIN,), kind="stock_received", title="توريد مخزون جديد",
+                       message=f"تم تسجيل استلام مخزون: {payload.request_id}", href="/stock-operations")
     try:
         await db.commit()
     except IntegrityError:

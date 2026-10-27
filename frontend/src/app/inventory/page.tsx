@@ -344,7 +344,7 @@ export default function InventoryPage() {
 
   const handleDelete = async (item: InventoryItem) => {
     const needsApproval = userRole === "INVENTORY_CONTROLLER";
-    if (await confirmAction({ title: needsApproval ? `طلب حذف «${item.nameAr}»؟` : `حذف «${item.nameAr}»؟`, message: needsApproval ? "سيصل الطلب للمدير. لن يُحذف المنتج إلا بعد موافقته والتحقق من الرصيد وأوامر الشراء." : "سيبقى سجل المنتج محفوظًا. لا يمكن حذفه إذا كان له رصيد أو أمر شراء مفتوح.", confirmLabel: needsApproval ? "إرسال للمدير" : "حذف المنتج", tone: "danger" })) {
+    if (await confirmAction({ title: needsApproval ? `طلب حذف «${item.nameAr}»؟` : `حذف «${item.nameAr}»؟`, message: needsApproval ? "سيصل الطلب للمدير. يشترط عدم وجود رصيد أو أمر شراء مفتوح عند الموافقة." : "سيبقى سجل المنتج محفوظًا. لا يمكن أرشفته إذا كان له رصيد أو أمر شراء مفتوح.", confirmLabel: needsApproval ? "إرسال للمدير" : "حذف المنتج", tone: "danger" })) {
       try {
         if (needsApproval) {
           await fetchApi("/product-approvals", { method: "POST", body: JSON.stringify({ product_id: item.id, action: "DELETE" }) });

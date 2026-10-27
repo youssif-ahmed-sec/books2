@@ -117,7 +117,10 @@ function ProductApprovalsContent() {
       setDecision(null); setReason("");
       await load();
     } catch (error) {
-      notifyError(error instanceof Error ? error.message : "تعذر تنفيذ القرار");
+      const message = error instanceof Error ? error.message : "";
+      notifyError(message.includes("warehouse stock") ? "لا يمكن أرشفة منتج له رصيد في المخزن." :
+        message.includes("open purchase order") ? "لا يمكن أرشفة منتج له أمر شراء مفتوح." :
+        /duplicate barcode/i.test(message) ? "الباركود مستخدم لمنتج أو وحدة أخرى." : message || "تعذر تنفيذ القرار");
     } finally {
       setBusy(false);
     }
@@ -148,7 +151,7 @@ function ProductApprovalsContent() {
         <section className="app-panel min-w-0 p-6" aria-label="تفاصيل الطلب">
           {!selected ? <p className="app-muted">اختر طلبًا لعرض تفاصيله.</p> : <div className="space-y-5">
             <div><h2 className="text-xl font-bold">{selected.action === "UPDATE" ? "تعديل" : "حذف"} {selected.product_name}</h2>
-              <p className="app-muted mt-1 text-sm">{selected.action === "DELETE" ? "الحذف أرشفة للمنتج بعد التحقق من خلو رصيده وعدم وجود أمر شراء مفتوح." : "التعديلات المقترحة لا تُطبّق قبل موافقة المدير."}</p></div>
+              <p className="app-muted mt-1 text-sm">{selected.action === "DELETE" ? "الحذف أرشفة للمنتج مع حفظ سجله، بعد التحقق من خلو جميع المخازن من رصيده وعدم وجود أمر شراء مفتوح." : "التعديلات المقترحة لا تُطبّق قبل موافقة المدير."}</p></div>
             {selected.action === "UPDATE" && <>
               <div className="space-y-3">
                 {changes.length ? changes.map(([key, value]) => (

@@ -31,6 +31,7 @@ const unitSchema = z.object({
 const productFormSchema = z.object({
   nameAr: z.string().min(2, "اسم المنتج مطلوب"),
   nameEn: z.string().optional(),
+  barcode: z.string().max(64).regex(/^[\x20-\x7E]*$/, "باركود العلبة يجب أن يحتوي على أحرف وأرقام إنجليزية").optional().or(z.literal("")),
   category_id: z.string().min(1, "التصنيف مطلوب"),
   supplier_id: z.string().min(1, "المورد الأساسي مطلوب"),
   subCategory_id: z.string().min(1, "الفئة الفرعية مطلوبة"),
@@ -125,6 +126,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete, appr
     { id: "1", name: "قطعة", conversionFactor: 1, sku: "", stock: 0, isBase: true, retailPrice: "0", semiWholesalePrice: "0", wholesalePrice: "0", superWholesalePrice: "0", vipPrice: "0" },
   ]);
   const [savedBarcodeIds, setSavedBarcodeIds] = useState<string[]>([]);
+  const [savedProductBarcode, setSavedProductBarcode] = useState<string | null>(null);
 
   const recalculatePrices = (cost: string, vat: string, margins: PriceMargins, tier?: keyof TierPrices) => {
     setUnits(previous => previous.map(unit => {
@@ -193,6 +195,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete, appr
           is_bundle: false,
         });
 
+        setSavedProductBarcode(data.barcode || null);
         if (data.units && data.units.length > 0) {
           setSavedBarcodeIds(data.units.filter((unit: SavedUnit) => !!unit.barcode).map((unit: SavedUnit) => unit.id));
           const loadedUnits = data.units.map((u: SavedUnit) => {
@@ -750,7 +753,15 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete, appr
                       <td data-label="باركود الوحدة (اختياري)" className="px-4 py-4">
                         <UnitBarcodeField unitName={unit.name || "الوحدة"} value={unit.sku}
                           readOnly={savedBarcodeIds.includes(unit.id)}
-                          onChange={value => updateUnit(unit.id, "sku", value)} />
+                          onChange={value => updateUnit(unit.id, "sku", value)}
+                          {...(unit.isBase ? {
+                            boxBarcode: form.barcode,
+                            boxBarcodeReadOnly: !!savedProductBarcode,
+                            onBoxBarcodeChange: (value: string) => {
+                              setForm(previous => ({ ...previous, barcode: value }));
+                              setErrors(previous => previous.filter(error => error !== "barcode"));
+                            },
+                          } : {})} />
                       </td>
                       <td data-label="كمية المخزون" className="px-6 py-4 whitespace-nowrap">
                         <span className="text-xs text-[#e2bfb0]">{unit.isBase ? `${totalBaseStock} ${unit.name}` : "يُعرض الرصيد بالوحدة الأساسية"}</span>

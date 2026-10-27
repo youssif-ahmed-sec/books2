@@ -2,7 +2,7 @@
 
 import { notifyError } from "@/lib/notifications";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
 import { fetchApi } from "@/lib/api";
 import { pricesFromMargins, type PriceMargins, type TierPrices } from "@/lib/pricing";
@@ -15,6 +15,7 @@ import { productFormErrors, productSaveError } from "@/lib/productFormErrors";
 import { getUserRole } from "@/utils/auth";
 import { useHydrated } from "@/lib/useHydrated";
 import { optimizeProductImage } from "@/lib/productImage";
+import { emptyBarcodeScanCapture, englishBarcodeFromScan, recordBarcodeScanKey } from "@/lib/barcodeScanner";
 
 const unitSchema = z.object({
   id: z.string(),
@@ -33,6 +34,7 @@ const unitSchema = z.object({
 const productFormSchema = z.object({
   nameAr: z.string().min(2, "اسم المنتج مطلوب"),
   nameEn: z.string().optional(),
+  barcode: z.string().max(64).regex(/^[\x20-\x7E]*$/, "باركود العلبة يجب أن يحتوي على أحرف وأرقام إنجليزية").optional().or(z.literal("")),
   category_id: z.string().min(1, "التصنيف مطلوب"),
   supplier_id: z.string().min(1, "المورد الأساسي مطلوب"),
   subCategory_id: z.string().min(1, "الفئة الفرعية مطلوبة"),
@@ -93,9 +95,11 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
   const [linkProduct, setLinkProduct] = useState<ExistingProduct | null>(null);
   const [printProduct, setPrintProduct] = useState<{ name: string; units: BarcodePrintUnit[] } | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
+  const boxBarcodeScanKeys = useRef(emptyBarcodeScanCapture());
   const [form, setForm] = useState({
     nameAr: "",
     nameEn: "",
+    barcode: "",
     category_id: "",
     supplier_id: "",
     subCategory_id: "",
@@ -344,7 +348,7 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
       // Map form data to API schema
       const productData = {
         sku: "INV-" + new Date().getFullYear() + "-" + Math.floor(Math.random() * 10000).toString(),
-        barcode: null,
+        barcode: form.barcode.trim() || null,
         name_en: form.nameEn.trim(),
         name_ar: form.nameAr,
         base_unit: units.find(u => u.isBase)?.name || "Piece",
@@ -476,6 +480,41 @@ export function AddProductPanel({ onClose, onSaved }: AddProductPanelProps) {
                     errors.includes("nameEn") ? "border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.2)]" : "border-white/5"
                   }`}
                 />
+              </div>
+
+              {/* Product Box Barcode */}
+              <div className="space-y-5">
+                <label className="text-[#e2bfb0] text-sm font-semibold px-1 leading-loose">
+                  باركود العلبة / الكرتونة (المصنعي) · اختياري
+                </label>
+                <div className="relative">
+                  <input
+                    dir="ltr"
+                    type="text"
+                    placeholder="امسح الباركود على العلبة أو اكتبه"
+                    value={form.barcode}
+                    onChange={(e) => {
+                      setForm({ ...form, barcode: e.target.value });
+                      if (errors.includes("barcode")) setErrors(errors.filter(err => err !== "barcode"));
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter") {
+                        if (!e.nativeEvent.isComposing) recordBarcodeScanKey(boxBarcodeScanKeys.current, e);
+                        return;
+                      }
+                      const code = englishBarcodeFromScan(boxBarcodeScanKeys.current, e.currentTarget.value.trim());
+                      if (code) {
+                        e.preventDefault();
+                        setForm(prev => ({ ...prev, barcode: code }));
+                      }
+                    }}
+                    className={`w-full bg-surface-container border rounded-full p-4 text-[#e5e2e1] font-mono focus:ring-2 focus:ring-primary/30 transition-all ${
+                      errors.includes("barcode") ? "border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.2)]" : "border-white/5"
+                    }`}
+                  />
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 material-symbols-outlined text-[#e2bfb0]/40 pointer-events-none">barcode_scanner</span>
+                </div>
+                <p className="text-[11px] text-[#e2bfb0]/70 px-2">يُستخدم للبحث والبيع بالماسح الضوئي إلى جانب الباركود الآلي للوحدات.</p>
               </div>
 
               {/* Category */}

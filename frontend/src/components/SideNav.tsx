@@ -109,7 +109,7 @@ export default function SideNav() {
       : (pathname === item.href || pathname.startsWith(`${item.href}/`));
 
     const count = item.href === "/purchases"
-      ? (badgeCounts.purchases + badgeCounts.product_approvals)
+      ? badgeCounts.purchases + (isSubItem ? 0 : badgeCounts.product_approvals)
       : item.href === "/product-approvals"
       ? badgeCounts.product_approvals
       : 0;

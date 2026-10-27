@@ -9,7 +9,7 @@ import { emptyBarcodeScanCapture, englishBarcodeFromScan, recordBarcodeScanKey }
 import { TopNavSearchPortal } from "@/lib/topNavSearchPortal";
 
 type Choice = { id: string; name?: string };
-type Product = { id: string; name_ar: string; sku: string; barcode?: string; base_unit: string; is_bundle?: boolean; units?: Array<{ barcode?: string }> };
+type Product = { id: string; name_ar: string; sku: string; barcode?: string; base_unit: string; cost?: number | string; supplier_id?: string; is_bundle?: boolean; units?: Array<{ barcode?: string }> };
 type Line = { product: Product; quantity: string; unitCost: string };
 type Receipt = {
   id: string; public_number: number; created_at: string; supplier_name: string; warehouse_name: string;
@@ -72,9 +72,15 @@ export default function ReceiveStockPanel({ onClose, onSaved }: { onClose: () =>
   }
 
   function addProduct(product: Product) {
+    if (!supplierId && product.supplier_id) {
+      setSupplierId(product.supplier_id);
+    }
     setLines(previous => {
       const existing = previous.find(line => line.product.id === product.id);
-      if (!existing) return [...previous, { product, quantity: "1", unitCost: "" }];
+      if (!existing) {
+        const defaultCost = product.cost != null && Number(product.cost) > 0 ? String(product.cost) : "";
+        return [...previous, { product, quantity: "1", unitCost: defaultCost }];
+      }
       return previous.map(line => line.product.id === product.id
         ? { ...line, quantity: String(Number(line.quantity || 0) + 1) } : line);
     });
@@ -110,15 +116,19 @@ export default function ReceiveStockPanel({ onClose, onSaved }: { onClose: () =>
       setError("حدد المورد والمخزن وأضف أصنافًا بكميات موجبة.");
       return;
     }
-    if (lines.some(line => !/^\d+(?:\.\d{1,2})?$/.test(line.unitCost.trim()) ||
-        !Number.isFinite(Number(line.unitCost)) || Number(line.unitCost) > 999999999)) {
-      setError("اكتب سعر شراء القطعة لكل صنف، بصفر أو أكثر وحتى منزلتين عشريتين.");
+    if (lines.some(line => line.unitCost.trim() !== "" && (!/^\d+(?:\.\d{1,2})?$/.test(line.unitCost.trim()) ||
+        !Number.isFinite(Number(line.unitCost)) || Number(line.unitCost) > 999999999))) {
+      setError("سعر شراء القطعة (إن وجد) يجب أن يكون بصفر أو أكثر وحتى منزلتين عشريتين.");
       return;
     }
     const payload = {
       supplier_id: supplierId, warehouse_id: selectedWarehouseId,
       supplier_document: reference.trim() || null,
-      lines: lines.map(line => ({ product_id: line.product.id, quantity: line.quantity, unit_cost: line.unitCost.trim() })),
+      lines: lines.map(line => ({
+        product_id: line.product.id,
+        quantity: line.quantity,
+        unit_cost: line.unitCost.trim() ? line.unitCost.trim() : null
+      })),
     };
     const fingerprint = JSON.stringify(payload);
     if (receiptRequest.current?.fingerprint !== fingerprint) {
@@ -190,14 +200,14 @@ export default function ReceiveStockPanel({ onClose, onSaved }: { onClose: () =>
               }
               const code = englishBarcodeFromScan(scanKeys.current, event.currentTarget.value.trim());
               if (code) { scannedSearch.current = code; setSearch(code); }
-            }} placeholder="باركود أو اسم الصنف للاستلام" aria-label="بحث صنف الاستلام" className="app-search app-search-focus min-w-0 flex-1 rounded-full px-4" />
+            }} placeholder="امسح الباركود (علبة أو وحدة) أو اكتب اسم الصنف للاستلام" aria-label="بحث صنف الاستلام" className="app-search app-search-focus min-w-0 flex-1 rounded-full px-4" />
               <button type="submit" className="app-secondary-button !px-3">إضافة</button></div></form></TopNavSearchPortal>
           {matches.length > 0 && <div className="max-h-44 overflow-y-auto rounded-xl border border-white/10" role="listbox" aria-label="الأصناف المطابقة">{matches.map(product =>
             <button type="button" role="option" aria-selected="false" key={product.id} onClick={() => addProduct(product)} className="block w-full border-b border-white/10 px-3 py-2 text-right hover:bg-white/10">{product.name_ar} <span className="app-muted text-xs">{product.sku}</span></button>)}</div>}
-          <div className="overflow-x-auto rounded-xl border border-white/10"><table className="w-full text-sm text-right"><thead className="bg-white/5"><tr><th className="p-3">الصنف</th><th className="p-3">الكمية بالوحدة الأساسية</th><th className="p-3">سعر شراء القطعة</th><th className="p-3">حذف</th></tr></thead><tbody>
+          <div className="overflow-x-auto rounded-xl border border-white/10"><table className="w-full text-sm text-right"><thead className="bg-white/5"><tr><th className="p-3">الصنف</th><th className="p-3">الكمية بالوحدة الأساسية</th><th className="p-3">سعر شراء القطعة (اختياري)</th><th className="p-3">حذف</th></tr></thead><tbody>
             {lines.length === 0 ? <tr><td colSpan={4} className="p-5 text-center app-muted">لم تُضف أصناف بعد</td></tr> : lines.map(line => <tr key={line.product.id} className="border-t border-white/10"><td className="p-3">{line.product.name_ar} <span className="app-muted">({line.product.base_unit})</span></td>
               <td className="p-3"><ZeroHintNumberInput aria-label={`كمية ${line.product.name_ar}`} min="0.01" max="99999999" step="0.01" value={line.quantity} onChange={event => setLines(previous => previous.map(item => item.product.id === line.product.id ? { ...item, quantity: event.target.value } : item))} className="app-field w-28 text-center" /></td>
-              <td className="p-3"><ZeroHintNumberInput aria-label={`سعر شراء القطعة من ${line.product.name_ar}`} placeholder="0.00" min="0" max="999999999" step="0.01" value={line.unitCost} onChange={event => setLines(previous => previous.map(item => item.product.id === line.product.id ? { ...item, unitCost: event.target.value } : item))} className="app-field w-32 text-center" /></td>
+              <td className="p-3"><ZeroHintNumberInput aria-label={`سعر شراء القطعة من ${line.product.name_ar}`} placeholder="0.00 (اختياري)" min="0" max="999999999" step="0.01" value={line.unitCost} onChange={event => setLines(previous => previous.map(item => item.product.id === line.product.id ? { ...item, unitCost: event.target.value } : item))} className="app-field w-32 text-center" /></td>
               <td className="p-3"><button type="button" aria-label={`حذف ${line.product.name_ar}`} onClick={() => setLines(previous => previous.filter(item => item.product.id !== line.product.id))} className="text-red-300 hover:text-red-200">حذف</button></td></tr>)}</tbody></table></div>
           <label className="app-muted block text-sm">رقم مستند المورد · اختياري<input value={reference} onChange={event => setReference(event.target.value)} className="app-field mt-1" /></label>
           <button type="button" disabled={saving || warehouses.length === 0 || lines.length === 0} onClick={save} className="app-primary-button w-full">{saving ? "جارٍ الحفظ..." : "حفظ فاتورة الاستلام"}</button>

@@ -13,6 +13,7 @@ import { refreshNotificationBell } from "@/lib/notificationEvents";
 import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
 import { warehouseOnlyMode } from "@/lib/warehouseMode";
 import { TopNavSearchPortal } from "@/lib/topNavSearchPortal";
+import ReceiveStockPanel from "@/components/ReceiveStockPanel";
 
 type Warehouse = { id: string; name: string };
 type Product = { id: string; name_ar: string; sku: string; barcode: string | null; base_unit: string; cost: number | null; units: { barcode: string | null; conversion_factor: number }[] };
@@ -55,6 +56,7 @@ export default function StockOperationsPage() {
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [showReceiveModal, setShowReceiveModal] = useState(false);
   const [targetId, setTargetId] = useState("");
   const [quantity, setQuantity] = useState("");
   const [transferBusy, setTransferBusy] = useState(false);
@@ -236,7 +238,17 @@ export default function StockOperationsPage() {
   return <div className="min-h-screen" dir="rtl">
 
     <main className="app-main space-y-7">
-      <div><h1 className="app-heading">جلسة الجرد</h1></div>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <h1 className="app-heading">جلسة الجرد</h1>
+        <button
+          type="button"
+          onClick={() => setShowReceiveModal(true)}
+          className="flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-primary/25 hover:opacity-90 transition-all"
+        >
+          <span className="material-symbols-outlined text-base">move_to_inbox</span>
+          <span>استلام مخزون</span>
+        </button>
+      </div>
       {error && <p role="alert" className="stock-ops-warning app-panel p-4 text-sm">{error}</p>}
       {!checkingCountFeature && !countFeatureReady && <p role="status" className="stock-ops-warning app-panel p-4 text-sm">جلسات الجرد وموافقات المدير قيد تفعيل السيرفر وقاعدة البيانات. إدخال جرد جديد متوقف مؤقتًا لحماية الأرصدة.</p>}
       {message && <p role="status" className="app-panel border border-primary/20 p-4 text-sm leading-7">{message}</p>}
@@ -270,5 +282,6 @@ export default function StockOperationsPage() {
       <p className="app-muted text-xs">{isAdmin ? "فروق جرد المدير تحدث الرصيد فور تسجيلها مع حفظ السبب والحركة." : "فروق الجرد تحتاج موافقة المدير قبل تحديث المنتج."} <Link href="/inventory" className="text-primary underline">العودة للمخزون</Link></p>
     </main>
     {confirming && createPortal(<div className="motion-overlay fixed inset-0 z-[120] flex items-center justify-center bg-black/70 p-4" dir="rtl" role="dialog" aria-modal="true" aria-label="تأكيد إرسال جلسة الجرد"><div className="motion-dialog app-panel w-full max-w-md space-y-5 p-6"><h2 className="text-lg font-bold">إرسال جلسة الجرد؟</h2><p className="app-muted text-sm leading-7">ستُسجّل {quantityText(draft.length)} أصناف. {draftDifference ? isAdmin ? `${quantityText(draftDifference)} منها بها فروق؛ سيتحدث رصيدها مباشرة بعد التأكيد.` : `${quantityText(draftDifference)} منها بها فروق ستصل للمدير، ولن يتغير رصيدها إلا بعد موافقته.` : "لا توجد فروق، وستُسجّل نتائج العد مباشرة."}</p><div className="flex flex-wrap gap-2"><button type="button" className="app-primary-button" disabled={submitting} onClick={() => void sendSession()}>{submitting ? "جارٍ الإرسال…" : "تأكيد الإرسال"}</button><button type="button" className="app-secondary-button" disabled={submitting} onClick={() => setConfirming(false)}>إلغاء</button></div></div></div>, document.body)}
+    {showReceiveModal && <ReceiveStockPanel onClose={() => setShowReceiveModal(false)} onSaved={refreshData} />}
   </div>;
 }
