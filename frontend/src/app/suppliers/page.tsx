@@ -14,6 +14,8 @@ import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot
 import { errorMessage } from "@/lib/errors";
 import { useSectionSearchSelection } from "@/lib/useSectionSearchSelection";
 import { useHydrated } from "@/lib/useHydrated";
+import { openWhatsApp } from "@/lib/whatsapp";
+import WhatsAppIcon from "@/components/WhatsAppIcon";
 
 // ─── Zod Schemas ─────────────────────────────────────────────────────────────
 const supplierSchema = z.object({
@@ -541,8 +543,15 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess, isAdmin, initialTab
           )}
 
           {/* Statement Tab */}
-          {activeTab === "statement" && (
+          {activeTab === "statement" && detail && (
             <div>
+              <button type="button" className="app-secondary-button mb-3 flex items-center gap-2" onClick={() => {
+                const lines = statementItems.map(item => item.kind === "payment"
+                  ? `${new Date(item.date).toLocaleDateString("ar-EG", { timeZone: "Africa/Cairo" })} · دفعة · −${Number(item.payment.amount).toFixed(2)} ج.م`
+                  : `${new Date(item.date).toLocaleDateString("ar-EG", { timeZone: "Africa/Cairo" })} · ${item.entry.entry_type === "DEBT" ? "مديونية" : "تصحيح"} · ${item.entry.note} · ${item.entry.entry_type === "DEBT" ? "+" : "−"}${Number(item.entry.amount).toFixed(2)} ج.م`);
+                const message = [`كشف حساب ${detail.name}`, `المديونية السابقة: ${Number(detail.opening_balance || 0).toFixed(2)} ج.م`, `استلامات قديمة محسوبة: ${Number(detail.total_purchases).toFixed(2)} ج.م`, ...lines, `الرصيد الحالي: ${detail.balance === null ? "غير معروف · كشف الحساب غير مكتمل" : `${Number(detail.balance).toFixed(2)} ج.م`}`].join("\n");
+                if (!openWhatsApp(detail.phone, message)) notifyError("رقم المورد غير متاح أو غير صالح للواتساب");
+              }}><WhatsAppIcon /> إرسال كشف الحساب</button>
               <div className="mb-3 flex flex-wrap gap-2" aria-label="تصفية كشف الحساب">
                 {([
                   { key: "all", label: "كل الحركات" },

@@ -87,16 +87,12 @@ class PurchaseDocumentService:
         db.add(PurchaseDocument(
             id=document_id, request_id=payload.request_id, request_fingerprint=fingerprint,
             supplier_id=payload.supplier_id, supplier_name=supplier_name,
-            note=payload.note, requested_by=user_id,
-            status="REQUESTED",
+            note=payload.note, requested_by=user_id, approved_by=user_id,
+            status="APPROVED",
         ))
         db.add_all(lines)
-        db.add(AuditLog(user_id=user_id, action="REQUEST_PURCHASE_DOCUMENT", entity_type="PurchaseDocument", entity_id=str(document_id),
-                        new_value={"supplier_id": str(payload.supplier_id), "lines": [line.model_dump(mode="json") for line in payload.lines]}))
-        requester_role = (await db.execute(select(User.role).where(User.id == user_id))).scalar_one_or_none()
-        if requester_role != RoleEnum.ADMIN:
-            await notify_roles(db, (RoleEnum.ADMIN,), kind="purchase_request", title="طلب شراء جديد",
-                               message=f"طلب يضم {len(lines)} صنف", href="/purchases")
+        db.add(AuditLog(user_id=user_id, action="APPROVE_PURCHASE_DOCUMENT", entity_type="PurchaseDocument", entity_id=str(document_id),
+                        new_value={"status": "APPROVED", "supplier_id": str(payload.supplier_id), "lines": [line.model_dump(mode="json") for line in payload.lines]}))
         try:
             await db.commit()
         except IntegrityError:

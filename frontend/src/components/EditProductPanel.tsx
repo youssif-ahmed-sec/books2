@@ -766,7 +766,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete, appr
                           } : {})} />
                       </td>
                       <td data-label="كمية المخزون" className="px-6 py-4 whitespace-nowrap">
-                        <span className="text-xs text-[#e2bfb0]">{unit.isBase ? `${totalBaseStock} ${unit.name}` : "يُعرض الرصيد بالوحدة الأساسية"}</span>
+                        <span className="text-xs text-[#e2bfb0]">{unit.isBase ? `${totalBaseStock} ${unit.name}` : "يُعرض الرصيد بالوحدة الأساسية"}</span>{unit.isBase && <button type="button" className="app-secondary-button ms-2" onClick={() => setEditingQuantity(true)}>تعديل الكمية</button>}
                       </td>
                       <td data-label="إجراءات" className="px-6 py-4 text-center whitespace-nowrap">
                         {unit.isBase ? (

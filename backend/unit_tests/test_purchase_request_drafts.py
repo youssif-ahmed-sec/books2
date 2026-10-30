@@ -21,6 +21,9 @@ class Result:
     def scalar_one_or_none(self):
         return self.value
 
+    def scalar_one(self):
+        return self.value
+
     def first(self):
         return self.value
 
@@ -147,3 +150,67 @@ def test_legacy_creation_requires_admin_and_quick_request_requires_inventory_rol
             SimpleNamespace(), SimpleNamespace(id=uuid4(), role=RoleEnum.ADMIN),
         ))
     assert raised.value.status_code == 403
+
+
+def test_admin_purchase_create_commits_as_approved(monkeypatch):
+    from schemas.purchase_document import PurchaseDocumentCreate
+    from models.user import AuditLog
+
+    supplier_id, product_id, unit_id, user_id, request_id = (uuid4() for _ in range(5))
+    payload = PurchaseDocumentCreate(supplier_id=supplier_id, request_id=request_id,
+        lines=[{"product_id": product_id, "unit_id": unit_id, "quantity": "2"}])
+    line = SimpleNamespace()
+
+    class Db:
+        def __init__(self):
+            self.results = [Result(None), Result("مورد")]
+            self.added = []
+            self.committed = False
+
+        async def execute(self, query):
+            return self.results.pop(0)
+
+        def add(self, value):
+            self.added.append(value)
+
+        def add_all(self, values):
+            self.added.extend(values)
+
+        async def commit(self):
+            self.committed = True
+
+    async def build_lines(db, document_id, data):
+        return [line]
+
+    monkeypatch.setattr(PurchaseDocumentService, "build_lines", build_lines)
+    db = Db()
+    document_id = asyncio.run(PurchaseDocumentService.create(db, payload, user_id))
+    document = next(item for item in db.added if isinstance(item, PurchaseDocument))
+    assert document.id == document_id and document.status == "APPROVED"
+    assert document.requested_by == user_id and document.approved_by == user_id and db.committed
+    assert any(isinstance(item, AuditLog) and item.action == "APPROVE_PURCHASE_DOCUMENT"
+               and item.new_value["status"] == "APPROVED" for item in db.added)
+
+
+def test_purchase_creation_is_admin_only_and_retries_do_not_duplicate():
+    from schemas.purchase_document import PurchaseDocumentCreate
+    from core.idempotency import request_fingerprint
+
+    creation = next(item for item in route.router.routes
+                    if item.path == "/purchase-documents" and "POST" in item.methods)
+    assert any(dependency.call is require_admin for dependency in creation.dependant.dependencies)
+    user_id = uuid4()
+    payload = PurchaseDocumentCreate(supplier_id=uuid4(), request_id=uuid4(),
+        lines=[{"product_id": uuid4(), "unit_id": uuid4(), "quantity": "2"}])
+    existing = SimpleNamespace(id=uuid4(), request_fingerprint=request_fingerprint(payload), requested_by=user_id)
+
+    class Db:
+        async def execute(self, query):
+            return Result(existing)
+
+    assert asyncio.run(PurchaseDocumentService.create(Db(), payload, user_id)) == existing.id
+    with pytest.raises(ValueError, match="Request ID"):
+        asyncio.run(PurchaseDocumentService.create(Db(), payload, uuid4()))
+    changed = payload.model_copy(update={"note": "different"})
+    with pytest.raises(ValueError, match="Request ID"):
+        asyncio.run(PurchaseDocumentService.create(Db(), changed, user_id))

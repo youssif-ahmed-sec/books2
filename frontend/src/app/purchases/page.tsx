@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import WhatsAppIcon from "@/components/WhatsAppIcon";
 import { useSectionSearchSelection } from "@/lib/useSectionSearchSelection";
 import { ProductSelect } from "@/components/ProductSelect";
 import { ZeroHintNumberInput } from "@/components/ZeroHintNumberInput";
@@ -125,7 +126,7 @@ function PurchaseEditor({ initial, suppliers, onClose, onSaved }: {
       setRequestId(crypto.randomUUID());
       await onSaved();
       onClose();
-      notifySuccess(initial ? "تم حفظ تعديل طلب الشراء بنجاح" : "تم إرسال طلب الشراء للمراجعة بنجاح");
+      notifySuccess(initial ? "تم حفظ تعديل طلب الشراء بنجاح" : "تم إنشاء أمر الشراء واعتماده");
     } catch (cause) { notifyError(errorMessage(cause, "تعذر حفظ طلب الشراء")); }
     finally { setBusy(false); }
   };
@@ -151,9 +152,9 @@ function PurchaseEditor({ initial, suppliers, onClose, onSaved }: {
           const selectedUnit = product?.units?.find(unit => unit.id === line.unit_id);
           return <div key={line.key} className="app-panel grid gap-3 p-4 sm:grid-cols-[minmax(0,1fr)_180px_130px_auto] sm:items-end"><div><strong className="block">{product?.name_ar || initial?.lines.find(item => item.product_id === line.product_id)?.product_name || "جاري تحميل الصنف"}</strong><span className="app-muted text-xs">{selectedUnit ? `يعادل ${moneylessNumber(Number(line.quantity || 0) * Number(selectedUnit.conversion_factor))} من الوحدة الأساسية` : ""}</span></div><label className="text-sm">الوحدة<ProductSelect label="وحدة الصنف" value={line.unit_id} placeholder="اختر الوحدة" options={(product?.units || []).map(unit => ({ value: unit.id, label: unit.unit_name }))} onChange={value => update(line.key, { unit_id: value })} compact /></label><label className="text-sm">الكمية<ZeroHintNumberInput className="app-field mt-1 h-11" min="0.01" step="0.01" value={line.quantity} onChange={event => update(line.key, { quantity: event.target.value })} /></label><button type="button" className="app-secondary-button !px-3 !py-2 text-red-300" onClick={() => setLines(previous => previous.filter(item => item.key !== line.key))}>إزالة</button></div>;
         })}</div>
-        <label className="block text-sm">ملاحظة للمراجعة<textarea className="app-field mt-2 min-h-20" maxLength={500} value={note} onChange={event => setNote(event.target.value)} placeholder="اختياري" /></label>
+        <label className="block text-sm">ملاحظة<textarea className="app-field mt-2 min-h-20" maxLength={500} value={note} onChange={event => setNote(event.target.value)} placeholder="اختياري" /></label>
       </div>
-      <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 p-5"><p className="app-muted text-sm">الاستلام لا يغيّر الأسعار أو حساب المورد.</p><button type="button" disabled={busy || !valid} onClick={() => void save()} className="app-primary-button">{busy ? "جاري الحفظ..." : initial ? "حفظ التعديل" : "إرسال الطلب للمراجعة"}</button></footer>
+      <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 p-5"><p className="app-muted text-sm">الاستلام لا يغيّر الأسعار أو حساب المورد.</p><button type="button" disabled={busy || !valid} onClick={() => void save()} className="app-primary-button">{busy ? "جاري الحفظ..." : initial ? "حفظ التعديل" : "إنشاء طلب الشراء"}</button></footer>
     </div>
   </div>;
 }
@@ -424,10 +425,9 @@ export default function PurchasesPage() {
                           type="button"
                           className="app-secondary-button !h-8 !px-2.5 text-xs text-emerald-400 hover:text-emerald-300 flex items-center gap-1"
                           onClick={() => openWhatsAppForDocument(document)}
-                          title="مراسلة المورد عبر واتساب ويب"
+                          title="مراسلة المورد عبر واتساب ويب" aria-label="مراسلة المورد عبر واتساب ويب"
                         >
-                          <span className="material-symbols-outlined text-sm">chat</span>
-                          <span>واتساب</span>
+                          <WhatsAppIcon />
                         </button>
                       )}
                       <button

@@ -18,6 +18,8 @@ import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot
 import { useConfirmAction } from "@/components/ConfirmationProvider";
 import { formatCurrency } from "@/lib/formatters";
 import { printCustomerStatement } from "@/lib/customerStatementPrint";
+import { openWhatsApp } from "@/lib/whatsapp";
+import WhatsAppIcon from "@/components/WhatsAppIcon";
 
 const customerSchema = z.object({
   name: z.string().min(2, "الاسم مطلوب (أكثر من حرفين)"),
@@ -499,6 +501,11 @@ export default function CustomersPage() {
                     <span className="app-muted text-xs block">الرصيد السابق</span>
                     <strong className="text-base">{formatCurrency(statement.opening_balance)}</strong>
                   </div>
+                  <button type="button" className="app-secondary-button flex items-center gap-2" onClick={() => {
+                    const lines = statement.entries.map(entry => `${new Date(entry.at).toLocaleDateString("ar-EG", { timeZone: "Africa/Cairo" })} · ${entry.kind === "invoice" ? "فاتورة بيع" : entry.kind === "correction" ? "تعديل فاتورة" : entry.kind === "return" ? "استرجاع أو استبدال" : entry.kind === "refund" ? "رد مبلغ" : "دفعة"}${entry.public_number ? ` · ${entry.public_number}` : ""} · ${entry.direction === "debit" ? "+" : "−"}${formatCurrency(entry.amount)} · الرصيد ${formatCurrency(entry.balance)}`);
+                    const message = [`كشف حساب ${profileCustomer.name}`, `الرصيد السابق: ${formatCurrency(statement.opening_balance)}`, ...lines, `الرصيد الحالي: ${formatCurrency(statement.closing_balance)}`].join("\n");
+                    if (!openWhatsApp(profileCustomer.whatsapp_number || profileCustomer.phone, message)) notifyError("رقم العميل غير متاح أو غير صالح للواتساب");
+                  }}><WhatsAppIcon /> إرسال كشف الحساب</button>
                   <button
                     type="button"
                     onClick={() => {

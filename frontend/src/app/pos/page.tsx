@@ -4,6 +4,8 @@ import { notifyError } from "@/lib/notifications";
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import Link from "next/link";
+import WhatsAppIcon from "@/components/WhatsAppIcon";
+import { openWhatsApp } from "@/lib/whatsapp";
 import { fetchApi } from "@/lib/api";
 import { ReceiptPrint } from "@/components/pos/ReceiptPrint";
 import { sendLocalPrint } from "@/lib/localPrint";
@@ -198,7 +200,7 @@ const defaultCustomerPriceLevel = (type: string) =>
   type === "Wholesale Customer" ? "Wholesale" :
   type === "Super Wholesale Customer" ? "Super Wholesale" :
   type === "VIP Customer" ? "VIP" : "Retail";
-type PosCustomer = { id: string; name: string; phone?: string | null; address?: string | null; addresses?: string[]; customer_type?: string; price_level: string; balance: number; credit_limit: number };
+type PosCustomer = { id: string; name: string; phone?: string | null; whatsapp_number?: string | null; address?: string | null; addresses?: string[]; customer_type?: string; price_level: string; balance: number; credit_limit: number };
 
 export default function POSPage() {
   const confirmAction = useConfirmAction();
@@ -279,6 +281,7 @@ export default function POSPage() {
   const latestPrintOrder = useRef<string | null>(null);
   const [lastOrder, setLastOrder] = useState<PrintedOrder | null>(null);
   const [lastPrintJob, setLastPrintJob] = useState<Record<string, unknown> | null>(null);
+  const [lastWhatsAppPhone, setLastWhatsAppPhone] = useState("");
   const [receiptItems, setReceiptItems] = useState<CartItem[]>([]);
   const [printStatus, setPrintStatus] = useState("");
   const [isSendingReceipt, setIsSendingReceipt] = useState(false);
@@ -1039,6 +1042,7 @@ export default function POSPage() {
         price_level: serverItemFor(item)?.price_level ?? item.priceLevel })),
     };
     setLastPrintJob(receiptJob);
+    setLastWhatsAppPhone(customers.find(customer => customer.id === sold.selectedCustomer)?.whatsapp_number || customers.find(customer => customer.id === sold.selectedCustomer)?.phone || sold.customerPhone || "");
     setCart([]); cartRef.current = []; checkoutRequest.current = null;
     if (draftOwner.current) {
       try {
@@ -1203,6 +1207,11 @@ export default function POSPage() {
             <p className="app-muted text-sm">فاتورة {lastOrder.publicNumber} · {printStatus}</p></div>
           <div className="flex flex-wrap gap-2">
             <button type="button" className="app-secondary-button" onClick={() => setReceiptOpen(true)}>عرض الفاتورة</button>
+            <button type="button" className="app-secondary-button flex items-center gap-2" onClick={() => {
+              const lines = receiptItems.map(item => `${item.nameAr} · ${item.quantity} ${item.unitName} · ${formatCurrency(item.quantity * item.unitPrice)}`);
+              const message = [`فاتورة رقم ${lastOrder.publicNumber}`, `العميل: ${lastOrder.customerName || "عميل نقدي"}`, ...lines, `الإجمالي قبل الخصم: ${formatCurrency(lastOrder.subtotal)}`, `الخصم: ${formatCurrency(lastOrder.discount)}`, `التوصيل: ${formatCurrency(lastOrder.shippingCost || 0)}`, `رسوم المحفظة: ${formatCurrency(lastOrder.walletFee || 0)}`, `الإجمالي: ${formatCurrency(lastOrder.totalAmount)}`, `المدفوع: ${formatCurrency(lastOrder.amountReceived || 0)}`, `المتبقي: ${formatCurrency(lastOrder.remainingAmount || 0)}`].join("\n");
+              if (!openWhatsApp(lastWhatsAppPhone, message)) notifyError("رقم العميل غير متاح أو غير صالح للواتساب");
+            }}><WhatsAppIcon /> إرسال الفاتورة عبر واتساب</button>
             <button type="button" className="app-secondary-button" onClick={reprintReceipt} disabled={!lastPrintJob || isSendingReceipt}>
               {isSendingReceipt ? "جارٍ الإرسال..." : "إعادة إرسال للطابعة"}</button>
             <button type="button" className="app-primary-button" onClick={() => searchInput.current?.focus()}>بيع جديد</button>
@@ -1253,8 +1262,10 @@ export default function POSPage() {
               <label className="block text-sm">نوع العميل</label>
               <ProductSelect label="نوع العميل" value={customerType} onChange={setCustomerType} disabled={savingCustomer || isProcessing || customerLookup === "found"}
                 placeholder="نوع العميل" options={customerTypes} allowClear={false} />
+              <label className="block text-sm">اسم العميل · اختياري
+                <input className="app-field mt-1" value={customerName} onChange={event => { setCustomerName(event.target.value); setSaleCustomerName(event.target.value); }} placeholder={customerLookup === "new" ? "عميل نقدي" : "أدخل رقم الهاتف أولًا"} maxLength={120} autoComplete="name" disabled={savingCustomer || isProcessing || customerLookup !== "new"} />
+              </label>
               {customerLookup === "found" && <>
-                <p className="text-sm">الاسم: <strong>{customerName}</strong></p>
                 <div className="min-w-0 text-sm"><span className="mb-1 block">{isDelivery ? "عنوان التوصيل على الفاتورة" : "عنوان العميل المسجل"}</span>
                   <ProductSelect label={isDelivery ? "عنوان التوصيل على الفاتورة" : "عنوان العميل المسجل"} value={customerAddress} onChange={setCustomerAddress} disabled={savingAddress || isProcessing}
                     placeholder="بدون عنوان" options={(customers.find(customer => customer.id === selectedCustomer)?.addresses || []).map(address => ({ value: address, label: address }))} allowClear />
@@ -1266,9 +1277,6 @@ export default function POSPage() {
                 </div> : <button type="button" className="app-secondary-button" onClick={() => setAddingAddress(true)} disabled={isProcessing}>إضافة عنوان جديد</button>}
               </>}
               {customerLookup === "new" && <>
-                <label className="block text-sm">اسم العميل <span className="app-muted">(اختياري)</span>
-                  <input className="app-field mt-1" value={customerName} onChange={event => { setCustomerName(event.target.value); setSaleCustomerName(event.target.value); }} placeholder="عميل نقدي" maxLength={120} autoComplete="name" disabled={savingCustomer || isProcessing} />
-                </label>
                 <label className="block text-sm">العنوان <span className="app-muted">(اختياري)</span>
                   <input className="app-field mt-1" value={customerAddress} onChange={event => setCustomerAddress(event.target.value)} autoComplete="street-address" disabled={savingCustomer || isProcessing} />
                 </label>
