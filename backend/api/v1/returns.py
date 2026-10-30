@@ -9,6 +9,7 @@ from core.idempotency import IdempotencyConflict
 from database import get_db
 from models.returns import SalesReturn
 from models.returns import SalesReturnLine
+from models.sale_correction import SaleCorrection
 from models.order import Order, OrderItem, OrderStatusEnum
 from models.customer import Customer
 from models.product import Product, ProductUnit
@@ -212,7 +213,13 @@ async def list_returns(
     query = select(SalesReturn).order_by(SalesReturn.created_at.desc())
     if order_id:
         query = query.where(SalesReturn.order_id == order_id)
-    return (await db.execute(query)).scalars().all()
+    records = (await db.execute(query)).scalars().all()
+    ids = [record.id for record in records]
+    correction_ids = set((await db.execute(select(SaleCorrection.id).where(
+        SaleCorrection.id.in_(ids), SaleCorrection.status == "APPLIED",
+    ))).scalars().all()) if ids else set()
+    return [{**SalesReturnResponse.model_validate(record).model_dump(), "is_correction": record.id in correction_ids}
+            for record in records]
 
 
 @router.get("/{return_id}/receipt", response_model=SalesReturnReceipt)
@@ -224,6 +231,9 @@ async def return_receipt(
     record = (await db.execute(select(SalesReturn).where(SalesReturn.id == return_id))).scalar_one_or_none()
     if record is None:
         raise HTTPException(status_code=404, detail="Return not found")
+    correction = (await db.execute(select(SaleCorrection).where(
+        SaleCorrection.id == record.id, SaleCorrection.status == "APPLIED",
+    ))).scalar_one_or_none()
     returned_rows = (await db.execute(select(
         SalesReturnLine, Product.name_ar, ProductUnit.unit_name,
     ).join(OrderItem, OrderItem.id == SalesReturnLine.order_item_id).join(
@@ -261,6 +271,8 @@ async def return_receipt(
         "charge_amount": record.charge_amount,
         "wallet_fee_amount": record.wallet_fee_amount,
         "collection_amount": record.collection_amount,
+        "is_correction": correction is not None,
+        "settlement_breakdown": correction.settlement_breakdown or [] if correction is not None else [],
         "returned_lines": [
             {"product_name": name, "unit_name": unit, "quantity": line.quantity, "amount": line.amount}
             for line, name, unit in returned_rows

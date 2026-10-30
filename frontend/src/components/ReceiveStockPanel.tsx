@@ -179,7 +179,7 @@ export default function ReceiveStockPanel({ onClose, onSaved }: { onClose: () =>
         </div>
         {receipt ? <>
           <div className="grid gap-2 sm:grid-cols-2 text-sm"><p>المورد: <strong>{receipt.supplier_name}</strong></p><p>المخزن: <strong>{receipt.warehouse_name}</strong></p>
-            <p>التاريخ: <strong>{new Date(receipt.created_at).toLocaleString("ar-EG")}</strong></p>
+            <p>التاريخ: <strong>{new Date(receipt.created_at).toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}</strong></p>
             {receipt.supplier_document && <p>مستند المورد: <strong>{receipt.supplier_document}</strong></p>}</div>
           <div className="overflow-x-auto rounded-xl border border-white/10"><table className="w-full text-sm text-right"><thead className="bg-white/5"><tr><th className="p-3">الصنف</th><th className="p-3">الوحدة الأساسية</th><th className="p-3">الكمية المستلمة</th><th className="p-3">سعر شراء القطعة</th></tr></thead>
             <tbody>{receipt.lines.map(line => <tr key={line.product_id} className="border-t border-white/10"><td className="p-3">{line.product_name}</td><td className="p-3">{line.unit_name}</td><td className="p-3">{line.quantity}</td><td className="p-3 whitespace-nowrap">{line.unit_cost == null ? "—" : `${Number(line.unit_cost).toFixed(2)} ج.م`}</td></tr>)}</tbody></table></div>

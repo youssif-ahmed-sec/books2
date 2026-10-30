@@ -11,7 +11,8 @@ from models.product import Product, ProductUnit, ProductPrice, ProductSupplierLi
 from models.user import User, RoleEnum, AuditLog
 from schemas.inventory import InventoryTransactionCreate, InventoryTransactionResponse, InventoryBalanceResponse, InventoryStatsResponse, InventoryTransactionRecentResponse, PaginatedInventoryTransactionResponse, StockReceiptCreate
 from sqlalchemy import func, desc
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from core.dependencies import require_inventory_access, require_warehouse_access
 from core.idempotency import request_fingerprint
 from database import get_db
@@ -313,11 +314,14 @@ async def get_inventory_stats(
     Get inventory dashboard statistics.
     """
     # 1. Today's transactions
-    today = date.today()
+    now = datetime.now(ZoneInfo("Africa/Cairo"))
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    day_end = day_start + timedelta(days=1)
     today_movements = None
     if current_user.role == RoleEnum.ADMIN:
         today_movements_query = select(func.count(InventoryTransaction.id)).where(
-            func.date(InventoryTransaction.created_at) == today
+            InventoryTransaction.created_at >= day_start.astimezone(timezone.utc),
+            InventoryTransaction.created_at < day_end.astimezone(timezone.utc),
         )
         today_movements = (await db.execute(today_movements_query)).scalar() or 0
 

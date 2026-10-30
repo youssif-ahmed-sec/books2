@@ -47,21 +47,22 @@ def session(*responses):
 
 
 def admin():
-    return User(id=uuid4(), email="admin@example.com", role=RoleEnum.ADMIN, is_active=True, is_deleted=False)
+    return User(id=uuid4(), email="admin@example.com", full_name="مدير", role=RoleEnum.ADMIN, is_active=True, is_deleted=False)
 
 
 def staff():
-    return User(id=uuid4(), email="staff@example.com", username="staff1", role=RoleEnum.CASHIER_ORDERS, is_active=True, is_deleted=False, created_at=datetime.now(timezone.utc))
+    return User(id=uuid4(), email="staff@example.com", username="staff1", full_name="موظف", role=RoleEnum.CASHIER_ORDERS, is_active=True, is_deleted=False, created_at=datetime.now(timezone.utc))
 
 
-def test_username_is_optional_and_normalized():
-    request = UserRegisterRequest(email="staff@example.com", password="password12345", username="Staff_1", role=RoleEnum.CASHIER_ORDERS)
+def test_username_is_required_and_normalized():
+    request = UserRegisterRequest(email="staff@example.com", full_name="موظف", password="password12345", username="Staff_1", role=RoleEnum.CASHIER_ORDERS)
     assert request.username == "staff_1"
-    assert UserRegisterRequest(email="staff@example.com", password="password12345", role=RoleEnum.CASHIER_ORDERS).username is None
+    with pytest.raises(ValidationError):
+        UserRegisterRequest(email="staff@example.com", full_name="موظف", password="password12345", role=RoleEnum.CASHIER_ORDERS)
     with pytest.raises(ValidationError):
         UserRegisterRequest(email="staff@example.com", password="password12345")
     with pytest.raises(ValidationError):
-        UserRegisterRequest(email="staff@example.com", password="password12345", username="bad@name", role=RoleEnum.CASHIER_ORDERS)
+        UserRegisterRequest(email="staff@example.com", full_name="موظف", password="password12345", username="bad@name", role=RoleEnum.CASHIER_ORDERS)
 
 
 @pytest.mark.asyncio
@@ -93,7 +94,7 @@ async def test_old_sales_role_cannot_log_in_or_use_existing_token():
         await get_current_user(create_access_token(subject=str(user.id)), session(result(), result(user)))
     assert error.value.status_code == 401
     with pytest.raises(ValidationError):
-        UserRegisterRequest(email="new@example.com", password="password12345", role=RoleEnum.SALES_ASSISTANT)
+        UserRegisterRequest(email="new@example.com", full_name="موظف", password="password12345", role=RoleEnum.SALES_ASSISTANT)
     with pytest.raises(ValidationError):
         UserUpdateRequest(role=RoleEnum.SALES_ASSISTANT)
 
@@ -148,7 +149,7 @@ async def test_logout_revokes_only_the_presented_token():
 async def test_duplicate_username_registration_conflicts():
     db = session(result(), result(staff()))
     with pytest.raises(HTTPException) as error:
-        await register_user(UserRegisterRequest(email="new@example.com", username="staff1", password="password12345", role=RoleEnum.CASHIER_ORDERS), db, admin())
+        await register_user(UserRegisterRequest(email="new@example.com", username="staff1", full_name="موظف", password="password12345", role=RoleEnum.CASHIER_ORDERS), db, admin())
     assert error.value.status_code == 409
     db.commit.assert_not_awaited()
 
@@ -231,7 +232,7 @@ async def test_user_lifecycle_persists_in_isolated_sqlite():
             current = admin()
             db.add(current)
             await db.commit()
-            created = await register_user(UserRegisterRequest(email="new@example.com", username="Worker_1", password="password12345", role=RoleEnum.CASHIER_ORDERS), db, current)
+            created = await register_user(UserRegisterRequest(email="new@example.com", username="Worker_1", full_name="موظف", password="password12345", role=RoleEnum.CASHIER_ORDERS), db, current)
             assert created.username == "worker_1"
             logged_in = await login(SimpleLoginForm(username="WORKER_1", password="password12345"), db)
             assert logged_in.user.id == created.id

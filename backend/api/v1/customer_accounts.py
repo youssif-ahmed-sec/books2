@@ -17,6 +17,7 @@ from models.customer import Customer, CustomerInteraction
 from models.financial import Payment
 from models.order import Order, OrderStatusEnum
 from models.returns import SalesReturn
+from models.sale_correction import SaleCorrection
 from models.user import AuditLog, User
 from services.order_service import OrderService
 
@@ -145,6 +146,10 @@ async def customer_statement(
     returns = (await db.execute(select(SalesReturn, Order.public_number).join(
         Order, Order.id == SalesReturn.order_id,
     ).where(Order.customer_id == customer_id))).all()
+    return_ids = [record.id for record, _ in returns]
+    correction_customers = dict((await db.execute(select(SaleCorrection.id, Order.customer_id).join(
+        Order, Order.id == SaleCorrection.corrected_order_id,
+    ).where(SaleCorrection.id.in_(return_ids), SaleCorrection.status == "APPLIED"))).all()) if return_ids else {}
     entries = []
     for order in orders:
         if order.id not in exchange_ids:
@@ -158,9 +163,14 @@ async def customer_statement(
                         "delta": _money(payment.amount) if payment.kind == "REFUND" else -_money(payment.amount),
                         "method": payment.method})
     for record, public_number in returns:
-        entries.append({"kind": "return", "id": str(record.id), "order_id": str(record.order_id),
+        is_correction = record.id in correction_customers
+        moved_to_another_customer = is_correction and correction_customers[record.id] != customer_id
+        delta = (-_money(record.returned_value) if moved_to_another_customer else
+                 _money(record.replacement_value) - _money(record.returned_value) if is_correction else
+                 _money(record.collection_amount) - _money(record.refund_amount))
+        entries.append({"kind": "correction" if is_correction else "return", "id": str(record.id), "order_id": str(record.order_id),
                         "public_number": public_number, "at": record.created_at,
-                        "delta": _money(record.collection_amount) - _money(record.refund_amount)})
+                        "delta": delta})
     entries.sort(key=lambda entry: (entry["at"] or datetime.min.replace(tzinfo=ZoneInfo("UTC")),
                                     0 if entry["kind"] == "invoice" else 1, entry["id"]))
     opening = _money(customer.balance) - sum((entry["delta"] for entry in entries), Decimal("0"))

@@ -133,15 +133,8 @@ export async function searchSection(pathname: string, query: string, signal?: Ab
     return (await list("customers-list", "/customers")).filter(item => matches(q, item.name, item.phone, item.email, item.city)).map(item => ({ id: text(item.id), label: text(item.name), detail: text(item.phone), href: target(pathname, text(item.id)) }));
   }
   if (pathname === "/orders") {
-    let completedInvoice: SectionSearchResult[] = [];
-    if (/^[0-9a-f]{12}$/i.test(q) || /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(q)) {
-      const invoice = await fetchApi(`/returns/lookup/${encodeURIComponent(q)}`, { signal, silentErrors: true })
-        .catch(() => null) as { id: string } | null;
-      if (invoice) completedInvoice = [{ id: invoice.id, label: `فاتورة ${invoice.id.slice(-12)}`, href: target("/orders", invoice.id) }];
-    }
     const data = rows(await fetchApi(`/orders/invoices?search=${encodeURIComponent(q)}&limit=20`, { signal, silentErrors: true }));
-    return [...completedInvoice, ...data.filter(item => !completedInvoice.some(found => found.id === text(item.id)))
-      .map(item => ({ id: text(item.id), label: `فاتورة ${text(item.public_number)}`, detail: text(item.customer_name), href: target("/orders", text(item.id)) }))];
+    return data.map(item => ({ id: text(item.id), label: `فاتورة ${text(item.public_number)}`, detail: text(item.customer_name), href: target("/orders", text(item.id)) }));
   }
   if (pathname === "/returns") {
     const data = rows(await fetchApi(`/returns/search?q=${encodeURIComponent(q)}&limit=15`, { signal, silentErrors: true }));

@@ -28,6 +28,7 @@ export interface PrintableStatement {
 const kindLabels: Record<string, string> = {
   invoice: "فاتورة بيع",
   return: "استرجاع / استبدال",
+  correction: "تعديل فاتورة",
   refund: "رد مبلغ",
   payment: "دفعة تحصيل",
 };
@@ -50,6 +51,7 @@ export function printCustomerStatement(customer: PrintableCustomer, statement: P
   }
 
   const printDate = new Date().toLocaleString("ar-EG", {
+    timeZone: "Africa/Cairo",
     year: "numeric",
     month: "long",
     day: "numeric",
@@ -67,6 +69,7 @@ export function printCustomerStatement(customer: PrintableCustomer, statement: P
 
   const rowsHtml = statement.entries.map((entry, index) => {
     const entryDate = new Date(entry.at).toLocaleString("ar-EG", {
+      timeZone: "Africa/Cairo",
       year: "numeric",
       month: "2-digit",
       day: "2-digit",

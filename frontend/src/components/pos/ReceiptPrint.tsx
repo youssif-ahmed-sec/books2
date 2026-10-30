@@ -19,8 +19,8 @@ const money = (value = 0) => `${Number(value).toFixed(2)} ج.م`;
 
 export const ReceiptPrint = forwardRef<HTMLDivElement, ReceiptPrintProps>(({ order, items }, ref) => {
   const date = order?.createdAt ? new Date(order.createdAt) : null;
-  const dateText = date && !Number.isNaN(date.valueOf()) ? date.toLocaleDateString("ar-EG") : "—";
-  const timeText = date && !Number.isNaN(date.valueOf()) ? date.toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" }) : "—";
+  const dateText = date && !Number.isNaN(date.valueOf()) ? date.toLocaleDateString("ar-EG", { timeZone: "Africa/Cairo" }) : "—";
+  const timeText = date && !Number.isNaN(date.valueOf()) ? date.toLocaleTimeString("ar-EG", { timeZone: "Africa/Cairo", hour: "2-digit", minute: "2-digit" }) : "—";
   const field = (label: string, value?: string) => value ? <span style={{ overflowWrap: "anywhere" }}><strong>{label}:</strong> {value}</span> : null;
   const pair = (right: React.ReactNode, left?: React.ReactNode) => <div style={{ display: "grid", gridTemplateColumns: left ? "repeat(2, minmax(0, 1fr))" : "minmax(0, 1fr)", gap: 8 }}>{right}{left}</div>;
   return <div ref={ref} dir="rtl" style={{ width: "80mm", margin: "0 auto", padding: "10px 8px", color: "#000", background: "white", fontFamily: "'Noto Sans Arabic', sans-serif", fontSize: 12, fontWeight: 600, lineHeight: 1.5 }}>

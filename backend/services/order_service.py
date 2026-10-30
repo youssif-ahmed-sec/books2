@@ -2,11 +2,13 @@ from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, timezone
 from typing import List, Optional
 from uuid import UUID
+from types import SimpleNamespace
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import func, exists
+from sqlalchemy import and_, func, exists, or_, select as sa_select
+from sqlalchemy.orm import aliased
 
 from core.idempotency import IdempotencyConflict, request_fingerprint
 from models.inventory import InventoryBalance, InventoryTransaction, TransactionTypeEnum, Warehouse
@@ -17,11 +19,13 @@ from models.user import User, RoleEnum
 from models.user import AuditLog
 from models.financial import Payment
 from models.returns import SalesReturn
+from models.sale_correction import SaleCorrection
 from schemas.order import OrderCreate, OrderDraftCreate, OrderStatusUpdate, OrderPreparation, LeadCreate
 from services.inventory_service import InventoryService
 from services.notification_service import notify_low_stock_crossing
 from services.order_workflow import allowed_next_statuses
 from services.cash_register_service import open_shift
+from services.sale_correction_pricing import _component_signature
 
 
 class OrderService:
@@ -104,11 +108,22 @@ class OrderService:
             OrderStatusEnum.RETURNED.value,
             OrderStatusEnum.EXCHANGE.value,
         )
+        original_order = aliased(Order)
+        corrected_order = aliased(Order)
+        moved_out = exists(sa_select(1).select_from(SaleCorrection).join(
+            corrected_order, corrected_order.id == SaleCorrection.corrected_order_id,
+        ).where(SaleCorrection.order_id == Order.id, SaleCorrection.status == "APPLIED",
+                corrected_order.customer_id.is_distinct_from(Order.customer_id)).correlate(Order))
+        moved_in = exists(sa_select(1).select_from(SaleCorrection).join(
+            original_order, original_order.id == SaleCorrection.order_id,
+        ).where(SaleCorrection.corrected_order_id == Order.id, SaleCorrection.status == "APPLIED",
+                original_order.customer_id.is_distinct_from(Order.customer_id)).correlate(Order))
+        counts_as_purchase = and_(or_(~exists().where(SalesReturn.exchange_order_id == Order.id), moved_in), ~moved_out)
         sale_total, purchase_count, last_purchase = (await db.execute(
             select(
                 func.coalesce(func.sum(Order.total_amount), 0),
-                func.count(Order.id).filter(~exists().where(SalesReturn.exchange_order_id == Order.id)),
-                func.max(Order.created_at).filter(~exists().where(SalesReturn.exchange_order_id == Order.id)),
+                func.count(Order.id).filter(counts_as_purchase),
+                func.max(Order.created_at).filter(counts_as_purchase),
             ).where(Order.customer_id == customer_id, Order.status.in_(completed))
         )).one()
         returned_total = (await db.execute(
@@ -228,8 +243,18 @@ class OrderService:
         return OrderService._build_order_dict(order, items)
 
     @staticmethod
-    async def _create_order_once(db: AsyncSession, order_in: OrderCreate, current_user_id: UUID, fingerprint: str) -> dict:
-        await OrderService._check_pricing_policy(db, order_in.customer_id, order_in.items, order_in.discount_amount, current_user_id)
+    async def _create_order_once(db: AsyncSession, order_in: OrderCreate, current_user_id: UUID, fingerprint: str,
+                                 *, commit: bool = True, correction_lines=None, original_order_id: UUID | None = None,
+                                 pricing_user_id: UUID | None = None, defer_payment: bool = False) -> dict:
+        if correction_lines is not None:
+            if commit or not defer_payment or original_order_id is None or pricing_user_id is None or len(correction_lines) != len(order_in.items):
+                raise ValueError("Correction checkout must use a caller-owned transaction and deferred settlement.")
+            if order_in.payment_method not in ("Cash", "Credit Card", "Instapay", "Wallet", "Deferred Payment"):
+                raise ValueError("This correction payment method needs manual review.")
+        elif defer_payment or original_order_id is not None or pricing_user_id is not None:
+            raise ValueError("Correction checkout requires trusted correction lines.")
+        await OrderService._check_pricing_policy(db, order_in.customer_id, order_in.items, order_in.discount_amount,
+                                                 pricing_user_id or current_user_id)
         selected_address = order_in.customer_address.strip() if order_in.customer_address is not None else None
         if selected_address:
             if order_in.customer_id is None:
@@ -264,14 +289,16 @@ class OrderService:
         grand_total = Decimal("0")
         items_out = []
 
-        for item_in in order_in.items:
-            unit_q = await db.execute(
-                select(ProductUnit).where(
+        for index, item_in in enumerate(order_in.items):
+            correction_line = correction_lines[index] if correction_lines is not None else None
+            unit_query = select(ProductUnit).where(
                     ProductUnit.id == item_in.unit_id,
                     ProductUnit.product_id == item_in.product_id,
                     ProductUnit.is_deleted == False,
                 )
-            )
+            if correction_line is not None:
+                unit_query = unit_query.with_for_update().execution_options(populate_existing=True)
+            unit_q = await db.execute(unit_query)
             unit = unit_q.scalar_one_or_none()
             if unit is None:
                 await db.rollback()
@@ -281,38 +308,82 @@ class OrderService:
             qty_requested     = Decimal(str(item_in.quantity))
             qty_actual        = qty_requested * conversion_factor
 
-            price_q = await db.execute(
-                select(ProductPrice).where(
+            price_query = select(ProductPrice).where(
                     ProductPrice.product_id == item_in.product_id,
                     ProductPrice.unit_id == item_in.unit_id,
                     ProductPrice.price_level == item_in.price_level.value,
                     ProductPrice.is_deleted == False,
                 )
-            )
+            if correction_line is not None:
+                price_query = price_query.with_for_update().execution_options(populate_existing=True)
+            price_q = await db.execute(price_query)
             price_record = price_q.scalar_one_or_none()
-            if not price_record:
+            if not price_record and (correction_line is None or correction_line.original_item_id is None):
                 await db.rollback()
                 raise ValueError("Price missing.")
 
-            unit_price = Decimal(str(price_record.price))
+            original_item = None
+            if correction_line is not None:
+                if (correction_line.product_id != item_in.product_id or correction_line.unit_id != item_in.unit_id
+                        or correction_line.price_level != item_in.price_level.value
+                        or correction_line.quantity != qty_requested or correction_line.conversion_factor != conversion_factor):
+                    raise ValueError("The corrected line or unit changed; review it again.")
+                if correction_line.original_item_id is not None:
+                    original_item = (await db.execute(select(OrderItem).where(
+                        OrderItem.id == correction_line.original_item_id, OrderItem.order_id == original_order_id,
+                    ).with_for_update().execution_options(populate_existing=True))).scalar_one_or_none()
+                    if (original_item is None or original_item.product_id != item_in.product_id
+                            or original_item.unit_id != item_in.unit_id or original_item.price_level != item_in.price_level.value
+                            or Decimal(str(original_item.unit_price)) != correction_line.unit_price
+                            or Decimal(str(original_item.conversion_factor)) != correction_line.conversion_factor
+                            or original_item.bundle_components_snapshot != correction_line.bundle_components_snapshot
+                            or original_item.bundle_components_snapshot is None or original_item.cost_at_sale is None):
+                        raise ValueError("The original line needs manual review.")
+                elif Decimal(str(price_record.price)) != correction_line.unit_price:
+                    raise ValueError("The corrected line price changed; review it again.")
+                unit_price = correction_line.unit_price
+            else:
+                unit_price = Decimal(str(price_record.price))
             if unit_price <= 0:
                 raise ValueError("Sale price must be greater than zero.")
             item_total = unit_price * qty_requested
 
-            prod_q = await db.execute(select(Product).where(Product.id == item_in.product_id))
+            product_query = select(Product).where(Product.id == item_in.product_id)
+            if correction_line is not None:
+                product_query = product_query.with_for_update().execution_options(populate_existing=True)
+            prod_q = await db.execute(product_query)
             product = prod_q.scalar_one_or_none()
             if product is None or product.is_deleted or not product.is_active:
                 await db.rollback()
                 raise ValueError("Product is not available for sale.")
+            if correction_line is not None and original_item is None:
+                if ((not product.is_bundle and Decimal(str(product.cost)) != correction_line.base_cost)
+                        or (Decimal(str(product.tax_rate)) if product.tax_rate is not None else None) != correction_line.tax_rate):
+                    raise ValueError("The corrected item cost or tax changed; review it again.")
             
             components_to_deduct = []
             bundle_comps = []
+            if correction_line is not None and bool(product.is_bundle) != bool(correction_line.bundle_components_snapshot):
+                raise ValueError("The corrected bundle type changed; review it again.")
             if product.is_bundle:
-                bundle_comps_q = await db.execute(select(ProductBundleComponent).where(ProductBundleComponent.bundle_id == product.id, ProductBundleComponent.is_deleted == False))
-                bundle_comps = bundle_comps_q.scalars().all()
+                if original_item is not None and correction_line is not None:
+                    bundle_comps = [SimpleNamespace(component_id=UUID(part["product_id"]), quantity=Decimal(str(part["quantity"])))
+                                    for part in correction_line.bundle_components_snapshot]
+                else:
+                    bundle_query = select(ProductBundleComponent).where(ProductBundleComponent.bundle_id == product.id, ProductBundleComponent.is_deleted == False)
+                    if correction_line is not None:
+                        bundle_query = bundle_query.with_for_update().execution_options(populate_existing=True)
+                    bundle_comps = (await db.execute(bundle_query)).scalars().all()
                 if not bundle_comps:
                     await db.rollback()
                     raise ValueError("Bundle has no components.")
+                if correction_line is not None and original_item is None:
+                    current_recipe = [{"product_id": str(part.component_id), "quantity": str(part.quantity)} for part in bundle_comps]
+                    if _component_signature(current_recipe) != _component_signature(correction_line.bundle_components_snapshot):
+                        raise ValueError("The bundle components changed; review it again.")
+                    current_cost = await OrderService._item_cost(db, product, Decimal("1"), bundle_comps)
+                    if current_cost != correction_line.base_cost:
+                        raise ValueError("The corrected item cost or tax changed; review it again.")
                 for comp in bundle_comps:
                     components_to_deduct.append({
                         "product_id": comp.component_id,
@@ -365,8 +436,9 @@ class OrderService:
                     {"product_id": str(component.component_id), "quantity": str(component.quantity)}
                     for component in bundle_comps
                 ],
-                cost_at_sale=await OrderService._item_cost(db, product, qty_actual, bundle_comps),
-                tax_rate=product.tax_rate,
+                cost_at_sale=(Decimal(str(original_item.cost_at_sale)) * qty_requested / Decimal(str(original_item.quantity_requested))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                             if original_item is not None else await OrderService._item_cost(db, product, qty_actual, bundle_comps),
+                tax_rate=original_item.tax_rate if original_item is not None else product.tax_rate,
             )
             db.add(order_item)
             await db.flush()
@@ -410,6 +482,8 @@ class OrderService:
                 if order_in.next_due_date < datetime.now(ZoneInfo("Africa/Cairo")).date():
                     raise ValueError("تاريخ الاستحقاق لا يمكن أن يكون في الماضي.")
             order.next_due_date = order_in.next_due_date
+            if defer_payment:
+                order.deferred_remaining = remaining
         if order_in.expected_total is not None and order.total_amount != order_in.expected_total:
             await db.rollback()
             raise ValueError("Prices changed. Refresh the cart before checkout.")
@@ -417,10 +491,14 @@ class OrderService:
         collected_base = order_in.amount_received
         if order_in.payment_method == "Deferred Payment" and order_in.received_method == "Wallet" and collected_base is not None:
             collected_base += wallet_fee
-        await OrderService._settle_sale(db, order, current_user_id, collected_base, order_in.received_method)
+        if not defer_payment:
+            await OrderService._settle_sale(db, order, current_user_id, collected_base, order_in.received_method)
         await OrderService._record_customer_sale(db, order.customer_id, order.total_amount)
         db.add(AuditLog(user_id=current_user_id, action="CREATE_POS_INVOICE", entity_type="Order", entity_id=str(order.id), new_value={"total": str(order.total_amount), "payment_method": order.payment_method}))
-        await db.commit()
+        if commit:
+            await db.commit()
+        else:
+            await db.flush()
         await db.refresh(order)
         return OrderService._build_order_dict(order, items_out)
 

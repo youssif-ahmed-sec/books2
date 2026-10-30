@@ -143,7 +143,7 @@ function ProductApprovalsContent() {
             <p className="app-muted p-6">لا توجد طلبات حتى الآن.</p> : rows.map(row =>
               <button key={row.id} type="button" onClick={() => setSelected(row)}
                 className={`app-table-row flex w-full items-center justify-between gap-4 px-5 py-4 text-right ${selected?.id === row.id ? "bg-primary/10" : ""}`}>
-                <span><strong className="block">{row.product_name}</strong><span className="app-muted text-xs">{row.action === "UPDATE" ? "تعديل" : "حذف"} · {row.requester || "أمين المخزن"} · {new Date(row.created_at).toLocaleString("ar-EG")}</span></span>
+                <span><strong className="block">{row.product_name}</strong><span className="app-muted text-xs">{row.action === "UPDATE" ? "تعديل" : "حذف"} · {row.requester || "أمين المخزن"} · {new Date(row.created_at).toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}</span></span>
                 <span className="shrink-0 text-xs font-bold text-primary">{row.status === "PENDING" ? "بانتظار المدير" : row.status === "APPROVED" ? "معتمد" : row.status === "CANCELLED" ? "ملغي" : "مرفوض"}</span>
               </button>)}
           {hasMore && <button type="button" className="app-secondary-button m-4" onClick={() => void loadMore()}>عرض المزيد</button>}

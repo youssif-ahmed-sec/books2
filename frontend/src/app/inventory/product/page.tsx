@@ -20,7 +20,7 @@ type Product = {
   category?: { name_ar: string }; subcategory?: { name_ar: string };
   brand?: { name_ar: string }; supplier?: { name: string };
   description?: string; image_url?: string; warehouse_location?: string;
-  base_unit: string; current_stock: string; min_stock_level: string; max_stock_level: string;
+  base_unit: string; current_stock: string; min_stock_level: string; max_stock_level: string; cost: string | number | null;
   is_active: boolean; created_at: string; updated_at?: string; units: Unit[];
 };
 type Balance = { product_id: string; warehouse_name?: string; current_stock: string };
@@ -159,6 +159,7 @@ function ProductDetails() {
         </section>
         <section className="app-panel p-6 space-y-4">
           <h2 className="text-xl font-bold">الوحدات والباركود والتسعير</h2>
+          {(role === "ADMIN" || role === "INVENTORY_CONTROLLER") && product.cost != null && <p className="text-sm">سعر الشراء للوحدة الأساسية: <strong>{product.cost} ج.م</strong></p>}
           <div className="grid gap-4 lg:grid-cols-2">
             {product.units.map(unit => <div key={unit.id} className="rounded-2xl border border-white/10 p-5 space-y-3">
               <div className="flex justify-between gap-3"><h3 className="font-bold">{unit.unit_name}</h3><span className="app-muted">= {unit.conversion_factor} {product.base_unit}</span></div>
@@ -174,7 +175,7 @@ function ProductDetails() {
           <p className="app-muted text-sm">آخر ٩٠ يوم · أحدث ١٠٠ حركة مخزون و١٠٠ تعديل للمنتج بحد أقصى</p>
           {timeline.length ? <ol className="max-h-[32rem] space-y-3 overflow-y-auto overscroll-contain pe-2 custom-scrollbar" aria-label="حركات المنتج خلال آخر ٩٠ يوم">{timeline.map(event => <li key={event.id} className="rounded-2xl border border-white/10 p-4 flex flex-wrap justify-between gap-3">
             <div><strong>{event.title}</strong>{event.detail && <p className="app-muted text-sm mt-1">{event.detail}</p>}</div>
-            <time className="app-muted text-sm" dateTime={event.date}>{new Date(event.date).toLocaleString("ar-EG")}</time>
+            <time className="app-muted text-sm" dateTime={event.date}>{new Date(event.date).toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}</time>
           </li>)}</ol> : <p className="app-muted">لا توجد حركات مسجلة</p>}
         </section>
       </>}

@@ -33,6 +33,8 @@ from api.v1.reports import router as reports_router
 from api.v1.purchases import router as purchases_router
 from api.v1.inventory_ops import router as inventory_ops_router
 from api.v1.returns import router as returns_router
+from api.v1.sale_cancellations import router as sale_cancellations_router
+from api.v1.sale_corrections import router as sale_corrections_router
 from api.v1.cash_register import router as cash_register_router
 from api.v1.audit import router as audit_router
 from api.v1.warehouse_reports import router as warehouse_reports_router
@@ -155,6 +157,8 @@ else:
     app.include_router(dashboards_router, prefix="/api/v1")
     app.include_router(reports_router, prefix="/api/v1")
     app.include_router(returns_router, prefix="/api/v1")
+    app.include_router(sale_cancellations_router, prefix="/api/v1")
+    app.include_router(sale_corrections_router, prefix="/api/v1")
     app.include_router(cash_register_router, prefix="/api/v1")
 
 

@@ -27,13 +27,25 @@ interface OrderDocument {
   items: Array<{ product_name: string; unit_name?: string; price_level: string; quantity_requested: number; unit_price: number }>;
 }
 
+// Older print agents display the wall clock in the ISO value without converting offsets.
+export function cairoPrintTimestamp(value: unknown): unknown {
+  if (typeof value !== "string" || !/(?:Z|[+-]\d\d:\d\d)$/i.test(value)) return value;
+  const instant = new Date(value);
+  if (Number.isNaN(instant.valueOf())) return value;
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23", timeZoneName: "longOffset" }).formatToParts(instant);
+  const part = (name: string) => parts.find(item => item.type === name)?.value || "";
+  const offset = part("timeZoneName").replace("GMT", "") || "+00:00";
+  return `${part("year")}-${part("month")}-${part("day")}T${part("hour")}:${part("minute")}:${part("second")}${offset}`;
+}
+
 export async function sendLocalPrint(order: Record<string, unknown>, receiptType: LocalPrintType): Promise<void> {
   let response: Response;
   try {
     response = await fetch("http://127.0.0.1:8199/api/print", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ order, receipt_type: receiptType }),
+      body: JSON.stringify({ order: { ...order, ...(order.created_at ? { created_at: cairoPrintTimestamp(order.created_at) } : {}) }, receipt_type: receiptType }),
     });
   } catch {
     playUiSound("printSubmissionFailure");
@@ -93,6 +105,7 @@ export async function printOrderInvoice(orderId: string): Promise<void> {
 
 export async function printSalesReturnReceipt(returnId: string): Promise<void> {
   const receipt = await fetchApi(`/returns/${encodeURIComponent(returnId)}/receipt`) as Record<string, unknown>;
+  if (receipt.is_correction) throw new Error("اطبع الفاتورة المصححة من قسم الفواتير؛ إيصال التعديل يحتاج تحديث تطبيق الطباعة.");
   await sendLocalPrint({ ...receipt,
     operation_type: receipt.kind === "EXCHANGE" ? "exchange" : "return",
     order_id: receipt.order_public_number ?? receipt.order_id,

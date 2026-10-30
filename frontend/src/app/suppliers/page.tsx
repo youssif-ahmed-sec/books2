@@ -563,7 +563,7 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess, isAdmin, initialTab
                     <div key={`payment-${item.payment.id}`} className="flex items-start justify-between gap-3 py-3">
                       <div className="min-w-0">
                         <p className="text-sm font-semibold text-white">دفعة · {paymentMethodLabel[item.payment.payment_method] || item.payment.payment_method}{item.payment.payment_method === "Cash" ? item.payment.cash_source === "OUTSIDE_SHIFT" ? " · خارج الوردية" : " · من الوردية" : ""}</p>
-                        <p className="text-xs text-[#e2bfb0]/75">{new Date(item.payment.payment_date).toLocaleDateString("ar-EG")}{item.payment.reference_number ? ` · ${item.payment.reference_number}` : ""}{item.payment.allocations?.length ? ` · ${item.payment.allocations.length} مديونية` : " · على الرصيد العام"}</p>
+                        <p className="text-xs text-[#e2bfb0]/75">{new Date(item.payment.payment_date).toLocaleDateString("ar-EG", { timeZone: "Africa/Cairo" })}{item.payment.reference_number ? ` · ${item.payment.reference_number}` : ""}{item.payment.allocations?.length ? ` · ${item.payment.allocations.length} مديونية` : " · على الرصيد العام"}</p>
                         {item.payment.notes && <p className="mt-1 text-xs text-[#e2bfb0]/75 break-words">{item.payment.notes}</p>}
                         {item.payment.allocations?.length > 0 && Number(item.payment.amount) - item.payment.allocations.reduce((sum, allocation) => sum + Number(allocation.amount), 0) > 0.001 && <p className="text-xs text-[#e2bfb0]/70">غير موزع: {(Number(item.payment.amount) - item.payment.allocations.reduce((sum, allocation) => sum + Number(allocation.amount), 0)).toLocaleString()} ج.م</p>}
                       </div>
@@ -574,7 +574,7 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess, isAdmin, initialTab
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <p className="break-words text-sm font-semibold text-white">{item.entry.entry_type === "DEBT" ? item.entry.note : `تصحيح · ${item.entry.note}`}</p>
-                          <p className="text-xs text-[#e2bfb0]/75">{new Date(item.entry.created_at).toLocaleDateString("ar-EG")}{item.entry.reference_number ? ` · ${item.entry.reference_number}` : ""}</p>
+                          <p className="text-xs text-[#e2bfb0]/75">{new Date(item.entry.created_at).toLocaleDateString("ar-EG", { timeZone: "Africa/Cairo" })}{item.entry.reference_number ? ` · ${item.entry.reference_number}` : ""}</p>
                           {item.entry.entry_type === "DEBT" && !reversedDebtIds.has(item.entry.id) && <p className={`text-xs ${item.entry.due_date && item.entry.due_date < today && openDebts.some(entry => entry.id === item.entry.id) ? "text-red-300" : "text-[#e2bfb0]/75"}`}>
                             {item.entry.due_date ? `استحقاق ${item.entry.due_date}` : "بلا موعد"} · {Number(item.entry.amount) - Number(item.entry.allocated_amount || 0) > 0.001 ? `متبقي ${(Number(item.entry.amount) - Number(item.entry.allocated_amount || 0)).toLocaleString()} ج.م` : "مسددة"}
                           </p>}

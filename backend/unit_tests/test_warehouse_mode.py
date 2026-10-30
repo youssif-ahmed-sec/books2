@@ -7,12 +7,13 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from main import app
+from main import WAREHOUSE_ONLY_MODE, app
 from schemas.inventory import InventoryCountCreate, InventoryTransactionCreate, InventoryTransferCreate
 from schemas.product import ProductCreate
 from schemas.purchase import PurchaseReceive, PurchaseRequestCreate
 
 
+@pytest.mark.skipif(not WAREHOUSE_ONLY_MODE, reason="Run with BOOKS2_WAREHOUSE_ONLY=1 in a fresh process")
 def test_only_warehouse_routes_are_exposed_when_handoff_is_enabled():
     paths = set(app.openapi()["paths"])
     for path in (
@@ -29,6 +30,7 @@ def test_only_warehouse_routes_are_exposed_when_handoff_is_enabled():
         assert path not in paths
 
 
+@pytest.mark.skipif(not WAREHOUSE_ONLY_MODE, reason="Run with BOOKS2_WAREHOUSE_ONLY=1 in a fresh process")
 def test_paused_routes_return_404_and_inventory_requires_login():
     with TestClient(app) as client:
         assert client.get("/api/v1/customers").status_code == 404

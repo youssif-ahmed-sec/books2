@@ -248,7 +248,7 @@ export default function InventoryPage() {
           return {
              product: tx.product_name || "منتج غير معروف",
              type: typeLabel,
-             date: `${d.toLocaleDateString('ar-EG')} ${d.toLocaleTimeString('ar-EG', {hour:'2-digit', minute:'2-digit'})}`,
+             date: `${d.toLocaleDateString('ar-EG', { timeZone: 'Africa/Cairo' })} ${d.toLocaleTimeString('ar-EG', {timeZone: 'Africa/Cairo', hour:'2-digit', minute:'2-digit'})}`,
              typeStyle: style,
           };
         });

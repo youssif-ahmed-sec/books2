@@ -145,7 +145,7 @@ export default function NotificationBell() {
           <Link key={item.id} href={item.href} onClick={() => { setOpen(false); if (!item.read_at) void markRead(item.id); }} className={`notification-item block rounded-xl p-3 ${item.read_at ? "opacity-70" : ""}`}>
             <span className="flex items-start justify-between gap-2"><strong className="text-sm">{item.title}</strong>{!item.read_at && <i className="mt-1 h-2 w-2 shrink-0 rounded-full bg-primary" aria-label="غير مقروء" />}</span>
             <span className="app-muted mt-1 block text-sm leading-6">{item.message}</span>
-            <time className="app-muted mt-1 block text-xs" dateTime={item.created_at}>{new Date(item.created_at).toLocaleString("ar-EG")}</time>
+            <time className="app-muted mt-1 block text-xs" dateTime={item.created_at}>{new Date(item.created_at).toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}</time>
           </Link>) : !error && <p className="app-muted px-3 py-7 text-center text-sm">لا توجد إشعارات بعد</p>}
         {inbox.has_more && <button type="button" className="app-menu-action w-full justify-center" disabled={loadingMore} onClick={() => void loadMore()}>{loadingMore ? "جارٍ تحميل الأقدم..." : "عرض إشعارات أقدم"}</button>}
       </div>

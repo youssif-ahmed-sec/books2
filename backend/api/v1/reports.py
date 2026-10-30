@@ -17,6 +17,22 @@ from services.analytics_service import financial_summary, stock_alerts, daily_sa
 router = APIRouter(prefix="/reports", tags=["Reports"])
 
 
+def _report_bounds(start_date: datetime | None, end_date: datetime | None,
+                   start_day: date | None, end_day: date | None):
+    if (start_day is not None or end_day is not None) and (start_date is not None or end_date is not None):
+        raise HTTPException(status_code=422, detail="Choose dates or timestamps, not both")
+    if start_day and end_day and end_day < start_day:
+        raise HTTPException(status_code=422, detail="End date must not be before start date")
+    cairo = ZoneInfo("Africa/Cairo")
+    if start_day:
+        start_date = datetime.combine(start_day, time.min, tzinfo=cairo)
+    if end_day:
+        end_date = datetime.combine(end_day + timedelta(days=1), time.min, tzinfo=cairo)
+    if start_date and end_date and end_date <= start_date:
+        raise HTTPException(status_code=422, detail="End date must be after start date")
+    return start_date, end_date
+
+
 @router.get("/product-activity", summary="Product sales movement and reorder context")
 async def get_product_activity(
     start_day: date | None = None,
@@ -43,6 +59,8 @@ async def get_product_activity(
 async def get_sales_report(
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
+    start_day: Optional[date] = None,
+    end_day: Optional[date] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
     db: AsyncSession = Depends(get_db),
@@ -51,8 +69,7 @@ async def get_sales_report(
     """
     Get aggregated sales report (orders).
     """
-    if start_date and end_date and end_date <= start_date:
-        raise HTTPException(status_code=422, detail="End date must be after start date")
+    start_date, end_date = _report_bounds(start_date, end_date, start_day, end_day)
     criteria = []
     if start_date:
         criteria.append(Order.created_at >= start_date)
@@ -123,6 +140,8 @@ async def get_stock_alerts(
 async def get_inventory_report(
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
+    start_day: Optional[date] = None,
+    end_day: Optional[date] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
     db: AsyncSession = Depends(get_db),
@@ -131,8 +150,7 @@ async def get_inventory_report(
     """
     Get inventory movements (transactions).
     """
-    if start_date and end_date and end_date <= start_date:
-        raise HTTPException(status_code=422, detail="End date must be after start date")
+    start_date, end_date = _report_bounds(start_date, end_date, start_day, end_day)
     query = select(InventoryTransaction, User.full_name, User.username, User.email).outerjoin(User, User.id == InventoryTransaction.user_id)
     
     if start_date:

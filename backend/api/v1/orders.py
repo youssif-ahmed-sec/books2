@@ -1,5 +1,6 @@
 from typing import List, Optional
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -17,6 +18,8 @@ from models.customer import Customer
 from models.financial import Payment
 from models.order import CustomerDebtAllocation, Order, OrderStatusEnum
 from models.returns import SalesReturn
+from models.sale_cancellation import SaleCancellation
+from models.sale_correction import SaleCorrection
 from models.product import Product, ProductUnit
 from services.order_service import OrderService
 
@@ -34,7 +37,7 @@ async def list_invoices(
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_admin),
+    _user: User = Depends(require_pos_orders_access),
 ):
     if date_from and date_to and date_from > date_to:
         raise HTTPException(status_code=422, detail="تاريخ البداية بعد تاريخ النهاية")
@@ -50,15 +53,21 @@ async def list_invoices(
                     .where(SalesReturn.exchange_order_id == Order.id)
                     .scalar_subquery())
     effective_due = func.coalesce(original_due, Order.deferred_remaining)
-    query = select(Order, Customer.name, effective_due).outerjoin(Customer, Customer.id == Order.customer_id).where(
+    cancellation_status = (select(SaleCancellation.status).where(
+        SaleCancellation.order_id == Order.id, SaleCancellation.status.in_(("PENDING", "AWAITING_SETTLEMENT", "APPROVED")),
+    ).limit(1).scalar_subquery())
+    query = select(Order, Customer.name, effective_due, cancellation_status).outerjoin(Customer, Customer.id == Order.customer_id).where(
         Order.status.in_(invoice_statuses),
     )
+    if _user.role != RoleEnum.ADMIN:
+        query = query.where(Order.user_id == _user.id)
     term = search.strip()
     if term:
         escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         pattern = f"%{escaped}%"
         query = query.where(or_(
             cast(Order.public_number, String).ilike(pattern, escape="\\"),
+            cast(Order.id, String).ilike(pattern, escape="\\"),
             Customer.name.ilike(pattern, escape="\\"),
             Customer.phone.ilike(pattern, escape="\\"),
         ))
@@ -91,13 +100,14 @@ async def list_invoices(
         query = query.where(is_credit, effective_due.is_(None))
     rows = (await db.execute(query.order_by(Order.created_at.desc(), Order.id.desc()).limit(limit).offset(offset))).all()
     result = []
-    for order, customer_name, remaining in rows:
+    for order, customer_name, remaining, cancellation in rows:
         eff_status = OrderStatusEnum.EXCHANGE.value if (
             order.status == OrderStatusEnum.EXCHANGE.value or
             (order.notes and order.notes.startswith("Exchange for order"))
         ) else order.status
         result.append({
             "id": str(order.id),
+            "cancellation_status": cancellation,
             "public_number": order.public_number,
             "customer_id": str(order.customer_id) if order.customer_id else None,
             "customer_name": customer_name or "عميل نقدي",
@@ -133,13 +143,16 @@ async def invoice_activity(
     returns = (await db.execute(select(SalesReturn).where(or_(
         SalesReturn.order_id == order_id, SalesReturn.exchange_order_id == order_id,
     )).order_by(SalesReturn.created_at, SalesReturn.id))).scalars().all()
+    correction_ids = set((await db.execute(select(SaleCorrection.id).where(
+        SaleCorrection.id.in_([record.id for record in returns]), SaleCorrection.status == "APPLIED",
+    ))).scalars().all()) if returns else set()
     events = [{"id": str(payment.id), "kind": payment.kind.lower(), "at": payment.created_at,
                "amount": payment.amount, "method": payment.method, "related_invoice": None}
               for payment in direct_payments]
     events.extend({"id": str(payment.id), "kind": "collection", "at": payment.created_at,
                    "amount": amount, "method": payment.method, "related_invoice": None}
                   for payment, amount in allocations)
-    events.extend({"id": str(record.id), "kind": ("exchange" if record.kind == "EXCHANGE" else "return") if record.order_id == order_id else "exchange_invoice",
+    events.extend({"id": str(record.id), "kind": ("correction" if record.order_id == order_id else "correction_invoice") if record.id in correction_ids else (("exchange" if record.kind == "EXCHANGE" else "return") if record.order_id == order_id else "exchange_invoice"),
                    "at": record.created_at, "amount": record.returned_value if record.order_id == order_id else record.replacement_value,
                    "method": record.payment_method,
                    "related_invoice": str(record.exchange_order_id) if record.order_id == order_id and record.exchange_order_id else None}
@@ -385,6 +398,11 @@ async def get_order_quotation(
     order = await OrderService.get_order(db, order_id)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    if (current_user.role != RoleEnum.ADMIN and order["status"] in (
+        OrderStatusEnum.DELIVERED.value, OrderStatusEnum.CLOSED.value,
+        OrderStatusEnum.RETURNED.value, OrderStatusEnum.EXCHANGE.value,
+    ) and order["user_id"] != current_user.id):
+        raise HTTPException(status_code=404, detail="Order not found")
     if order["customer_id"]:
         customer = (await db.execute(select(Customer.name, Customer.phone, Customer.address).where(
             Customer.id == order["customer_id"],
@@ -401,6 +419,15 @@ async def get_order_quotation(
     order["received_method"] = (await db.execute(select(Payment.method).where(
         Payment.order_id == order_id, Payment.kind == "SALE",
     ).order_by(Payment.created_at.asc()).limit(1))).scalar_one_or_none()
+    correction = (await db.execute(select(SaleCorrection).where(
+        SaleCorrection.corrected_order_id == order_id, SaleCorrection.status == "APPLIED",
+    ).limit(1))).scalar_one_or_none()
+    if correction:
+        # The unchanged portion of the payment remains on the original invoice;
+        # correction payment entries only record the settlement difference.
+        order["amount_received"] = Decimal(str(correction.proposed_quote["collected"]))
+        order["received_method"] = (correction.proposal.get("received_method") if order["payment_method"] == "Deferred Payment"
+                                    else order["payment_method"])
     product_ids = {item["product_id"] for item in order["items"]}
     names = dict((await db.execute(select(Product.id, Product.name_ar).where(Product.id.in_(product_ids)))).all()) if product_ids else {}
     unit_ids = {item["unit_id"] for item in order["items"]}

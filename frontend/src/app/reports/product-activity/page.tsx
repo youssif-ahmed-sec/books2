@@ -14,7 +14,7 @@ type Activity = { start_day: string; end_day: string; dormant_days: number; dorm
   reorder_count: number; products: Row[] };
 type View = "all" | "dormant" | "reorder";
 const number = (value: number) => new Intl.NumberFormat("ar-EG", { maximumFractionDigits: 2 }).format(value);
-const today = () => new Date().toLocaleDateString("en-CA");
+const today = () => new Date().toLocaleDateString("en-CA", { timeZone: "Africa/Cairo" });
 
 export default function ProductActivityPage() {
   const [endDay, setEndDay] = useState(today);
@@ -44,10 +44,10 @@ export default function ProductActivityPage() {
     (view === "all" || (view === "dormant" ? row.dormant : row.reorder_priority)) &&
     matchesSearch(query, row.name)), [data, view, query]);
   const setSeason = (months: number) => {
-    const end = new Date(`${today()}T12:00:00`);
+    const end = new Date(`${today()}T12:00:00Z`);
     const start = new Date(end);
-    start.setMonth(start.getMonth() - months);
-    setStartDay(start.toLocaleDateString("en-CA"));
+    start.setUTCMonth(start.getUTCMonth() - months);
+    setStartDay(start.toISOString().slice(0, 10));
     setEndDay(today());
     setLoading(true);
   };
@@ -69,8 +69,8 @@ export default function ProductActivityPage() {
         <TopNavSearchPortal><input type="search" className="app-search app-search-focus h-10 w-full rounded-full px-4 text-sm" placeholder="ابحث باسم الصنف في التقرير" aria-label="بحث الأصناف في التقرير" value={query} onChange={event => setQuery(event.target.value)} /></TopNavSearchPortal>
         <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex flex-wrap gap-2">{(["all", "dormant", "reorder"] as const).map(key => <button key={key} type="button" aria-pressed={view === key} onClick={() => setView(key)} className={`rounded-xl px-3 py-2 text-sm ${view === key ? "bg-primary text-white" : "bg-white/5"}`}>{key === "all" ? `كل الأصناف ${data?.products.length ?? ""}` : key === "dormant" ? `خاملة ${data?.dormant_count ?? ""}` : `تحتاج إعادة طلب ${data?.reorder_count ?? ""}`}</button>)}</div></div>
         <p className="app-muted mt-3 text-xs">المعدل بالوحدة الأساسية يوميًا خلال الفترة. الخمول محسوب من آخر بيع، أو تاريخ إضافة الصنف إن لم يُبع.</p>
-        <div className="mt-4 space-y-2 md:hidden">{rows.map(row => <div key={row.product_id} className="rounded-xl border border-white/10 p-3 text-sm"><div className="flex items-start justify-between gap-3"><strong>{row.name}</strong><span className="shrink-0 text-primary">{row.dormant ? "راكد" : row.reorder_priority ? "راجع الطلب" : row.never_sold ? "جديد" : "نشط"}</span></div><div className="app-muted mt-2 flex flex-wrap gap-x-4 gap-y-1"><span>بيع {number(row.quantity_sold)} {row.base_unit}</span><span>يوميًا {number(row.daily_rate)}</span><span>المخزون {number(row.stock)}</span><span>آخر بيع {row.last_sold_at ? new Date(row.last_sold_at).toLocaleDateString("ar-EG") : "لا يوجد"}</span></div></div>)}</div>
-        <div className="mt-4 hidden overflow-x-auto md:block"><table className="w-full min-w-[660px] text-right text-sm"><thead className="app-table-head"><tr><th className="p-3">الصنف</th><th className="p-3">البيع</th><th className="p-3">المعدل اليومي</th><th className="p-3">آخر بيع</th><th className="p-3">المخزون</th><th className="p-3">التقييم</th></tr></thead><tbody>{rows.map(row => <tr key={row.product_id} className="app-table-row"><td className="p-3 font-bold">{row.name}</td><td className="p-3 tabular-nums">{number(row.quantity_sold)} {row.base_unit}</td><td className="p-3 tabular-nums">{number(row.daily_rate)}</td><td className="p-3">{row.last_sold_at ? new Date(row.last_sold_at).toLocaleDateString("ar-EG") : "لم يُبع"}</td><td className="p-3 tabular-nums">{number(row.stock)}</td><td className="p-3">{row.dormant ? "راكد · راجع العرض" : row.reorder_priority ? "بيع نشط · راجع الطلب" : row.never_sold ? "صنف جديد · لم يُبع" : "طبيعي"}</td></tr>)}</tbody></table></div>
+        <div className="mt-4 space-y-2 md:hidden">{rows.map(row => <div key={row.product_id} className="rounded-xl border border-white/10 p-3 text-sm"><div className="flex items-start justify-between gap-3"><strong>{row.name}</strong><span className="shrink-0 text-primary">{row.dormant ? "راكد" : row.reorder_priority ? "راجع الطلب" : row.never_sold ? "جديد" : "نشط"}</span></div><div className="app-muted mt-2 flex flex-wrap gap-x-4 gap-y-1"><span>بيع {number(row.quantity_sold)} {row.base_unit}</span><span>يوميًا {number(row.daily_rate)}</span><span>المخزون {number(row.stock)}</span><span>آخر بيع {row.last_sold_at ? new Date(row.last_sold_at).toLocaleDateString("ar-EG", { timeZone: "Africa/Cairo" }) : "لا يوجد"}</span></div></div>)}</div>
+        <div className="mt-4 hidden overflow-x-auto md:block"><table className="w-full min-w-[660px] text-right text-sm"><thead className="app-table-head"><tr><th className="p-3">الصنف</th><th className="p-3">البيع</th><th className="p-3">المعدل اليومي</th><th className="p-3">آخر بيع</th><th className="p-3">المخزون</th><th className="p-3">التقييم</th></tr></thead><tbody>{rows.map(row => <tr key={row.product_id} className="app-table-row"><td className="p-3 font-bold">{row.name}</td><td className="p-3 tabular-nums">{number(row.quantity_sold)} {row.base_unit}</td><td className="p-3 tabular-nums">{number(row.daily_rate)}</td><td className="p-3">{row.last_sold_at ? new Date(row.last_sold_at).toLocaleDateString("ar-EG", { timeZone: "Africa/Cairo" }) : "لم يُبع"}</td><td className="p-3 tabular-nums">{number(row.stock)}</td><td className="p-3">{row.dormant ? "راكد · راجع العرض" : row.reorder_priority ? "بيع نشط · راجع الطلب" : row.never_sold ? "صنف جديد · لم يُبع" : "طبيعي"}</td></tr>)}</tbody></table></div>
         {!loading && !rows.length && <p className="app-muted py-8 text-center text-sm">لا توجد أصناف مطابقة.</p>}
         {loading && <p role="status" className="app-muted py-5 text-center text-sm">جاري تحديث التقرير...</p>}
       </section>

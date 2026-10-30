@@ -1,6 +1,6 @@
 """Period accounting from completed sales, immutable returns, and payment entries."""
 
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from collections import defaultdict
 from decimal import Decimal
 from zoneinfo import ZoneInfo
@@ -24,6 +24,10 @@ COMPLETED = (
     OrderStatusEnum.RETURNED.value,
     OrderStatusEnum.EXCHANGE.value,
 )
+
+
+def _elapsed_cutoff(now: datetime, duration: timedelta) -> datetime:
+    return now.astimezone(timezone.utc) - duration
 
 
 def _period(query, column, start: datetime | None, end: datetime | None):
@@ -269,15 +273,19 @@ async def management_details(db: AsyncSession, now: datetime) -> dict:
     customer_names = dict((await db.execute(select(Customer.id, Customer.name).where(
         Customer.id.in_(top_customer_ids), Customer.is_deleted == False,
     ))).all()) if top_customer_ids else {}
+    cairo = ZoneInfo("Africa/Cairo")
+    today = now.astimezone(cairo).date()
+    day_start = datetime.combine(today, time.min, tzinfo=cairo).astimezone(timezone.utc)
+    day_end = datetime.combine(today + timedelta(days=1), time.min, tzinfo=cairo).astimezone(timezone.utc)
     new_customers = (await db.execute(select(func.count(Customer.id)).where(
-        Customer.is_deleted == False, func.date(Customer.created_at) == now.date(),
+        Customer.is_deleted == False, Customer.created_at >= day_start, Customer.created_at < day_end,
     ))).scalar_one()
     returning_customers = (await db.execute(select(func.count(Customer.id)).where(
         Customer.is_deleted == False, Customer.purchase_count > 1,
     ))).scalar_one()
     delayed_filter = (
         Order.status == OrderStatusEnum.PREPARING.value,
-        Order.preparing_started_at < now - timedelta(hours=2),
+        Order.preparing_started_at < _elapsed_cutoff(now, timedelta(hours=2)),
     )
     delayed_count = (await db.execute(select(func.count(Order.id)).where(*delayed_filter))).scalar_one()
     delayed = (await db.execute(select(Order.id, Order.assigned_to_id, Order.preparing_started_at)

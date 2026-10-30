@@ -1644,7 +1644,7 @@ export default function POSPage() {
           <div className="custom-scrollbar overflow-y-auto divide-y divide-white/10">
             {heldCarts.map(held => <div key={held.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
               <div className="min-w-0"><strong className="block truncate text-sm">{held.draft.cart[0]?.nameAr || "سلة بيع"}</strong>
-                <span className="app-muted text-xs">{held.draft.cart.length} صنف · {new Date(held.savedAt).toLocaleString("ar-EG")}</span></div>
+                <span className="app-muted text-xs">{held.draft.cart.length} صنف · {new Date(held.savedAt).toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}</span></div>
               <div className="flex gap-2">
                 <button type="button" className="app-primary-button !px-3 !py-2 text-xs" disabled={reviewingCart} onClick={() => void restoreHeld(held)}>{reviewingCart ? "جارٍ الفحص..." : "استرجاع"}</button>
                 <button type="button" className="app-secondary-button !px-3 !py-2 text-xs" disabled={reviewingCart} onClick={async () => {

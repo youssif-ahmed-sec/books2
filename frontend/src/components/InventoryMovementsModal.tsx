@@ -73,7 +73,7 @@ export default function InventoryMovementsModal({ onClose }: InventoryMovementsM
            id: tx.id,
            product: tx.product_name || "منتج غير معروف",
            type: typeLabel,
-           date: `${d.toLocaleDateString('ar-EG')} ${d.toLocaleTimeString('ar-EG', {hour:'2-digit', minute:'2-digit'})}`,
+           date: `${d.toLocaleDateString('ar-EG', { timeZone: 'Africa/Cairo' })} ${d.toLocaleTimeString('ar-EG', {timeZone: 'Africa/Cairo', hour:'2-digit', minute:'2-digit'})}`,
            typeStyle: style,
            qty: `${qtyPrefix}${tx.quantity_changed}`,
            receiptId: tx.reference_document?.startsWith("RCV-") ? tx.reference_document.slice(4) : undefined,
@@ -251,7 +251,7 @@ export default function InventoryMovementsModal({ onClose }: InventoryMovementsM
           <div className="flex justify-between gap-3"><div><h3 className="text-xl font-bold">فاتورة استلام المخزون</h3><p className="app-muted text-xs">{receipt.public_number}</p></div>
             <button type="button" onClick={() => setReceipt(null)} className="app-muted hover:text-white">إغلاق</button></div>
           <div className="grid gap-2 sm:grid-cols-2 text-sm"><p>المورد: {receipt.supplier_name}</p><p>المخزن: {receipt.warehouse_name}</p>
-            <p>التاريخ: {new Date(receipt.created_at).toLocaleString("ar-EG")}</p>
+            <p>التاريخ: {new Date(receipt.created_at).toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}</p>
             {receipt.supplier_document && <p>مستند المورد: {receipt.supplier_document}</p>}</div>
           <div className="overflow-x-auto"><table className="w-full text-sm text-right"><thead><tr className="bg-white/5"><th className="p-2">الصنف</th><th className="p-2">الوحدة</th><th className="p-2">الكمية</th><th className="p-2">سعر شراء القطعة</th></tr></thead>
             <tbody>{receipt.lines.map(line => <tr key={line.product_id} className="border-t border-white/10"><td className="p-2">{line.product_name}</td><td className="p-2">{line.unit_name}</td><td className="p-2">{line.quantity}</td><td className="p-2 whitespace-nowrap">{line.unit_cost == null ? "—" : `${Number(line.unit_cost).toFixed(2)} ج.م`}</td></tr>)}</tbody></table></div>

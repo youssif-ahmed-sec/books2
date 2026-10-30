@@ -4,6 +4,10 @@ import { useEffect, useState } from "react";
 import { fetchApi } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
 import InvoiceDetailsDialog from "@/components/InvoiceDetailsDialog";
+import SaleCancellationRequests from "@/components/SaleCancellationRequests";
+import SaleCorrectionEditor from "@/components/SaleCorrectionEditor";
+import SaleCorrectionRequests from "@/components/SaleCorrectionRequests";
+import { getUserRole } from "@/utils/auth";
 import { DatePicker } from "@/components/DatePicker";
 import { ProductSelect } from "@/components/ProductSelect";
 import { orderStatusLabels } from "@/lib/orderLabels";
@@ -11,7 +15,7 @@ import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot
 import { useSectionSearchSelection } from "@/lib/useSectionSearchSelection";
 import { toast } from "react-toastify";
 
-type Invoice = { id: string; public_number: number; customer_name: string; status: string; total_amount: number; payment_method: string; payment_status: "paid" | "due" | "untracked"; created_at: string };
+type Invoice = { id: string; public_number: number; customer_name: string; status: string; cancellation_status?: "PENDING" | "AWAITING_SETTLEMENT" | "APPROVED" | null; total_amount: number; payment_method: string; payment_status: "paid" | "due" | "untracked"; created_at: string };
 type InvoiceFilters = { dateFrom: string; dateTo: string; status: string; paymentMethod: string; paymentStatus: string };
 
 const PAGE_SIZE = 50;
@@ -44,7 +48,7 @@ const paymentStatusOptions = [
 ];
 
 const money = (value: number) => `${Number(value).toLocaleString("ar-EG", { maximumFractionDigits: 2 })} ج.م`;
-const date = (value: string) => new Date(value).toLocaleString("ar-EG", { dateStyle: "medium", timeStyle: "short" });
+const date = (value: string) => new Date(value).toLocaleString("ar-EG", { timeZone: "Africa/Cairo", dateStyle: "medium", timeStyle: "short" });
 const invoiceUrl = (filters: InvoiceFilters, offset: number) => {
   const query = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) });
   if (filters.dateFrom) query.set("date_from", filters.dateFrom);
@@ -68,6 +72,12 @@ export default function OrdersPage() {
   const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [role, setRole] = useState<string | null>(null);
+  const [showCancellations, setShowCancellations] = useState(false);
+  const [cancellationRevision, setCancellationRevision] = useState(0);
+  const [showCorrections, setShowCorrections] = useState(false);
+  const [correctionRevision, setCorrectionRevision] = useState(0);
   const [draftFilters, setDraftFilters] = useState<InvoiceFilters>({ ...emptyFilters });
   const [activeFilters, setActiveFilters] = useState<InvoiceFilters>({ ...emptyFilters });
 
@@ -75,6 +85,15 @@ export default function OrdersPage() {
     setSelectedId(id);
   }
   useSectionSearchSelection(openInvoice);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setRole(getUserRole());
+      if (new URLSearchParams(window.location.search).has("cancellations")) setShowCancellations(true);
+      if (new URLSearchParams(window.location.search).has("corrections")) setShowCorrections(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     const requested = new URLSearchParams(window.location.search).get("invoice_id");
@@ -134,7 +153,14 @@ export default function OrdersPage() {
     <main className="app-side-page mx-4 mb-8 mt-28 flex min-w-0 flex-1 flex-col gap-4 lg:ml-8 lg:mt-36">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="app-heading">الفواتير</h1>
+        <div className="flex flex-wrap gap-2"><button type="button" className="app-secondary-button" aria-expanded={showCorrections}
+          onClick={() => setShowCorrections(value => !value)}>{showCorrections ? "إخفاء طلبات التعديل" : "طلبات تعديل الفواتير"}</button><button type="button" className="app-secondary-button" aria-expanded={showCancellations}
+          onClick={() => setShowCancellations(value => !value)}>{showCancellations ? "إخفاء طلبات الإلغاء" : "طلبات إلغاء المبيعات"}</button></div>
       </header>
+      {showCancellations && <SaleCancellationRequests admin={role === "ADMIN"} revision={cancellationRevision} onOpenInvoice={openInvoice}
+        onChanged={() => setActiveFilters(previous => ({ ...previous }))} />}
+      {showCorrections && <SaleCorrectionRequests admin={role === "ADMIN"} revision={correctionRevision} onOpenInvoice={openInvoice}
+        onChanged={() => setActiveFilters(previous => ({ ...previous }))} />}
       <form className="app-panel flex flex-col gap-3 p-4" onSubmit={event => { event.preventDefault(); applyFilters(); }} aria-label="تصفية الفواتير">
         <div className="flex flex-wrap items-end gap-3">
           <div className="min-w-36 flex-1 text-sm">
@@ -214,7 +240,7 @@ export default function OrdersPage() {
                 <td className="whitespace-nowrap px-4 py-3">{paymentMethodLabels[invoice.payment_method] || invoice.payment_method}</td>
                 <td className="whitespace-nowrap px-4 py-3 font-semibold">{money(invoice.total_amount)}</td>
                 <td className="whitespace-nowrap px-4 py-3">{paymentStatusLabels[invoice.payment_status]}</td>
-                <td className="whitespace-nowrap px-4 py-3 font-medium">{orderStatusLabels[invoice.status] || invoice.status}</td>
+                <td className="whitespace-nowrap px-4 py-3 font-medium">{orderStatusLabels[invoice.status] || invoice.status}{invoice.cancellation_status && <span className="ms-2 text-xs text-amber-300">{invoice.cancellation_status === "APPROVED" ? "إلغاء مكتمل" : invoice.cancellation_status === "AWAITING_SETTLEMENT" ? "بانتظار تأكيد التسوية" : "طلب إلغاء معلق"}</span>}</td>
                 <td className="whitespace-nowrap px-4 py-3"><button type="button" className="text-primary underline-offset-4 hover:underline" onClick={() => openInvoice(invoice.id)}>التفاصيل</button></td>
               </tr>)}
             </tbody>
@@ -234,6 +260,10 @@ export default function OrdersPage() {
         {hasMore && <div className="border-t border-current/10 p-3 text-center"><button type="button" className="app-secondary-button" disabled={loadingMore} onClick={loadMore}>{loadingMore ? "جارٍ التحميل..." : "تحميل المزيد"}</button></div>}
       </section>
     </main>
-    {selectedId && <InvoiceDetailsDialog key={selectedId} invoiceId={selectedId} onClose={() => setSelectedId(null)} />}
+    {selectedId && <InvoiceDetailsDialog key={selectedId} invoiceId={selectedId} onClose={() => setSelectedId(null)}
+      onEdit={() => { setEditingId(selectedId); setSelectedId(null); }}
+      onCancellation={() => { setShowCancellations(true); setCancellationRevision(value => value + 1); setActiveFilters(previous => ({ ...previous })); }} />}
+    {editingId && <SaleCorrectionEditor key={editingId} invoiceId={editingId} onClose={() => setEditingId(null)}
+      onSubmitted={() => { setShowCorrections(true); setCorrectionRevision(value => value + 1); setActiveFilters(previous => ({ ...previous })); }} />}
   </div>;
 }

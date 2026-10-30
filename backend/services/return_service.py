@@ -165,7 +165,8 @@ class ReturnService:
         }
 
     @staticmethod
-    async def _process_once(db: AsyncSession, payload: SalesReturnCreate, user_id: UUID, fingerprint: str) -> SalesReturn:
+    async def _process_once(db: AsyncSession, payload: SalesReturnCreate, user_id: UUID, fingerprint: str,
+                            *, commit: bool = True, settlement_override=None) -> SalesReturn:
         order = (await db.execute(select(Order).where(Order.id == payload.order_id).with_for_update())).scalar_one_or_none()
         if order is None:
             raise ValueError("Original order not found.")
@@ -327,7 +328,9 @@ class ReturnService:
             result.refund_amount = -difference
         elif difference > 0:
             result.charge_amount = difference
-        if settlement_method == "Deferred Payment":
+        if settlement_override is not None:
+            await settlement_override(db, order, result, difference)
+        elif settlement_method == "Deferred Payment":
             if order.customer_id is None:
                 raise ValueError("Deferred order has no customer.")
             customer = (await db.execute(select(Customer).where(Customer.id == order.customer_id).with_for_update())).scalar_one()
@@ -384,6 +387,9 @@ class ReturnService:
         db.add(AuditLog(user_id=user_id, action="RETURN_OR_EXCHANGE", entity_type="Order", entity_id=str(order.id),
                         new_value={"return_id": str(result.id), "kind": payload.kind,
                                    "refund_amount": str(result.refund_amount), "charge_amount": str(result.charge_amount)}))
-        await db.commit()
-        await db.refresh(result)
+        if commit:
+            await db.commit()
+            await db.refresh(result)
+        else:
+            await db.flush()
         return result

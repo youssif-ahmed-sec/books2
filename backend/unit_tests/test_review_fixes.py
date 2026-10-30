@@ -17,6 +17,17 @@ def test_product_search_matches_separate_arabic_words_and_spelling_variants():
     assert rows == ["كتاب اللغة للصف الأول"]
 
 
+def test_product_search_matches_name_sku_and_product_or_unit_barcode():
+    engine = create_engine("sqlite://")
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE products (id TEXT, sku TEXT, barcode TEXT, name_en TEXT, name_ar TEXT)"))
+        connection.execute(text("CREATE TABLE product_units (product_id TEXT, barcode TEXT, is_deleted BOOLEAN)"))
+        connection.execute(text("INSERT INTO products VALUES ('1', 'BK-17', '12345', 'Book', 'كتاب التاريخ')"))
+        connection.execute(text("INSERT INTO product_units VALUES ('1', '98765', 0)"))
+        for search in ("كتاب", "Book", "BK-17", "12345", "98765"):
+            assert connection.execute(select(Product.name_ar).where(product_search_filter(search))).scalars().all() == ["كتاب التاريخ"]
+
+
 def test_health_does_not_return_database_error_details():
     class FailingSession:
         async def execute(self, _statement):

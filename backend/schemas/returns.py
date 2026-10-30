@@ -54,6 +54,7 @@ class SalesReturnResponse(BaseModel):
     returned_value: Decimal
     replacement_value: Decimal
     created_at: datetime
+    is_correction: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -96,3 +97,5 @@ class SalesReturnReceipt(BaseModel):
     collection_amount: Decimal
     returned_lines: list[ReturnReceiptLine]
     replacement_lines: list[ReturnReceiptLine]
+    is_correction: bool = False
+    settlement_breakdown: list[dict] = Field(default_factory=list)

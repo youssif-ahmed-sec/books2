@@ -36,7 +36,7 @@ const managementTabs = [
 const salesTabs = [
   { href: "/pos", icon: "point_of_sale", label: "نقطة البيع", roles: ["ADMIN", "CASHIER_ORDERS"] },
   { href: "/cash-register", icon: "payments", label: "الصندوق", roles: ["ADMIN", "CASHIER_ORDERS"] },
-  { href: "/orders", icon: "receipt_long", label: "الفواتير", roles: ["ADMIN"] },
+  { href: "/orders", icon: "receipt_long", label: "الفواتير", roles: ["ADMIN", "CASHIER_ORDERS"] },
   { href: "/returns", icon: "assignment_return", label: "المرتجعات", roles: ["ADMIN", "CASHIER_ORDERS"] },
 ];
 

@@ -23,7 +23,7 @@ const inventoryTypeLabels: Record<string, string> = {
   Adjustment: "تسوية", Counting: "جرد",
 };
 const money = (value: number) => `${new Intl.NumberFormat("ar-EG", { maximumFractionDigits: 2 }).format(value)} ج.م`;
-const dateLabel = (value: string) => new Date(value).toLocaleDateString("ar-EG", { year: "numeric", month: "short", day: "numeric" });
+const dateLabel = (value: string) => new Date(value).toLocaleDateString("ar-EG", { timeZone: "Africa/Cairo", year: "numeric", month: "short", day: "numeric" });
 
 function SummaryCard({ label, value, note }: { label: string; value: string | null; note?: string }) {
   return <div className="app-panel min-w-0 rounded-2xl p-5"><p className="app-muted text-sm">{label}</p>{value === null ? <span className="app-skeleton mt-4 h-8 w-28" role="status" aria-label={`جاري تحميل ${label}`} /> : <strong className="mt-3 block text-2xl font-black tabular-nums text-primary">{value}</strong>}{note && <p className="app-muted mt-2 text-xs">{note}</p>}</div>;
@@ -60,7 +60,7 @@ export default function ReportsPage() {
   const key = `${tab}|${startDate}|${endDate}|${offset}`;
   const chartDays = useMemo(() => {
     if (!startDate) return 30;
-    const until = endDate || new Date().toISOString().slice(0, 10);
+    const until = endDate || new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
     const span = Math.floor((Date.parse(until) - Date.parse(startDate)) / 86400000) + 1;
     return Math.max(7, Math.min(90, span || 30));
   }, [startDate, endDate]);
@@ -69,12 +69,8 @@ export default function ReportsPage() {
     if (!role || invalidRange) return;
     let active = true;
     const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) });
-    if (startDate) params.set("start_date", new Date(`${startDate}T00:00:00`).toISOString());
-    if (endDate) {
-      const after = new Date(`${endDate}T00:00:00`);
-      after.setDate(after.getDate() + 1);
-      params.set("end_date", after.toISOString());
-    }
+    if (startDate) params.set("start_day", startDate);
+    if (endDate) params.set("end_day", endDate);
     const chartParams = new URLSearchParams({ days: String(chartDays) });
     if (endDate) chartParams.set("end_day", endDate);
     const endpoint = tab === "sales" ? "/reports/sales" : "/reports/inventory";

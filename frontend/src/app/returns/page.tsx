@@ -106,6 +106,7 @@ type ReturnRecord = {
   id: string;
   public_number: number;
   kind: "REFUND" | "EXCHANGE";
+  is_correction?: boolean;
   refund_amount: number;
   charge_amount: number;
   wallet_fee_amount: number;
@@ -1528,11 +1529,11 @@ export default function ReturnsPage() {
                     >
                       <div>
                         <div className="flex flex-wrap items-center gap-2 font-semibold text-white">
-                          <span>{record.kind === "REFUND" ? "استرجاع" : "استبدال"} رقم {record.public_number}</span>
+                          <span>{record.is_correction ? "تعديل فاتورة" : record.kind === "REFUND" ? "استرجاع" : "استبدال"} رقم {record.public_number}</span>
                           {(() => {
                             const d = new Date(record.created_at);
-                            const dateStr = d.toLocaleDateString("ar-EG", { year: "numeric", month: "numeric", day: "numeric" });
-                            const timeStr = d.toLocaleTimeString("ar-EG", { hour: "numeric", minute: "2-digit", hour12: true });
+                            const dateStr = d.toLocaleDateString("ar-EG", { timeZone: "Africa/Cairo", year: "numeric", month: "numeric", day: "numeric" });
+                            const timeStr = d.toLocaleTimeString("ar-EG", { timeZone: "Africa/Cairo", hour: "numeric", minute: "2-digit", hour12: true });
                             return (
                               <span className="text-[#a98a7d] font-normal text-sm inline-flex items-center gap-1.5">
                                 <span>·</span>

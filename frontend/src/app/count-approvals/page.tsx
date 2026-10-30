@@ -147,7 +147,7 @@ export default function CountApprovalsPage() {
             : history.items.length ? <div className="max-h-[68vh] overflow-y-auto">{history.items.map(item =>
               <button key={item.id} type="button" onClick={() => setSelectedId(item.id)}
                 className={`app-table-row w-full px-5 py-4 text-start ${selectedId === item.id ? "bg-primary/10" : ""}`}>
-                <div className="flex items-start justify-between gap-3"><div className="min-w-0"><strong className="block truncate text-sm">{item.product_name}</strong><span className="app-muted mt-1 block text-xs">{item.sku} · {new Date(item.created_at).toLocaleString("ar-EG")}</span></div><span className={`shrink-0 text-sm font-bold ${item.difference < 0 ? "text-red-300" : "text-primary"}`} dir="auto">{signedQuantity(item.difference)}</span></div>
+                <div className="flex items-start justify-between gap-3"><div className="min-w-0"><strong className="block truncate text-sm">{item.product_name}</strong><span className="app-muted mt-1 block text-xs">{item.sku} · {new Date(item.created_at).toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}</span></div><span className={`shrink-0 text-sm font-bold ${item.difference < 0 ? "text-red-300" : "text-primary"}`} dir="auto">{signedQuantity(item.difference)}</span></div>
                 <p className="app-muted mt-2 truncate text-xs">{item.counter} · {countStatusLabel[item.status]}</p>
               </button>)}</div>
             : <p className="app-muted p-10 text-center text-sm">لا توجد أصناف في هذه القائمة.</p>}
@@ -160,7 +160,7 @@ export default function CountApprovalsPage() {
             <div className="border-y border-white/10 py-4"><p className="app-muted text-xs">قيمة الفرق بسعر الشراء وقت الجرد</p><p className="mt-2 text-lg font-bold" dir="auto">{selected.difference_value === null ? "غير محفوظ للجرد القديم" : moneyText(selected.difference_value)}</p><p className="app-muted mt-1 text-xs">سعر الوحدة {selected.unit_cost === null ? "غير محفوظ" : moneyText(selected.unit_cost)}</p></div>
             <div><p className="app-muted text-xs">سبب فرق الجرد</p><p className="mt-2 whitespace-pre-wrap text-sm leading-7">{selected.reason || "لا يوجد فرق"}</p></div>
             {selected.rejection_reason && <div><p className="app-muted text-xs">سبب الرفض</p><p className="mt-2 text-sm leading-7">{selected.rejection_reason}</p></div>}
-            {selected.reviewed_at && <p className="app-muted text-xs">قرار {selected.reviewer || "المدير"} · {new Date(selected.reviewed_at).toLocaleString("ar-EG")}</p>}
+            {selected.reviewed_at && <p className="app-muted text-xs">قرار {selected.reviewer || "المدير"} · {new Date(selected.reviewed_at).toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}</p>}
             {selected.status === "PENDING" && <div className="flex flex-wrap gap-2 border-t border-white/10 pt-5"><button type="button" className="app-primary-button" onClick={() => setDecision("approve")}>اعتماد وتحديث الرصيد</button><button type="button" className="app-secondary-button" onClick={() => setDecision("reject")}>رفض الجرد</button></div>}
           </div> : <div className="app-muted flex min-h-72 items-center justify-center text-center text-sm">اختر صنفًا لعرض تفاصيله.</div>}
         </section>

@@ -2,8 +2,8 @@
 
 import type { ReactNode } from "react";
 import RoleGate from "@/components/RoleGate";
-import { adminRoles } from "@/lib/routeRoles";
+import { salesRoles } from "@/lib/routeRoles";
 
 export default function OrdersLayout({ children }: { children: ReactNode }) {
-  return <RoleGate allowedRoles={adminRoles}>{children}</RoleGate>;
+  return <RoleGate allowedRoles={salesRoles}>{children}</RoleGate>;
 }

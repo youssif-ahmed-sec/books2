@@ -44,7 +44,7 @@ export default function AuditPage() {
       <div className="glass rounded-2xl overflow-x-auto"><table className="w-full text-sm text-right">
         <thead><tr><th className="p-4">التاريخ</th><th className="p-4">العملية</th><th className="p-4">المستخدم</th><th className="p-4">السجل</th><th className="p-4">التفاصيل</th></tr></thead>
         <tbody>{loading ? <LoadingTableRows label="جاري تحميل سجل العمليات" columns={5} /> : entries.map(entry => <tr key={entry.id} data-search-id={entry.id} className={`border-t border-white/10 ${focusedId === entry.id ? "app-search-target" : ""}`}>
-          <td className="p-4">{new Date(entry.created_at).toLocaleString("ar-EG")}</td>
+          <td className="p-4">{new Date(entry.created_at).toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}</td>
           <td className="p-4">{entry.action}</td><td className="p-4">{entry.user_name || entry.user_id.slice(0, 8)}</td>
           <td className="p-4">{entry.entity_type} #{entry.entity_id?.slice(0, 8)}</td>
           <td className="p-4 text-xs"><details><summary className="cursor-pointer">عرض</summary><pre className="whitespace-pre-wrap">{JSON.stringify({ before: entry.old_value, after: entry.new_value }, null, 2)}</pre></details></td>

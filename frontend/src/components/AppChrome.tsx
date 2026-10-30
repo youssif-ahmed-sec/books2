@@ -20,7 +20,7 @@ const pages: Record<string, { title: string; roles: readonly UserRole[] }> = {
   "/inventory": { title: "إدارة المخزون", roles: inventoryRoles },
   "/inventory/product": { title: "تفاصيل المنتج", roles: inventoryRoles },
   "/offers": { title: "العروض", roles: inventoryRoles },
-  "/orders": { title: "الفواتير", roles: adminRoles },
+  "/orders": { title: "الفواتير", roles: salesRoles },
   "/pos": { title: "نقطة البيع", roles: salesRoles },
   "/product-approvals": { title: "طلبات المنتجات", roles: inventoryRoles },
   "/purchases": { title: "المشتريات", roles: inventoryRoles },

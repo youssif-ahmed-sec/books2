@@ -414,7 +414,7 @@ export default function PurchasesPage() {
                           <strong className="text-[#e2bfb0] font-medium text-xs">{supplierName(document.supplier_id, document.supplier_name)}</strong>
                         )}
                         <span className="mx-2 text-white/20">·</span>
-                        <span className="app-muted text-xs">{new Date(document.created_at).toLocaleDateString("ar-EG")}</span>
+                        <span className="app-muted text-xs">{new Date(document.created_at).toLocaleDateString("ar-EG", { timeZone: "Africa/Cairo" })}</span>
                       </div>
                     </div>
 
@@ -486,7 +486,7 @@ export default function PurchasesPage() {
                     <div className="space-y-1.5 pt-1">
                       {document.receipts.map(receipt => (
                         <div key={receipt.id} className="flex items-center justify-between text-xs text-gray-300 py-1 border-t border-white/5">
-                          <span>استلام {receipt.public_number} · {new Date(receipt.created_at).toLocaleDateString("ar-EG")}</span>
+                          <span>استلام {receipt.public_number} · {new Date(receipt.created_at).toLocaleDateString("ar-EG", { timeZone: "Africa/Cairo" })}</span>
                           <button
                             type="button"
                             disabled={printingId === receipt.id}

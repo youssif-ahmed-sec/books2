@@ -178,7 +178,7 @@ function FinancialsContent() {
               {loading && <LoadingTableRows label="جاري تحميل الحركات المالية" columns={4} />}
               {!loading && activeTab === "expense" && expenses.map((e) => (
                 <tr key={e.id} data-search-id={e.id} className="app-table-row">
-                  <td className="px-4 py-3" dir="ltr">{new Date(e.expense_date).toLocaleDateString()}</td>
+                  <td className="px-4 py-3" dir="ltr">{new Date(e.expense_date).toLocaleDateString("ar-EG", { timeZone: "Africa/Cairo" })}</td>
                   <td className="px-4 py-3 font-medium text-white">{e.category}</td>
                   <td className="px-4 py-3">{e.description || "-"}</td>
                   <td className="px-4 py-3 text-[#ffb4ab] font-bold">{Number(e.amount).toFixed(2)} ج.م</td>
@@ -186,7 +186,7 @@ function FinancialsContent() {
               ))}
               {!loading && activeTab === "income" && incomes.map((i) => (
                 <tr key={i.id} data-search-id={i.id} className="app-table-row">
-                  <td className="px-4 py-3" dir="ltr">{new Date(i.income_date).toLocaleDateString()}</td>
+                  <td className="px-4 py-3" dir="ltr">{new Date(i.income_date).toLocaleDateString("ar-EG", { timeZone: "Africa/Cairo" })}</td>
                   <td className="px-4 py-3 font-medium text-white">{i.source}</td>
                   <td className="px-4 py-3">{i.description || "-"}</td>
                   <td className="px-4 py-3 text-primary font-bold">{Number(i.amount).toFixed(2)} ج.م</td>

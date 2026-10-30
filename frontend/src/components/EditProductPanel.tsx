@@ -13,6 +13,7 @@ import { ProductSelect } from "@/components/ProductSelect";
 import { productFormErrors, productSaveError } from "@/lib/productFormErrors";
 import { refreshNotificationBell } from "@/lib/notificationEvents";
 import { optimizeProductImage } from "@/lib/productImage";
+import StockQuantityDialog from "@/components/StockQuantityDialog";
 
 const unitSchema = z.object({
   id: z.string(),
@@ -93,6 +94,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete, appr
     return () => document.body.classList.remove("product-panel-open");
   }, []);
   const [isSaving, setIsSaving] = useState(false);
+  const [editingQuantity, setEditingQuantity] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [form, setForm] = useState({
     sku: "",
@@ -657,7 +659,7 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete, appr
                   <span className="material-symbols-outlined text-sm">inventory_2</span>
                   الرصيد الحالي: {totalBaseStock} {units.find(unit => unit.isBase)?.name || "وحدة"}
                 </span>
-                <span className="text-xs text-[#e2bfb0]/70">تغيير الكمية يتم من استلام المخزون</span>
+                <button type="button" className="app-secondary-button" onClick={() => setEditingQuantity(true)}>تعديل الكمية</button>
                 <button
                   onClick={addUnit}
                   className="flex items-center gap-2 text-primary font-bold text-sm bg-primary/10 px-6 py-3 rounded-full hover:bg-primary/20 transition-all border border-primary/20 whitespace-nowrap"
@@ -1003,6 +1005,11 @@ export function EditProductPanel({ productId, onClose, onSuccess, onDelete, appr
       </aside>
 
       {/* New Unit Dialog */}
+      {editingQuantity && <StockQuantityDialog productId={productId} unit={units.find(unit => unit.isBase)?.name || "وحدة"} approvalRequired={approvalRequired}
+        onClose={() => setEditingQuantity(false)} onSuccess={() => {
+          onSuccess();
+          if (!approvalRequired) void fetchApi(`/products/${productId}`).then(product => setUnits(previous => previous.map(unit => unit.isBase ? { ...unit, stock: Number(product.current_stock || 0) } : unit))).catch(() => notifyError("تم تعديل الكمية، لكن تعذر تحديث الرصيد المعروض"));
+        }} />}
       {showNewUnitDialog && (
         <div className="motion-overlay fixed inset-0 bg-black/80 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
           <div className="motion-dialog bg-surface-container-low rounded-3xl border border-white/10 p-8 w-full max-w-md shadow-2xl">
