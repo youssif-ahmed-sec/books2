@@ -50,6 +50,21 @@ async def list_notifications(
             "unread_count": unread, "has_more": len(rows) > limit}
 
 
+@router.get("/summary")
+async def notification_summary(
+    db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
+):
+    filters = (Notification.user_id == user.id, Notification.created_at >= notification_cutoff())
+    newest = (await db.execute(
+        select(Notification.id).where(*filters)
+        .order_by(Notification.created_at.desc(), Notification.id.desc()).limit(1)
+    )).scalar_one_or_none()
+    unread = (await db.execute(
+        select(func.count(Notification.id)).where(*filters, Notification.read_at.is_(None))
+    )).scalar_one()
+    return {"newest_id": str(newest) if newest is not None else None, "unread_count": unread}
+
+
 @router.get("/badge-counts")
 async def get_badge_counts(
     db: AsyncSession = Depends(get_db),
@@ -66,7 +81,7 @@ async def get_badge_counts(
 
     if user.role == RoleEnum.ADMIN:
         approvals_count = (await db.execute(
-            select(func.count(ProductApproval.id))
+            select(func.count(ProductApproval.id)).where(ProductApproval.status == "PENDING")
         )).scalar_one()
         counts["product_approvals"] = int(approvals_count or 0)
 
@@ -89,6 +104,7 @@ async def get_badge_counts(
         approvals_count = (await db.execute(
             select(func.count(ProductApproval.id)).where(
                 ProductApproval.requested_by == user.id,
+                ProductApproval.status == "PENDING",
             )
         )).scalar_one()
         counts["product_approvals"] = int(approvals_count or 0)

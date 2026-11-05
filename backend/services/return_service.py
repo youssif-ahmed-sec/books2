@@ -25,14 +25,39 @@ MONEY = Decimal("0.01")
 
 class ReturnService:
     @staticmethod
-    def _settlement_method(order: Order, payload: SalesReturnCreate) -> str:
+    def _settlement_method(order: Order, payload: SalesReturnCreate, effective_remaining=None) -> str:
         method = payload.settlement_payment_method or order.payment_method
-        outstanding = order.deferred_remaining is None or Decimal(str(order.deferred_remaining)) > 0
+        remaining = order.deferred_remaining if effective_remaining is None else effective_remaining
+        outstanding = remaining is None or Decimal(str(remaining)) > 0
         if order.payment_method == "Deferred Payment" and outstanding and method != "Deferred Payment":
             raise ValueError("An unpaid deferred invoice must be settled against customer debt; manual review is required for another refund method.")
         if method == "Deferred Payment" and order.customer_id is None:
             raise ValueError("Deferred settlement requires a customer account.")
         return method
+
+    @staticmethod
+    async def _debt_chain(db: AsyncSession, order: Order) -> list[Order]:
+        chain = [order]
+        seen = {order.id}
+        while True:
+            parent_id = (await db.execute(select(SalesReturn.order_id).where(
+                SalesReturn.exchange_order_id == chain[-1].id,
+            ))).scalar_one_or_none()
+            if parent_id is None:
+                return chain
+            if parent_id in seen:
+                raise ValueError("Exchange invoice ancestry requires manual review.")
+            parent = (await db.execute(select(Order).where(Order.id == parent_id))).scalar_one_or_none()
+            if parent is None or parent.customer_id != order.customer_id:
+                raise ValueError("Exchange invoice ancestry requires manual review.")
+            chain.append(parent)
+            seen.add(parent_id)
+
+    @staticmethod
+    async def effective_deferred_remaining(db: AsyncSession, order: Order) -> Decimal | None:
+        chain = await ReturnService._debt_chain(db, order)
+        tracked = [Decimal(str(item.deferred_remaining)) for item in chain if item.deferred_remaining is not None]
+        return sum(tracked, Decimal("0")) if tracked else None
 
     @staticmethod
     def _return_line_amount(item: OrderItem, quantity: Decimal, already: Decimal,
@@ -117,6 +142,7 @@ class ReturnService:
             raise ValueError("Original order has no refundable items.")
         discount_factor = (subtotal - min(Decimal(str(order.discount_amount)), subtotal)) / subtotal
         returned_total = Decimal("0")
+        stock_delta = {}
         for line in payload.lines:
             item = by_id.get(line.order_item_id)
             if item is None:
@@ -133,6 +159,12 @@ class ReturnService:
                 item, line.quantity, Decimal(str(already)), Decimal(str(already_amount)), discount_factor,
             )
             returned_total += amount
+            components = item.bundle_components_snapshot or [{"product_id": str(item.product_id), "quantity": "1"}]
+            for component in components:
+                component_id = UUID(component["product_id"])
+                stock_delta[component_id] = stock_delta.get(component_id, Decimal("0")) + (
+                    line.quantity * Decimal(str(item.conversion_factor)) * Decimal(str(component["quantity"]))
+                )
 
         replacement_total = Decimal("0")
         if payload.replacements:
@@ -150,8 +182,30 @@ class ReturnService:
                 if price is None or Decimal(str(price.price)) <= 0:
                     raise ValueError("Replacement product, unit, or price is unavailable.")
                 replacement_total += (Decimal(str(price.price)) * replacement.quantity).quantize(MONEY, rounding=ROUND_HALF_UP)
+                unit = (await db.execute(select(ProductUnit).where(
+                    ProductUnit.id == replacement.unit_id, ProductUnit.product_id == replacement.product_id,
+                    ProductUnit.is_deleted == False,
+                ))).scalar_one_or_none()
+                product = (await db.execute(select(Product).where(Product.id == replacement.product_id))).scalar_one()
+                if unit is None:
+                    raise ValueError("Replacement product, unit, or price is unavailable.")
+                parts = (await db.execute(select(ProductBundleComponent).where(
+                    ProductBundleComponent.bundle_id == product.id, ProductBundleComponent.is_deleted == False,
+                ))).scalars().all() if product.is_bundle else []
+                if product.is_bundle and not parts:
+                    raise ValueError("Replacement bundle has no components.")
+                components = [(part.component_id, Decimal(str(part.quantity))) for part in parts] if product.is_bundle else [(product.id, Decimal("1"))]
+                for component_id, quantity in components:
+                    stock_delta[component_id] = stock_delta.get(component_id, Decimal("0")) - replacement.quantity * Decimal(str(unit.conversion_factor)) * quantity
+            for component_id, delta in stock_delta.items():
+                current = (await db.execute(select(InventoryBalance.current_stock).where(
+                    InventoryBalance.product_id == component_id, InventoryBalance.warehouse_id == payload.warehouse_id,
+                ))).scalar_one_or_none()
+                if Decimal(str(current or 0)) + delta < 0:
+                    raise ValueError("Insufficient stock for exchange item.")
         difference = replacement_total - returned_total
-        settlement_method = ReturnService._settlement_method(order, payload)
+        effective_remaining = await ReturnService.effective_deferred_remaining(db, order)
+        settlement_method = ReturnService._settlement_method(order, payload, effective_remaining)
         charge_amount = max(difference, Decimal("0"))
         wallet_fee = ReturnService._wallet_fee(charge_amount, settlement_method)
         return {
@@ -198,7 +252,8 @@ class ReturnService:
             raise ValueError("Original order has no refundable items.")
         discount_factor = (subtotal - min(Decimal(str(order.discount_amount)), subtotal)) / subtotal
 
-        settlement_method = ReturnService._settlement_method(order, payload)
+        effective_remaining = await ReturnService.effective_deferred_remaining(db, order)
+        settlement_method = ReturnService._settlement_method(order, payload, effective_remaining)
         result = SalesReturn(
             id=payload.request_id, order_id=order.id, warehouse_id=payload.warehouse_id,
             user_id=user_id, kind=payload.kind, payment_method=settlement_method,
@@ -340,12 +395,15 @@ class ReturnService:
             if next_balance > Decimal(str(customer.credit_limit or 0)):
                 raise ValueError("Exchange exceeds customer credit limit.")
             customer.balance = next_balance
-            if order.deferred_remaining is not None and difference > 0:
-                order.deferred_remaining = Decimal(str(order.deferred_remaining)) + difference
-                if order.next_due_date is None:
+            if difference > 0:
+                chain = await ReturnService._debt_chain(db, order)
+                debt_order = next((entry for entry in chain if entry.deferred_remaining is not None), None)
+                debt_order = debt_order or exchange_order or order
+                debt_order.deferred_remaining = Decimal(str(debt_order.deferred_remaining or 0)) + difference
+                if debt_order.next_due_date is None:
                     from datetime import datetime
                     from zoneinfo import ZoneInfo
-                    order.next_due_date = datetime.now(ZoneInfo("Africa/Cairo")).date()
+                    debt_order.next_due_date = datetime.now(ZoneInfo("Africa/Cairo")).date()
             open_dues = (await db.execute(select(Order).where(
                 Order.customer_id == order.customer_id, Order.deferred_remaining > 0,
             ).order_by(Order.next_due_date.asc().nulls_last(), Order.created_at, Order.id).with_for_update())).scalars().all()

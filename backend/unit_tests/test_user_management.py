@@ -21,7 +21,7 @@ from core.security import hash_password, create_access_token
 from core.dependencies import get_current_user
 from database import get_db
 from main import app
-from models.user import AuditLog, Base, RevokedAccessToken, RoleEnum, User
+from models.user import AuditLog, AuthSession, Base, RevokedAccessToken, RoleEnum, User
 from schemas.auth import UserRegisterRequest, UserStatusRequest, UserUpdateRequest
 
 
@@ -69,11 +69,11 @@ def test_username_is_required_and_normalized():
 async def test_username_login_and_inactive_rejection():
     user = staff()
     user.hashed_password = hash_password("password12345")
-    db = session(result(user))
+    db = session(result(user), result())
     response = await login(SimpleLoginForm(username="STAFF1", password="password12345"), db)
     assert response.user.id == user.id
     assert response.access_token
-    query = str(db.execute.call_args.args[0])
+    query = str(db.execute.call_args_list[0].args[0])
     assert "users.username" in query and "lower(users.email)" in query
     assert "users.is_active" in query and "users.is_deleted" in query
     db = session(result())
@@ -227,6 +227,7 @@ async def test_user_lifecycle_persists_in_isolated_sqlite():
         async with engine.begin() as connection:
             await connection.run_sync(User.__table__.create)
             await connection.run_sync(AuditLog.__table__.create)
+            await connection.run_sync(AuthSession.__table__.create)
         maker = async_sessionmaker(engine, expire_on_commit=False)
         async with maker() as db:
             current = admin()

@@ -5,6 +5,7 @@ import NotificationCenter from "@/components/NotificationCenter";
 import { ConfirmationProvider } from "@/components/ConfirmationProvider";
 import AppChrome from "@/components/AppChrome";
 import { TopNavSearchProvider } from "@/lib/topNavSearchPortal";
+import SessionActivity from "@/components/SessionActivity";
 
 export const metadata: Metadata = {
   title: "مكتبة سعود الشافعي | إدارة المكتبة",
@@ -40,6 +41,7 @@ export default function RootLayout({
         />
       </head>
       <body className="overflow-x-hidden antialiased">
+        <SessionActivity />
         <ConfirmationProvider><WarehouseModeGate><TopNavSearchProvider><AppChrome />{children}</TopNavSearchProvider></WarehouseModeGate></ConfirmationProvider>
         <NotificationCenter />
       </body>

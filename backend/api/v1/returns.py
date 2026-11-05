@@ -185,6 +185,7 @@ async def return_eligibility(
                 customer_name = cust[1]
             if cust[2]:
                 customer_phone = cust[2]
+    effective_remaining = await ReturnService.effective_deferred_remaining(db, order)
     return {
         "warehouse_id": warehouses[0],
         "customer_id": str(order.customer_id) if order.customer_id else None,
@@ -196,7 +197,7 @@ async def return_eligibility(
         "total_amount": float(order.total_amount),
         "discount_amount": float(order.discount_amount or 0),
         "subtotal_amount": float(sum((item.total_price for item, _, _ in rows), 0)),
-        "deferred_remaining": float(order.deferred_remaining) if order.deferred_remaining is not None else None,
+        "deferred_remaining": float(effective_remaining) if effective_remaining is not None else None,
         "wallet_fee_amount": float(order.wallet_fee_amount or 0),
         "items": result,
     }

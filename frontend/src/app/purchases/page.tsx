@@ -263,13 +263,11 @@ export default function PurchasesPage() {
       whatsappWindow = window.open("", "_blank");
     }
     try {
-      await fetchApi(`/purchase-documents/${document.id}/status/${action}`, { method: "POST" });
-      refreshNotificationBell();
-      await load();
+      const updated = await fetchApi(`/purchase-documents/${document.id}/status/${action}`, { method: "POST" }) as Document;
       if (action === "approve") {
         if (whatsappWindow) {
           if (cleanPhone) {
-            const message = buildPurchaseWhatsAppMessage(document, targetSupplier?.name);
+            const message = buildPurchaseWhatsAppMessage(updated, targetSupplier?.name);
             whatsappWindow.location.href = `https://web.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(message)}`;
             notifySuccess("تمت الموافقة وفتح واتساب ويب بمراسلة أمر الشراء للمورد");
           } else {
@@ -283,6 +281,8 @@ export default function PurchasesPage() {
       else if (action === "reject") notifySuccess("تم رفض أمر الشراء");
       else if (action === "place") notifySuccess("تم إصدار أمر الشراء بنجاح");
       else if (action === "cancel") notifySuccess("تم إلغاء أمر الشراء");
+      refreshNotificationBell();
+      await load();
     }
     catch (cause) {
       whatsappWindow?.close();

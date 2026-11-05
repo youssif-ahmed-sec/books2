@@ -25,7 +25,7 @@ export default function StockQuantityDialog({ productId, unit, approvalRequired,
 
   useEffect(() => {
     let active = true;
-    Promise.all([fetchApi("/inventory/warehouses") as Promise<Warehouse[]>, fetchApi("/inventory/balances") as Promise<Balance[]>])
+    Promise.all([fetchApi("/inventory/warehouses") as Promise<Warehouse[]>, fetchApi(`/inventory/balances?product_id=${encodeURIComponent(productId)}`) as Promise<Balance[]>])
       .then(([stores, stock]) => { if (active) { setWarehouses(stores); setBalances(stock.filter(item => item.product_id === productId)); if (stores.length === 1) setWarehouse(stores[0].id); } })
       .catch(cause => { if (active) setError(countErrorMessage(cause, "تعذر تحميل رصيد المنتج")); })
       .finally(() => { if (active) setLoading(false); });

@@ -7,7 +7,7 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 
-from api.v1.notifications import list_notifications
+from api.v1.notifications import list_notifications, notification_summary
 from api.v1.cash_register import CloseShift, finish_shift
 from models.user import RoleEnum
 from services.gmail_smtp import gmail_configured, send_gmail_message
@@ -62,6 +62,42 @@ def test_notification_cursor_requires_both_parts():
                                        before_id=None, db=NotificationDb([], 0),
                                        user=SimpleNamespace(id=uuid4())))
     assert raised.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_notification_summary_is_private_and_excludes_expired():
+    from datetime import timedelta
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    engine = create_async_engine("sqlite+aiosqlite://")
+    owner, other = uuid4(), uuid4()
+    newest, old, foreign = uuid4(), uuid4(), uuid4()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    async with engine.begin() as conn:
+        await conn.execute(text("CREATE TABLE notifications (id CHAR(32), user_id CHAR(32), created_at DATETIME, read_at DATETIME)"))
+        await conn.execute(text("INSERT INTO notifications VALUES (:id, :user_id, :created_at, :read_at)"), [
+            {"id": newest.hex, "user_id": owner.hex, "created_at": now, "read_at": None},
+            {"id": old.hex, "user_id": owner.hex, "created_at": now - timedelta(days=8), "read_at": None},
+            {"id": foreign.hex, "user_id": other.hex, "created_at": now, "read_at": None},
+        ])
+    async with async_sessionmaker(engine)() as db:
+        result = await notification_summary(db=db, user=SimpleNamespace(id=owner))
+        empty = await notification_summary(db=db, user=SimpleNamespace(id=uuid4()))
+    await engine.dispose()
+    assert result == {"newest_id": str(newest), "unread_count": 1}
+    assert empty == {"newest_id": None, "unread_count": 0}
+
+
+def test_notification_summary_requires_authentication():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from api.v1.notifications import router
+
+    app = FastAPI()
+    app.include_router(router)
+    response = TestClient(app).get("/notifications/summary")
+    assert response.status_code == 401
 
 
 def test_low_stock_crossing_creates_notifications_for_inventory_controller():

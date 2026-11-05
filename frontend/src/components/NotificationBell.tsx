@@ -17,6 +17,7 @@ type Notice = {
   read_at: string | null;
 };
 type Inbox = { items: Notice[]; unread_count: number; has_more: boolean };
+type Summary = { newest_id: string | null; unread_count: number };
 
 const seenByUser = new Map<string, string>();
 const soundKey = (id: string) => `books2-notification-sound:${id}`;
@@ -31,6 +32,10 @@ export default function NotificationBell() {
   const userId = useRef<string | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const requestVersion = useRef(0);
+  const inboxRef = useRef<Inbox | null>(null);
+  const openRef = useRef(false);
+
+  useEffect(() => { openRef.current = open; }, [open]);
 
   const refresh = useCallback(async () => {
     const version = ++requestVersion.current;
@@ -46,6 +51,7 @@ export default function NotificationBell() {
         if (notificationSoundEnabled(id) && document.visibilityState === "visible") playUiSound("notification");
       }
       seenByUser.set(id, newest || "");
+      inboxRef.current = next;
       setInbox(previous => {
         if (previous.items.length <= next.items.length) return next;
         const latestIds = new Set(next.items.map(item => item.id));
@@ -61,16 +67,35 @@ export default function NotificationBell() {
     }
   }, []);
 
+  const poll = useCallback(async () => {
+    if (openRef.current || !inboxRef.current) { await refresh(); return; }
+    const version = ++requestVersion.current;
+    try {
+      const summary = await fetchApi("/notifications/summary", { silentErrors: true }) as Summary;
+      if (version !== requestVersion.current || !userId.current) return;
+      const current = inboxRef.current;
+      if (!current || summary.newest_id !== (current.items[0]?.id || null) ||
+          summary.unread_count !== current.unread_count) {
+        await refresh();
+      } else {
+        setError(false);
+      }
+    } catch {
+      if (version === requestVersion.current) setError(true);
+    }
+  }, [refresh]);
+
   useEffect(() => {
     let active = true;
     getCurrentUser().then((user) => {
       if (!active) return;
       userId.current = user.id;
+      inboxRef.current = null;
       setInbox({ items: [], unread_count: 0, has_more: false });
       setSoundEnabled(localStorage.getItem(soundKey(user.id)) !== "off");
       void refresh();
     }).catch(() => { if (active) { setError(true); setLoading(false); } });
-    const timer = window.setInterval(() => { if (document.visibilityState === "visible" && userId.current) void refresh(); }, 20000);
+    const timer = window.setInterval(() => { if (document.visibilityState === "visible" && userId.current) void poll(); }, 20000);
     const onVisibility = () => { if (document.visibilityState === "visible" && userId.current) void refresh(); };
     const onChanged = () => { if (userId.current) void refresh(); };
     const onPointer = () => armUiSound();
@@ -93,7 +118,7 @@ export default function NotificationBell() {
       document.removeEventListener("mousedown", onOutside);
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [refresh]);
+  }, [poll, refresh]);
 
   const markRead = async (id: string) => {
     try { await fetchApi(`/notifications/${id}/read`, { method: "POST", invalidateSnapshots: false, silentErrors: true }); setInbox(previous => ({ ...previous, unread_count: Math.max(0, previous.unread_count - (previous.items.find(item => item.id === id)?.read_at ? 0 : 1)), items: previous.items.map(item => item.id === id ? { ...item, read_at: item.read_at || new Date().toISOString() } : item) })); await refresh(); }
@@ -128,7 +153,7 @@ export default function NotificationBell() {
 
   return <div className="relative" ref={root} dir="rtl">
     <button type="button" className="app-icon-button relative" aria-label={`الإشعارات${inbox.unread_count ? `: ${inbox.unread_count} غير مقروءة` : ""}`} aria-expanded={open}
-      onClick={() => { setOpen(!open); if (!open) void refresh(); }}>
+      onClick={() => { openRef.current = !open; setOpen(!open); if (!open) void refresh(); }}>
       <span className="material-symbols-outlined" aria-hidden="true">notifications</span>
       {inbox.unread_count > 0 && <span className="notification-count" aria-hidden="true">{inbox.unread_count > 99 ? "99+" : inbox.unread_count}</span>}
     </button>

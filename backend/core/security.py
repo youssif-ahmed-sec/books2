@@ -41,9 +41,9 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 
 # ── JWT ─────────────────────────────────────────────────
-def create_access_token(subject: str, extra_claims: dict = None) -> str:
+def create_access_token(subject: str, extra_claims: dict = None, expires_delta: timedelta = None) -> str:
     """Create a signed JWT token with the given subject (user_id as string)."""
-    expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     payload = {
         "sub": subject,
         "exp": expire,

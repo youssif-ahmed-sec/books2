@@ -1,13 +1,15 @@
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy import and_, func, or_, update
 from uuid import UUID
+from datetime import datetime, timedelta, timezone
 import jwt
 
 from core.security import access_token_hash, decode_access_token
 from database import get_db
-from models.user import RevokedAccessToken, User, RoleEnum
+from models.user import AuthSession, RevokedAccessToken, User, RoleEnum
 
 # This tells Swagger where to send login requests to get a token
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
@@ -16,6 +18,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_db),
+    request: Request = None,
 ) -> User:
     """
     Shared dependency: validate JWT and return the current active user.
@@ -46,17 +49,32 @@ async def get_current_user(
     except (ValueError, TypeError, AttributeError):
         raise credentials_exception
 
-    revoked = (await db.execute(select(RevokedAccessToken.token_hash).where(
-        RevokedAccessToken.token_hash == access_token_hash(token),
-    ))).scalar_one_or_none()
-    if revoked is not None:
-        raise credentials_exception
-
+    session_id = payload.get("sid")
+    if session_id:
+        try:
+            session_id = UUID(session_id)
+        except (ValueError, TypeError, AttributeError):
+            raise credentials_exception
+    else:
+        revoked = (await db.execute(select(RevokedAccessToken.token_hash).where(
+            RevokedAccessToken.token_hash == access_token_hash(token),
+        ))).scalar_one_or_none()
+        if revoked is not None:
+            raise credentials_exception
+    now = datetime.now(timezone.utc)
     query = select(User).where(
         User.id == parsed_user_id,
         User.is_active == True,
         User.is_deleted == False,
     )
+    if session_id:
+        query = query.join(AuthSession, AuthSession.user_id == User.id).where(
+            AuthSession.id == session_id,
+            or_(
+                and_(User.role == RoleEnum.CASHIER_ORDERS, AuthSession.created_at > now - timedelta(hours=24)),
+                and_(User.role != RoleEnum.CASHIER_ORDERS, AuthSession.last_activity_at > now - timedelta(hours=2)),
+            ),
+        )
     result = await db.execute(query)
     user = result.scalar_one_or_none()
 
@@ -67,6 +85,17 @@ async def get_current_user(
         )
     if user.role not in (RoleEnum.ADMIN, RoleEnum.INVENTORY_CONTROLLER, RoleEnum.CASHIER_ORDERS):
         raise HTTPException(status_code=401, detail="Account role must be reassigned by an admin")
+    if session_id:
+        if payload.get("role") != user.role.value:
+            raise credentials_exception
+        if request and request.headers.get("X-User-Activity") == "1" and user.role != RoleEnum.CASHIER_ORDERS:
+            result = await db.execute(update(AuthSession).where(
+                AuthSession.id == session_id, AuthSession.user_id == user.id,
+                AuthSession.last_activity_at > now - timedelta(hours=2),
+            ).values(last_activity_at=func.greatest(AuthSession.last_activity_at, now)))
+            if not result.rowcount:
+                raise credentials_exception
+            await db.commit()
     return user
 
 

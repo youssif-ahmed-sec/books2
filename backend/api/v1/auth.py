@@ -5,10 +5,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import delete, func, or_
 from sqlalchemy.exc import IntegrityError
-from uuid import UUID
-from datetime import datetime, timezone
+from uuid import UUID, uuid4
+from datetime import datetime, timedelta, timezone
 
-from models.user import User, RoleEnum, AuditLog, RevokedAccessToken
+from models.user import User, RoleEnum, AuditLog, RevokedAccessToken, AuthSession
 from schemas.auth import UserProfileResponse, UserSyncRequest, UserRegisterRequest, UserUpdateRequest, UserStatusRequest, TokenResponse
 from core.security import access_token_hash, decode_access_token, hash_password, verify_password, create_access_token
 from core.dependencies import get_current_user, require_admin
@@ -72,9 +72,17 @@ async def login(
     if user.role not in (RoleEnum.ADMIN, RoleEnum.INVENTORY_CONTROLLER, RoleEnum.CASHIER_ORDERS):
         raise HTTPException(status_code=403, detail="Account role must be reassigned by an admin")
 
+    now = datetime.now(timezone.utc)
+    await db.execute(delete(AuthSession).where(
+        AuthSession.created_at <= now - timedelta(hours=24),
+        AuthSession.last_activity_at <= now - timedelta(hours=2),
+    ))
+    session_id = uuid4()
+    db.add(AuthSession(id=session_id, user_id=user.id, created_at=now, last_activity_at=now))
     token = create_access_token(
         subject=str(user.id),
-        extra_claims={"role": user.role.value},
+        extra_claims={"role": user.role.value, "sid": str(session_id)},
+        expires_delta=timedelta(hours=24) if user.role == RoleEnum.CASHIER_ORDERS else timedelta(days=3650),
     )
 
     db.add(AuditLog(user_id=user.id, action="LOGIN", entity_type="User", entity_id=str(user.id)))
@@ -90,8 +98,12 @@ async def logout(
     token: str = Depends(logout_token),
 ):
     expires_at = datetime.fromtimestamp(decode_access_token(token)["exp"], timezone.utc)
+    session_id = decode_access_token(token).get("sid")
+    if session_id:
+        await db.execute(delete(AuthSession).where(AuthSession.id == UUID(session_id), AuthSession.user_id == current_user.id))
     await db.execute(delete(RevokedAccessToken).where(RevokedAccessToken.expires_at <= datetime.now(timezone.utc)))
-    db.add(RevokedAccessToken(token_hash=access_token_hash(token), user_id=current_user.id, expires_at=expires_at))
+    if not session_id:
+        db.add(RevokedAccessToken(token_hash=access_token_hash(token), user_id=current_user.id, expires_at=expires_at))
     db.add(AuditLog(user_id=current_user.id, action="LOGOUT", entity_type="User", entity_id=str(current_user.id)))
     await db.commit()
 

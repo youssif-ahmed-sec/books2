@@ -92,6 +92,13 @@ type ReplacementItem = {
   quantity: number;
 };
 
+function returnErrorMessage(error: unknown, fallback: string): string {
+  const message = errorMessage(error, fallback);
+  return /Insufficient stock for exchange item/i.test(message)
+    ? "المخزون لا يكفي للأصناف البديلة بعد إضافة المرتجعات. راجع الكميات."
+    : message;
+}
+
 type Preview = {
   payment_method: string;
   returned_value: number;
@@ -409,32 +416,19 @@ export default function ReturnsPage() {
     });
   }, [selectedLines, quantities]);
 
-  const replacementStockUsage = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const item of replacements) {
-      const unit = item.product.units.find(u => u.id === item.unit_id);
-      const factor = Number(unit?.conversion_factor || 1);
-      map.set(item.product.id, (map.get(item.product.id) || 0) + item.quantity * factor);
-    }
-    return map;
-  }, [replacements]);
-
   const replacementsValid = useMemo(() => {
     if (kind === "REFUND") return true;
     if (replacements.length === 0) return false;
     return replacements.every(item => {
       const unit = item.product.units.find(u => u.id === item.unit_id);
       const price = unit?.prices.find(p => p.price_level === item.price_level);
-      const availableStock = Number(item.product.current_stock || 0);
-      const requestedStock = replacementStockUsage.get(item.product.id) || 0;
       return (
         Boolean(unit && price && Number(price.price) > 0) &&
         item.quantity > 0 &&
-        Math.abs(item.quantity * 100 - Math.round(item.quantity * 100)) < 1e-6 &&
-        requestedStock <= availableStock
+        Math.abs(item.quantity * 100 - Math.round(item.quantity * 100)) < 1e-6
       );
     });
-  }, [kind, replacements, replacementStockUsage]);
+  }, [kind, replacements]);
 
   const canPreview = Boolean(
     eligibility &&
@@ -508,12 +502,6 @@ export default function ReturnsPage() {
 
     if (!targetUnit || !targetPrice) {
       setActionError(`لا يوجد سعر محدد للصنف (${product.name_ar}) بفئة ${priceLevelLabel[customerLevel] || customerLevel}`);
-      return;
-    }
-
-    const availableStock = Number(product.current_stock || 0);
-    if (availableStock <= 0) {
-      setActionError(`الصنف (${product.name_ar}) غير متوفر في المستودع الحالي`);
       return;
     }
 
@@ -650,7 +638,7 @@ export default function ReturnsPage() {
       }
     } catch (error) {
       if (sequence === reviewSequence.current) {
-        setActionError(errorMessage(error, "تعذر حساب تسوية العملية"));
+        setActionError(returnErrorMessage(error, "تعذر حساب تسوية العملية"));
       }
     } finally {
       if (sequence === reviewSequence.current) setBusy(false);
@@ -1201,13 +1189,12 @@ export default function ReturnsPage() {
                             const price =
                               unit?.prices.find(p => p.price_level === customerLevel && Number(p.price) > 0) ||
                               (isAdmin ? unit?.prices.find(p => Number(p.price) > 0) : undefined);
-                            const inStock = Number(product.current_stock || 0) > 0;
 
                             return (
                               <button
                                 key={product.id}
                                 type="button"
-                                disabled={busy || !inStock || !price}
+                                disabled={busy || !price}
                                 onClick={() => addReplacement(product)}
                                 className="flex w-full items-center justify-between gap-3 rounded-lg p-2.5 text-right text-sm hover:bg-white/10 disabled:opacity-40"
                               >
@@ -1239,16 +1226,11 @@ export default function ReturnsPage() {
                           const price = unit?.prices.find(p => p.price_level === item.price_level);
                           const unitPrice = Number(price?.price || 0);
                           const lineTotal = item.quantity * unitPrice;
-                          const availableStock = Number(item.product.current_stock || 0);
-                          const totalRequestedStock = replacementStockUsage.get(item.product.id) || 0;
-                          const isStockExceeded = totalRequestedStock > availableStock;
 
                           return (
                             <div
                               key={`${item.product.id}-${index}`}
-                              className={`rounded-xl border p-4 text-sm ${
-                                isStockExceeded ? "border-red-500/50 bg-red-500/10" : "border-white/10 bg-[#171717]"
-                              }`}
+                              className="rounded-xl border border-white/10 bg-[#171717] p-4 text-sm"
                             >
                               <div className="flex items-center justify-between gap-2">
                                 <strong className="text-white text-base">{item.product.name_ar}</strong>

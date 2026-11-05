@@ -30,7 +30,7 @@ async def management_events(request: Request, _user: User = Depends(require_admi
                             token: str = Depends(oauth2_scheme)):
     """Tell an authorized dashboard to refetch after a committed input change."""
     expires_at = decode_access_token(token)["exp"]
-    deadline = time.monotonic() + max(0, int(expires_at) - time.time())
+    deadline = time.monotonic() + min(7200, max(0, int(expires_at) - time.time()))
     try:
         queue = await dashboard_event_hub.subscribe()
     except (asyncpg.PostgresError, OSError, TimeoutError, RuntimeError):

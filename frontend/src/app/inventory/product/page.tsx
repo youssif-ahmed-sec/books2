@@ -62,7 +62,7 @@ function ProductDetails() {
     let active = true;
     Promise.all([
       fetchApi(`/products/${id}`),
-      fetchApi("/inventory/balances"),
+      fetchApi(`/inventory/balances?product_id=${encodeURIComponent(id)}`),
       fetchApi(`/inventory/transactions?product_id=${encodeURIComponent(id)}&limit=100&recent_days=90`),
       fetchApi(`/products/${id}/history`),
       fetchApi("/product-approvals/pending-product-ids"),

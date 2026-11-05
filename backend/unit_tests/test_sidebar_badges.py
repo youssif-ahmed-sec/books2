@@ -10,14 +10,15 @@ from models.user import RoleEnum
 
 
 @pytest.mark.asyncio
-async def test_badges_match_default_lists_and_user_scope():
+async def test_badges_count_pending_approvals_and_respect_user_scope():
     engine = create_async_engine("sqlite+aiosqlite://")
     owner, other = uuid4(), uuid4()
     async with engine.begin() as conn:
         await conn.execute(text("CREATE TABLE product_approvals (id TEXT PRIMARY KEY, requested_by TEXT, status TEXT)"))
         await conn.execute(text("CREATE TABLE purchase_documents (id TEXT PRIMARY KEY, requested_by TEXT, status TEXT)"))
         for table, rows in (
-            ("product_approvals", [(owner, "PENDING"), (owner, "APPROVED"), (other, "REJECTED")]),
+            ("product_approvals", [(owner, "PENDING"), (other, "PENDING"), (owner, "APPROVED"),
+                                   (owner, "CANCELLED"), (other, "REJECTED")]),
             ("purchase_documents", [(owner, "REQUESTED"), (owner, "APPROVED"),
                                     (owner, "RECEIVED"), (other, "ORDERED")]),
         ):
@@ -29,6 +30,6 @@ async def test_badges_match_default_lists_and_user_scope():
         controller = await get_badge_counts(db, SimpleNamespace(id=owner, role=RoleEnum.INVENTORY_CONTROLLER))
         cashier = await get_badge_counts(db, SimpleNamespace(id=other, role=RoleEnum.CASHIER_ORDERS))
     await engine.dispose()
-    assert admin == {"product_approvals": 3, "purchases": 3}
-    assert controller == {"product_approvals": 2, "purchases": 2}
+    assert admin == {"product_approvals": 2, "purchases": 3}
+    assert controller == {"product_approvals": 1, "purchases": 2}
     assert cashier == {"product_approvals": 0, "purchases": 0}

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { fetchApi } from "@/lib/api";
 import { searchSection, sectionSearchHasSnapshot, sectionSearchLabel, type SectionSearchResult } from "@/lib/sectionSearch";
@@ -11,6 +11,7 @@ import NotificationBell from "@/components/NotificationBell";
 import { notifyError } from "@/lib/notifications";
 import { useTopNavSearchSlot } from "@/lib/topNavSearchPortal";
 import { useBadgeCounts } from "@/lib/badgeCounts";
+import { emptyBarcodeScanCapture, englishBarcodeFromScan, recordBarcodeScanKey } from "@/lib/barcodeScanner";
 
 interface TopNavProps { title: string }
 interface CurrentUser { email: string | null; username?: string | null; full_name?: string | null; role: string }
@@ -71,6 +72,8 @@ export default function TopNav({ title }: TopNavProps) {
   const [loggingOut, setLoggingOut] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
   const accountRef = useRef<HTMLDivElement>(null);
+  const barcodeScan = useRef(emptyBarcodeScanCapture());
+  const barcodeLookup = useRef(false);
   const badgeCounts = useBadgeCounts();
 
   const isApprovalsRoute = ["/purchases", "/product-approvals", "/count-approvals", "/approvals"].some(
@@ -150,6 +153,39 @@ export default function TopNav({ title }: TopNavProps) {
     }
   };
 
+  const openScannedProduct = async (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== "Enter" || (pathname !== "/inventory" && pathname !== "/inventory/product")) return;
+    const raw = event.currentTarget.value.trim();
+    const capture = barcodeScan.current;
+    const physicalValue = capture.value;
+    const elapsed = capture.lastAt - capture.firstAt;
+    const isFastAsciiScan = physicalValue.length >= 4 && performance.now() - capture.lastAt <= 250 &&
+      capture.maxGap <= 120 && elapsed / Math.max(1, physicalValue.length - 1) <= 80;
+    const code = englishBarcodeFromScan(capture, raw) ||
+      (isFastAsciiScan && /^[\x21-\x7e]{4,128}$/.test(physicalValue) ? physicalValue : null);
+    capture.value = "";
+    if (!code || barcodeLookup.current) return;
+    barcodeLookup.current = true;
+    event.preventDefault();
+    try {
+      const response = await fetchApi(`/products?is_bundle=false&search=${encodeURIComponent(code)}&limit=20`, { silentErrors: true }) as {
+        data?: Array<{ id: string; units?: Array<{ barcode?: string | null; prices?: Array<{ price?: string | number }> }> }>;
+      };
+      const matches = (response.data || []).filter(product => product.units?.some(unit =>
+        unit.barcode?.toUpperCase() === code.toUpperCase() &&
+        unit.prices?.some(price => Number.isFinite(Number(price.price)) && Number(price.price) > 0)));
+      if (matches.length === 1) {
+        setSearchOpen(false);
+        setQuery("");
+        router.push(`/inventory/product?id=${encodeURIComponent(matches[0].id)}`);
+      }
+    } catch {
+      // Keep the regular search results available when the exact lookup fails.
+    } finally {
+      barcodeLookup.current = false;
+    }
+  };
+
   return (
     <header className={`app-top-nav fixed left-8 right-[380px] top-8 ${overlaySearch ? "z-[130]" : "z-40"} flex min-h-[76px] items-center gap-4 lg:gap-6 rounded-full px-5 py-3 lg:px-9`}>
       {/* Right side: Title & Section Search */}
@@ -165,6 +201,10 @@ export default function TopNav({ title }: TopNavProps) {
           <span className="material-symbols-outlined text-xl app-muted" aria-hidden="true">search</span>
           <input type="search" value={query} disabled={!searchLabel}
             onChange={(event) => { setQuery(event.target.value); setSearchOpen(true); }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") { void openScannedProduct(event); return; }
+              if (!event.nativeEvent.isComposing) recordBarcodeScanKey(barcodeScan.current, event);
+            }}
             onFocus={() => setSearchOpen(true)} placeholder={searchLabel ? `ابحث عن ${searchLabel}...` : "لا توجد سجلات للبحث في هذا القسم"} aria-label={searchLabel ? `البحث عن ${searchLabel}` : "البحث غير متاح في هذا القسم"}
             className="app-hide-native-search-clear min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:opacity-60" />
           {query && <button type="button" onClick={() => { setQuery(""); setResults([]); }} aria-label="مسح البحث" className="app-muted text-xs hover:text-white">✕</button>}

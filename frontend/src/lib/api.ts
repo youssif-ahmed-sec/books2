@@ -1,5 +1,6 @@
 import { notifyError, notifyOffline } from "@/lib/notifications";
 import { clearSectionSnapshots } from "@/lib/sectionSnapshot";
+import { beginActivity, finishActivity } from "@/lib/sessionActivity";
 
 export const API_BASE_URL = "/api/v1";
 
@@ -14,9 +15,11 @@ export async function fetchApi(endpoint: string, options: FetchOptions = {}) {
 
   const requestHeaders = new Headers(headers);
   requestHeaders.set("Content-Type", "application/json");
+  let requestToken: string | null = null;
 
   if (requireAuth) {
     const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+    requestToken = token;
     if (token) {
       requestHeaders.set("Authorization", `Bearer ${token}`);
     } else {
@@ -29,6 +32,8 @@ export async function fetchApi(endpoint: string, options: FetchOptions = {}) {
   }
 
   const url = `${API_BASE_URL}${endpoint}`;
+  const activity = requireAuth ? beginActivity(requestToken) : null;
+  if (activity !== null) requestHeaders.set("X-User-Activity", "1");
   
   let response: Response;
   try {
@@ -37,6 +42,7 @@ export async function fetchApi(endpoint: string, options: FetchOptions = {}) {
       ...rest,
     });
   } catch (cause) {
+    finishActivity(requestToken, activity, false);
     if (typeof navigator !== "undefined" && !navigator.onLine) {
       if (!silentErrors) notifyOffline();
       throw new Error("انقطع الاتصال بالإنترنت. حاول مرة أخرى بعد عودة الاتصال.", { cause });
@@ -46,10 +52,11 @@ export async function fetchApi(endpoint: string, options: FetchOptions = {}) {
     throw new Error(message, { cause });
   }
 
+  finishActivity(requestToken, activity, response.ok);
   if (!response.ok) {
     if (!silentErrors && response.status >= 500) notifyError("حدث خطأ بالخادم. حاول مرة أخرى بعد قليل.");
     if (response.status === 401 && requireAuth) {
-      if (typeof window !== "undefined") {
+      if (typeof window !== "undefined" && localStorage.getItem("access_token") === requestToken) {
         localStorage.removeItem("access_token");
         clearSectionSnapshots();
         window.location.href = "/login";

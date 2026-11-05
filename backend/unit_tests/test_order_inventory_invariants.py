@@ -124,6 +124,77 @@ async def test_product_quantity_change_role_approval_and_stale_stock(database):
 
 
 @pytest.mark.asyncio
+async def test_exchange_tracks_deferred_difference_and_paid_ancestor_and_returned_stock(database):
+    user_id, warehouse_id, customer_id, old_id, new_id, old_unit, new_unit, bundle_id, bundle_unit = [uuid4() for _ in range(9)]
+    async with database() as db:
+        db.add_all([
+            User(id=user_id, role=RoleEnum.ADMIN), Warehouse(id=warehouse_id, name="Main"),
+            Customer(id=customer_id, name="Customer", balance=0, credit_limit=1000),
+            Product(id=old_id, sku="EX-OLD", name_en="Old", name_ar="قديم", base_unit="Piece"),
+            Product(id=new_id, sku="EX-NEW", name_en="New", name_ar="جديد", base_unit="Piece"),
+            Product(id=bundle_id, sku="EX-BUNDLE", name_en="Bundle", name_ar="باقة", base_unit="Piece", is_bundle=True),
+        ])
+        await db.flush()
+        db.add_all([
+            CashShift(user_id=user_id, opening_cash=0, status="OPEN"),
+            ProductUnit(id=old_unit, product_id=old_id, unit_name="Piece", conversion_factor=1),
+            ProductUnit(id=new_unit, product_id=new_id, unit_name="Piece", conversion_factor=1),
+            ProductUnit(id=bundle_unit, product_id=bundle_id, unit_name="Piece", conversion_factor=1),
+            ProductBundleComponent(bundle_id=bundle_id, component_id=old_id, quantity=1),
+            InventoryBalance(product_id=old_id, warehouse_id=warehouse_id, current_stock=1),
+            InventoryBalance(product_id=new_id, warehouse_id=warehouse_id, current_stock=1),
+            ProductPrice(product_id=old_id, unit_id=old_unit, price_level="Retail", price=30),
+            ProductPrice(product_id=new_id, unit_id=new_unit, price_level="Retail", price=40),
+            ProductPrice(product_id=bundle_id, unit_id=bundle_unit, price_level="Retail", price=30),
+        ])
+        await db.commit()
+        sale = await OrderService.create_order(db, OrderCreate(
+            request_id=uuid4(), warehouse_id=warehouse_id, customer_id=customer_id,
+            items=[{"product_id": old_id, "unit_id": old_unit, "quantity": 1}],
+        ), user_id)
+        base = dict(order_id=sale["id"], warehouse_id=warehouse_id, kind="EXCHANGE", settlement_confirmed=True,
+                    lines=[{"order_item_id": sale["items"][0]["id"], "quantity": 1}])
+        same = SalesReturnCreate(**base, request_id=uuid4(), replacements=[{"product_id": old_id, "unit_id": old_unit, "quantity": 1}],
+                                 expected_refund_amount=0, expected_charge_amount=0)
+        assert (await ReturnService.preview(db, same, user_id))["replacement_value"] == 30
+        bundle = same.model_copy(update={"replacements": [same.replacements[0].model_copy(update={"product_id": bundle_id, "unit_id": bundle_unit})]})
+        assert (await ReturnService.preview(db, bundle, user_id))["replacement_value"] == 30
+        unavailable = same.model_copy(update={"replacements": [same.replacements[0].model_copy(update={"quantity": Decimal("2")})]})
+        with pytest.raises(ValueError, match="Insufficient stock"):
+            await ReturnService.preview(db, unavailable, user_id)
+        payload = SalesReturnCreate(**base, request_id=uuid4(), settlement_payment_method="Deferred Payment",
+                                    replacements=[{"product_id": new_id, "unit_id": new_unit, "quantity": 1}],
+                                    expected_refund_amount=0, expected_charge_amount=10)
+        record = await ReturnService.process(db, payload, user_id)
+        exchange = (await db.execute(select(Order).where(Order.id == record.exchange_order_id))).scalar_one()
+        assert exchange.deferred_remaining == 10
+        assert (await db.execute(select(Customer.balance).where(Customer.id == customer_id))).scalar_one() == 10
+        assert await ReturnService.effective_deferred_remaining(db, exchange) == 10
+        with pytest.raises(ValueError, match="customer debt"):
+            ReturnService._settlement_method(exchange, same.model_copy(update={"settlement_payment_method": "Cash"}),
+                                             await ReturnService.effective_deferred_remaining(db, exchange))
+        original = (await db.execute(select(Order).where(Order.id == sale["id"]))).scalar_one()
+        exchange.deferred_remaining = None
+        original.deferred_remaining = 10
+        await db.flush()
+        assert await ReturnService.effective_deferred_remaining(db, exchange) == 10
+        original.deferred_remaining = 0
+        customer = (await db.execute(select(Customer).where(Customer.id == customer_id))).scalar_one()
+        customer.balance = 0
+        await db.flush()
+        assert await ReturnService.effective_deferred_remaining(db, exchange) == 0
+        assert ReturnService._settlement_method(exchange, same.model_copy(update={"settlement_payment_method": "Cash"}),
+                                                await ReturnService.effective_deferred_remaining(db, exchange)) == "Cash"
+        item = (await db.execute(select(OrderItem).where(OrderItem.order_id == exchange.id))).scalar_one()
+        refund = SalesReturnCreate(request_id=uuid4(), order_id=exchange.id, warehouse_id=warehouse_id,
+                                   kind="REFUND", settlement_confirmed=True, settlement_payment_method="Cash",
+                                   lines=[{"order_item_id": item.id, "quantity": 1}],
+                                   expected_refund_amount=40, expected_charge_amount=0)
+        result = await ReturnService.process(db, refund, user_id)
+        assert result.refund_amount == 40
+
+
+@pytest.mark.asyncio
 async def test_discounted_return_preview_and_exchange_are_atomic_and_retry_safe(database):
     user_id, warehouse_id, old_id, new_id, old_unit, new_unit = [uuid4() for _ in range(6)]
     async with database() as db:

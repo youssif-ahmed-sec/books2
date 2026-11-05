@@ -272,6 +272,7 @@ async def get_inventory_balances(
     warehouse_id: UUID = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_inventory_access),
+    product_id: UUID = None,
 ):
     """
     Get all inventory balances, optionally filtered by warehouse, including product and warehouse names.
@@ -283,6 +284,8 @@ async def get_inventory_balances(
     )
     if warehouse_id:
         query = query.where(InventoryBalance.warehouse_id == warehouse_id)
+    if product_id:
+        query = query.where(InventoryBalance.product_id == product_id)
         
     result = await db.execute(query)
     rows = result.all()
