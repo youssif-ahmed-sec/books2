@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchApi } from "@/lib/api";
 import { getCurrentUser } from "@/lib/currentUser";
 import { armUiSound, notificationSoundEnabled, playUiSound, previewNotificationSound } from "@/lib/uiSounds";
-import { NOTIFICATIONS_CHANGED_EVENT } from "@/lib/notificationEvents";
+import { NOTIFICATION_NAVIGATE_EVENT, NOTIFICATIONS_CHANGED_EVENT } from "@/lib/notificationEvents";
 
 type Notice = {
   id: string;
@@ -23,6 +24,7 @@ const seenByUser = new Map<string, string>();
 const soundKey = (id: string) => `books2-notification-sound:${id}`;
 
 export default function NotificationBell() {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [inbox, setInbox] = useState<Inbox>({ items: [], unread_count: 0, has_more: false });
   const [loading, setLoading] = useState(true);
@@ -167,7 +169,7 @@ export default function NotificationBell() {
       {error && <p role="alert" className="rounded-lg px-3 py-2 text-sm text-red-300">تعذر تحديث الإشعارات. <button type="button" className="underline" onClick={() => void refresh()}>إعادة المحاولة</button></p>}
       <div className="max-h-80 space-y-1 overflow-y-auto">
         {loading ? <div className="space-y-2" role="status" aria-label="جاري تحميل الإشعارات"><span className="sr-only">جاري تحميل الإشعارات</span>{[0, 1, 2].map(index => <div key={index} aria-hidden="true" className="space-y-2 rounded-xl p-3"><span className="app-skeleton h-4 w-32" /><span className="app-skeleton h-3 w-full" /></div>)}</div> : inbox.items.length ? inbox.items.map((item) =>
-          <Link key={item.id} href={item.href} onClick={() => { setOpen(false); if (!item.read_at) void markRead(item.id); }} className={`notification-item block rounded-xl p-3 ${item.read_at ? "opacity-70" : ""}`}>
+          <Link key={item.id} href={item.href} onClick={() => { setOpen(false); if (!item.read_at) void markRead(item.id); window.dispatchEvent(new CustomEvent(NOTIFICATION_NAVIGATE_EVENT, { detail: { href: item.href } })); router.refresh(); }} className={`notification-item block rounded-xl p-3 ${item.read_at ? "opacity-70" : ""}`}>
             <span className="flex items-start justify-between gap-2"><strong className="text-sm">{item.title}</strong>{!item.read_at && <i className="mt-1 h-2 w-2 shrink-0 rounded-full bg-primary" aria-label="غير مقروء" />}</span>
             <span className="app-muted mt-1 block text-sm leading-6">{item.message}</span>
             <time className="app-muted mt-1 block text-xs" dateTime={item.created_at}>{new Date(item.created_at).toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}</time>

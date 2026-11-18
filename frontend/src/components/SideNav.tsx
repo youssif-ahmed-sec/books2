@@ -55,9 +55,38 @@ export default function SideNav() {
 
   const [user, setUser] = useState<{ email: string | null; username?: string | null; role: string } | null>(() => cachedCurrentUser());
   const [mobileMenu, setMobileMenu] = useState({ path: pathname, open: false });
+  const [desktopCollapsed, setDesktopCollapsed] = useState(false);
   const mobileOpen = mobileMenu.path === pathname && mobileMenu.open;
   const scrollRef = useRef<HTMLDivElement>(null);
   const badgeCounts = useBadgeCounts();
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      try {
+        const saved = localStorage.getItem("sidebar_collapsed") === "1";
+        setDesktopCollapsed(saved);
+        if (saved) document.documentElement.dataset.sidebarCollapsed = "true";
+        else delete document.documentElement.dataset.sidebarCollapsed;
+      } catch {
+        // Ignore storage errors
+      }
+    }, 0);
+    return () => {
+      window.clearTimeout(timer);
+      delete document.documentElement.dataset.sidebarCollapsed;
+    };
+  }, []);
+
+  const toggleDesktopCollapsed = (collapsed: boolean) => {
+    setDesktopCollapsed(collapsed);
+    try {
+      localStorage.setItem("sidebar_collapsed", collapsed ? "1" : "0");
+    } catch {
+      // Ignore storage errors
+    }
+    if (collapsed) document.documentElement.dataset.sidebarCollapsed = "true";
+    else delete document.documentElement.dataset.sidebarCollapsed;
+  };
 
   useLayoutEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = rememberedNavScrollTop;
@@ -114,13 +143,17 @@ export default function SideNav() {
       ? badgeCounts.product_approvals
       : 0;
 
+    const label = warehouseOnlyMode && item.href === "/stock-operations" ? "الجرد" : item.label;
+
     return (
       <Link
         key={item.href}
         href={item.href}
         onClick={() => setMobileMenu({ path: pathname, open: false })}
         aria-current={isActive ? "page" : undefined}
-        className={`flex items-center gap-3 rounded-full px-4 py-2.5 text-sm font-bold transition-colors ${
+        aria-label={count > 0 ? `${label} · ${count}` : label}
+        title={count > 0 ? `${label} · ${count}` : label}
+        className={`app-side-link flex items-center gap-3 rounded-full px-4 py-2.5 text-sm font-bold transition-colors ${
           isActive ? "bg-primary text-white shadow-md shadow-primary/20" : "text-[#e2bfb0] hover:bg-white/5"
         }`}
       >
@@ -131,10 +164,10 @@ export default function SideNav() {
         >
           {item.icon}
         </span>
-        <span>{warehouseOnlyMode && item.href === "/stock-operations" ? "الجرد" : item.label}</span>
+        <span className="app-side-label">{label}</span>
         {count > 0 && (
           <span
-            className={`mr-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-bold ${
+            className={`app-side-badge mr-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-bold ${
               isActive ? "bg-white text-primary" : "bg-primary text-white shadow-sm"
             }`}
           >
@@ -170,9 +203,9 @@ export default function SideNav() {
 
       {/* Side Navigation Drawer */}
       <aside
-        className={`app-side-nav fixed bottom-0 right-0 top-0 z-[60] w-[min(22rem,88vw)] overflow-hidden rounded-none transition-transform duration-200 xl:bottom-4 xl:right-4 xl:top-4 xl:w-72 xl:translate-x-0 xl:rounded-2xl ${
+        className={`app-side-nav fixed bottom-0 right-0 top-0 z-[60] w-[min(22rem,88vw)] overflow-hidden rounded-none transition-transform duration-200 xl:bottom-4 xl:right-4 xl:top-4 xl:w-72 xl:rounded-2xl ${
           mobileOpen ? "translate-x-0" : "translate-x-full"
-        }`}
+        } xl:translate-x-0`}
       >
         <div
           ref={scrollRef}
@@ -182,14 +215,25 @@ export default function SideNav() {
           className="h-full w-full overflow-y-auto overflow-x-hidden custom-scrollbar"
           dir="ltr"
         >
-          <div className="flex min-h-full flex-col p-6" dir="rtl">
+          <div className="app-side-content relative flex min-h-full flex-col p-6" dir="rtl">
+            {/* Desktop Collapse / Close Button */}
+            <button
+              type="button"
+              aria-label={desktopCollapsed ? "توسيع القائمة الجانبية" : "طي القائمة الجانبية"}
+              aria-expanded={!desktopCollapsed}
+              title={desktopCollapsed ? "توسيع القائمة الجانبية" : "طي القائمة الجانبية"}
+              onClick={() => toggleDesktopCollapsed(!desktopCollapsed)}
+              className="app-side-toggle absolute left-4 top-4 z-10 hidden h-8 w-8 items-center justify-center rounded-full border border-current/15 app-muted transition-colors hover:bg-primary/10 hover:text-primary xl:flex"
+            >
+              <span aria-hidden="true" className="material-symbols-outlined text-[18px]">{desktopCollapsed ? "chevron_left" : "chevron_right"}</span>
+            </button>
             {/* Logo & Brand Header */}
-            <div className="mb-7 flex flex-col items-center gap-3 text-center">
+            <div className="app-side-brand mb-7 flex flex-col items-center gap-3 text-center">
               <div className="relative">
                 <div className="absolute -inset-4 bg-primary/10 blur-3xl rounded-full" />
                 <BrandMark />
               </div>
-              <div>
+              <div className="app-side-brand-text">
                 <h1 className="text-2xl font-bold text-primary tracking-tight">مكتبة سعود الشافعي</h1>
                 <p className="app-muted text-sm">{warehouseOnlyMode ? "إدارة المخازن" : "إدارة المكتبة والمبيعات"}</p>
               </div>
@@ -227,19 +271,21 @@ export default function SideNav() {
             </nav>
 
             {/* Footer: Settings */}
-            <div className="mt-auto pt-6 flex flex-col gap-4">
+            <div className="app-side-footer mt-auto pt-6 flex flex-col gap-4">
               {user?.role === "ADMIN" && (
                 <Link
                   href="/settings"
                   onClick={() => setMobileMenu({ path: pathname, open: false })}
-                  className={`flex items-center gap-4 rounded-full px-4 py-3 transition-all font-bold ${
+                  aria-label="الإعدادات"
+                  title="الإعدادات"
+                  className={`app-side-link flex items-center gap-4 rounded-full px-4 py-3 transition-all font-bold ${
                     pathname === "/settings"
                       ? "bg-primary text-white shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-[0.98]"
                       : "text-[#e2bfb0] hover:bg-white/5 hover:-translate-x-1"
                   }`}
                 >
                   <span className="material-symbols-outlined">settings</span>
-                  <span>الإعدادات</span>
+                  <span className="app-side-label">الإعدادات</span>
                 </Link>
               )}
             </div>

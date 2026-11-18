@@ -546,10 +546,47 @@ function EditSupplierPanel({ supplierId, onClose, onSuccess, isAdmin, initialTab
           {activeTab === "statement" && detail && (
             <div>
               <button type="button" className="app-secondary-button mb-3 flex items-center gap-2" onClick={() => {
-                const lines = statementItems.map(item => item.kind === "payment"
-                  ? `${new Date(item.date).toLocaleDateString("ar-EG", { timeZone: "Africa/Cairo" })} · دفعة · −${Number(item.payment.amount).toFixed(2)} ج.م`
-                  : `${new Date(item.date).toLocaleDateString("ar-EG", { timeZone: "Africa/Cairo" })} · ${item.entry.entry_type === "DEBT" ? "مديونية" : "تصحيح"} · ${item.entry.note} · ${item.entry.entry_type === "DEBT" ? "+" : "−"}${Number(item.entry.amount).toFixed(2)} ج.م`);
-                const message = [`كشف حساب ${detail.name}`, `المديونية السابقة: ${Number(detail.opening_balance || 0).toFixed(2)} ج.م`, `استلامات قديمة محسوبة: ${Number(detail.total_purchases).toFixed(2)} ج.م`, ...lines, `الرصيد الحالي: ${detail.balance === null ? "غير معروف · كشف الحساب غير مكتمل" : `${Number(detail.balance).toFixed(2)} ج.م`}`].join("\n");
+                const nowStr = new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+                const lines = statementItems.map((item, idx) => {
+                  const dt = new Date(item.date).toLocaleString("ar-EG", { timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+                  if (item.kind === "payment") {
+                    const p = item.payment;
+                    const method = paymentMethodLabel[p.payment_method] || p.payment_method;
+                    const source = p.payment_method === "Cash" ? (p.cash_source === "OUTSIDE_SHIFT" ? " · خارج الوردية" : " · من الوردية") : "";
+                    const ref = p.reference_number ? ` | مرجع: ${p.reference_number}` : "";
+                    const alloc = p.allocations?.length ? `موزعة على ${p.allocations.length} مديونية` : "على الرصيد العام";
+                    const notePart = p.notes ? `\n   ملاحظة: ${p.notes}` : "";
+                    return `${idx + 1}. ${dt}\n   دفعة سداد (${method}${source})${ref}\n   المبلغ: −${Number(p.amount).toFixed(2)} ج.م | التوزيع: ${alloc}${notePart}`;
+                  }
+                  const e = item.entry;
+                  const typeLabel = e.entry_type === "DEBT" ? "مديونية" : "تصحيح مديونية";
+                  const sign = e.entry_type === "DEBT" ? "+" : "−";
+                  const ref = e.reference_number ? ` | مرجع: ${e.reference_number}` : "";
+                  const due = e.due_date ? ` | تاريخ الاستحقاق: ${e.due_date}` : "";
+                  const remaining = e.entry_type === "DEBT"
+                    ? `\n   المسدد: ${Number(e.allocated_amount || 0).toFixed(2)} ج.م | المتبقي: ${Math.max(0, Number(e.amount) - Number(e.allocated_amount || 0)).toFixed(2)} ج.م`
+                    : "";
+                  return `${idx + 1}. ${dt}\n   ${typeLabel}: ${e.note}${ref}${due}\n   المبلغ: ${sign}${Number(e.amount).toFixed(2)} ج.م${remaining}`;
+                });
+                const message = [
+                  "*مكتبة سعود الشافعي*",
+                  `*كشف حساب تفصيلي للمورد: ${detail.name}*`,
+                  `تاريخ الإصدار: ${nowStr}`,
+                  detail.phone ? `الهاتف: ${detail.phone}` : "",
+                  detail.address ? `العنوان: ${detail.address}` : "",
+                  detail.tax_number ? `الرقم الضريبي: ${detail.tax_number}` : "",
+                  "",
+                  "*ملخص الحساب:*",
+                  `المديونية السابقة (الافتتاحية): ${Number(detail.opening_balance || 0).toFixed(2)} ج.م`,
+                  `استلامات قديمة محسوبة: ${Number(detail.total_purchases).toFixed(2)} ج.م`,
+                  `إجمالي المديونيات اليدوية: ${Number(detail.total_manual_debt || 0).toFixed(2)} ج.م`,
+                  `إجمالي المدفوعات المسددة: ${Number(detail.total_payments || 0).toFixed(2)} ج.م`,
+                  `عدد الحركات: ${statementItems.length}`,
+                  `*الرصيد الحالي: ${detail.balance === null ? "غير معروف · كشف الحساب غير مكتمل" : `${Number(detail.balance).toFixed(2)} ج.م`}*`,
+                  "",
+                  lines.length > 0 ? "*تفاصيل الحركات:*" : "لا توجد حركات مالية مسجلة بعد.",
+                  ...lines,
+                ].filter((line, index, arr) => line !== "" || (index > 0 && arr[index - 1] !== "")).join("\n");
                 if (!openWhatsApp(detail.phone, message)) notifyError("رقم المورد غير متاح أو غير صالح للواتساب");
               }}><WhatsAppIcon /> إرسال كشف الحساب</button>
               <div className="mb-3 flex flex-wrap gap-2" aria-label="تصفية كشف الحساب">

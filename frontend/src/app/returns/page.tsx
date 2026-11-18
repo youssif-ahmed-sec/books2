@@ -11,7 +11,7 @@ import { errorMessage } from "@/lib/errors";
 import { getUserRole } from "@/utils/auth";
 import { readSectionSnapshot, writeSectionSnapshot } from "@/lib/sectionSnapshot";
 import { printSalesReturnReceipt } from "@/lib/localPrint";
-import { emptyBarcodeScanCapture, englishBarcodeFromScan, recordBarcodeScanKey } from "@/lib/barcodeScanner";
+import { emptyBarcodeScanCapture, englishBarcodeFromArabicLayout, englishBarcodeFromScan, recordBarcodeScanKey } from "@/lib/barcodeScanner";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -208,6 +208,7 @@ export default function ReturnsPage() {
   const reviewSequence = useRef(0);
   const scanKeys = useRef(emptyBarcodeScanCapture());
   const invoiceScanKeys = useRef(emptyBarcodeScanCapture());
+  const skipInvoiceAutoSelectRef = useRef(false);
 
   useEffect(() => {
     // Load recent returnable orders for quick selection (available to Admin and Cashier)
@@ -225,9 +226,17 @@ export default function ReturnsPage() {
   // Debounced search for invoices by number, name, phone, or barcode
   useEffect(() => {
     const q = orderFilter.trim();
-    if (!q) return;
+    if (!q || skipInvoiceAutoSelectRef.current) return;
+    const mappedBarcode = englishBarcodeFromArabicLayout(q)?.toUpperCase();
+    const barcodeCandidate = mappedBarcode || q.toUpperCase();
     let active = true;
     const timer = window.setTimeout(() => {
+      if (/^(?:UNIT|INV)-[A-F0-9]{8}$/.test(barcodeCandidate)) {
+        if (skipInvoiceAutoSelectRef.current) return;
+        skipInvoiceAutoSelectRef.current = true;
+        void lookupOrder(barcodeCandidate);
+        return;
+      }
       fetchApi(`/returns/search?q=${encodeURIComponent(q)}&limit=10`, { silentErrors: true })
         .then((data: ReturnableSearchResult[]) => {
           if (!active) return;
@@ -241,7 +250,7 @@ export default function ReturnsPage() {
         .finally(() => {
           if (active) setInvoiceSearching(false);
         });
-    }, 200);
+    }, 220);
 
     return () => {
       active = false;
@@ -297,17 +306,33 @@ export default function ReturnsPage() {
     if (kind !== "EXCHANGE" || !search.trim() || !eligibility) {
       return;
     }
+    const raw = search.trim();
+    const mapped = englishBarcodeFromArabicLayout(raw)?.toUpperCase();
+    const effectiveQuery = mapped && /^(?:UNIT|INV)-[A-F0-9]{8}$/.test(mapped) ? mapped : raw;
     let active = true;
     const timer = window.setTimeout(() => {
       setSearching(true);
       setSearchError("");
       fetchApi(
-        `/pos/search?q=${encodeURIComponent(search.trim())}&warehouse_id=${encodeURIComponent(
+        `/pos/search?q=${encodeURIComponent(effectiveQuery)}&warehouse_id=${encodeURIComponent(
           eligibility.warehouse_id
         )}&limit=20`
       )
         .then((data: Product[]) => {
           if (!active) return;
+          const needle = effectiveQuery.toUpperCase();
+          const exactMatches = data.filter(
+            p =>
+              p.barcode?.toUpperCase() === needle ||
+              p.sku?.toUpperCase() === needle ||
+              p.units.some(u => u.barcode?.toUpperCase() === needle)
+          );
+          if (exactMatches.length === 1) {
+            const product = exactMatches[0];
+            const unit = product.units.find(u => u.barcode?.toUpperCase() === needle);
+            addReplacement(product, unit?.id);
+            return;
+          }
           setProducts(data);
           if (data.length === 0) {
             setSearchError("لا توجد نتائج مطابقة في هذا المستودع");
@@ -358,6 +383,7 @@ export default function ReturnsPage() {
   async function lookupOrder(explicitNumber?: string) {
     const rawNumber = (explicitNumber ?? orderFilter).trim();
     if (!rawNumber || busy || lookingUp) return;
+    if (/^(?:UNIT|INV)-[A-F0-9]{8}$/i.test(rawNumber)) skipInvoiceAutoSelectRef.current = true;
     setInvoiceSearchOpen(false);
 
     // If exact match exists in live results, select directly!
@@ -367,11 +393,6 @@ export default function ReturnsPage() {
     if (exact) {
       setOrderFilter(String(exact.public_number));
       selectOrder(exact.id);
-      return;
-    }
-    if (invoiceSearchResults.length === 1 && !rawNumber.includes(" ")) {
-      setOrderFilter(String(invoiceSearchResults[0].public_number));
-      selectOrder(invoiceSearchResults[0].id);
       return;
     }
 
@@ -484,11 +505,12 @@ export default function ReturnsPage() {
     }
   }
 
-  function addReplacement(product: Product) {
+  function addReplacement(product: Product, scannedUnitId?: string) {
     if (busy) return;
     const customerLevel = eligibility?.customer_price_level || "Retail";
 
     let targetUnit = product.units.find(u =>
+      (!scannedUnitId || u.id === scannedUnitId) &&
       u.prices.some(p => p.price_level === customerLevel && Number(p.price) > 0)
     );
     let targetPrice = targetUnit?.prices.find(
@@ -496,7 +518,7 @@ export default function ReturnsPage() {
     );
 
     if (!targetUnit && isAdmin) {
-      targetUnit = product.units.find(u => u.prices.some(p => Number(p.price) > 0));
+      targetUnit = product.units.find(u => (!scannedUnitId || u.id === scannedUnitId) && u.prices.some(p => Number(p.price) > 0));
       targetPrice = targetUnit?.prices.find(p => Number(p.price) > 0);
     }
 
@@ -834,6 +856,7 @@ export default function ReturnsPage() {
                             }
                           }}
                           onChange={e => {
+                            skipInvoiceAutoSelectRef.current = false;
                             setOrderFilter(e.target.value);
                             setInvoiceSearchOpen(true);
                           }}
@@ -893,6 +916,7 @@ export default function ReturnsPage() {
                                   key={item.id}
                                   type="button"
                                   onClick={() => {
+                                    skipInvoiceAutoSelectRef.current = true;
                                     setOrderFilter(String(item.public_number));
                                     selectOrder(item.id);
                                     setInvoiceSearchOpen(false);
@@ -1164,16 +1188,31 @@ export default function ReturnsPage() {
                         placeholder="ابحث باسم الصنف أو امسح الباركود..."
                         value={search}
                         disabled={busy}
-                        onChange={e => setSearch(e.target.value)}
+                        onChange={e => { setProducts([]); setSearch(e.target.value); }}
                         onKeyDown={e => {
                           if (e.key !== "Enter") {
                             if (!e.nativeEvent.isComposing) recordBarcodeScanKey(scanKeys.current, e);
                             return;
                           }
-                          const code = englishBarcodeFromScan(scanKeys.current, e.currentTarget.value.trim());
+                          e.preventDefault();
+                          const raw = e.currentTarget.value.trim();
+                          const code = englishBarcodeFromScan(scanKeys.current, raw);
                           if (code) {
-                            e.preventDefault();
                             setSearch(code);
+                            return;
+                          }
+                          const needle = raw.toUpperCase();
+                          const exactMatch = products.find(
+                            p =>
+                              p.barcode?.toUpperCase() === needle ||
+                              p.sku?.toUpperCase() === needle ||
+                              p.units.some(u => u.barcode?.toUpperCase() === needle)
+                          );
+                          if (exactMatch) {
+                            const unit = exactMatch.units.find(u => u.barcode?.toUpperCase() === needle);
+                            addReplacement(exactMatch, unit?.id);
+                          } else if (products.length === 1) {
+                            addReplacement(products[0]);
                           }
                         }}
                       />

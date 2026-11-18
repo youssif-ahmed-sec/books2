@@ -502,8 +502,49 @@ export default function CustomersPage() {
                     <strong className="text-base">{formatCurrency(statement.opening_balance)}</strong>
                   </div>
                   <button type="button" className="app-secondary-button flex items-center gap-2" onClick={() => {
-                    const lines = statement.entries.map(entry => `${new Date(entry.at).toLocaleDateString("ar-EG", { timeZone: "Africa/Cairo" })} · ${entry.kind === "invoice" ? "فاتورة بيع" : entry.kind === "correction" ? "تعديل فاتورة" : entry.kind === "return" ? "استرجاع أو استبدال" : entry.kind === "refund" ? "رد مبلغ" : "دفعة"}${entry.public_number ? ` · ${entry.public_number}` : ""} · ${entry.direction === "debit" ? "+" : "−"}${formatCurrency(entry.amount)} · الرصيد ${formatCurrency(entry.balance)}`);
-                    const message = [`كشف حساب ${profileCustomer.name}`, `الرصيد السابق: ${formatCurrency(statement.opening_balance)}`, ...lines, `الرصيد الحالي: ${formatCurrency(statement.closing_balance)}`].join("\n");
+                    const kindLabels: Record<string, string> = {
+                      invoice: "فاتورة بيع",
+                      correction: "تعديل فاتورة",
+                      return: "استرجاع أو استبدال",
+                      refund: "رد مبلغ",
+                      payment: "دفعة تحصيل",
+                    };
+                    const methodLabels: Record<string, string> = {
+                      Cash: "نقدي",
+                      Instapay: "إنستا باي",
+                      Wallet: "محفظة إلكترونية",
+                      Credit: "آجل",
+                    };
+                    const totalDebit = statement.entries.filter(e => e.direction === "debit").reduce((s, e) => s + Number(e.amount || 0), 0);
+                    const totalCredit = statement.entries.filter(e => e.direction === "credit").reduce((s, e) => s + Number(e.amount || 0), 0);
+                    const nowStr = new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+                    const lines = statement.entries.map((entry, idx) => {
+                      const dt = new Date(entry.at).toLocaleString("ar-EG", { timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+                      const kindText = kindLabels[entry.kind] || entry.kind;
+                      const refText = entry.public_number ? ` رقم #${entry.public_number}` : "";
+                      const methodText = entry.method ? ` (${methodLabels[entry.method] || entry.method})` : "";
+                      const dirText = entry.direction === "debit" ? "مدين (+)" : "دائن (−)";
+                      return `${idx + 1}. ${dt}\n   ${kindText}${refText}${methodText}\n   ${dirText}: ${formatCurrency(entry.amount)} | الرصيد بعد العملية: ${formatCurrency(entry.balance)}`;
+                    });
+                    const message = [
+                      "*مكتبة سعود الشافعي*",
+                      `*كشف حساب تفصيلي للعميل: ${profileCustomer.name}*`,
+                      `تاريخ الإصدار: ${nowStr}`,
+                      profileCustomer.phone ? `الهاتف: ${profileCustomer.phone}` : "",
+                      profileCustomer.customer_type ? `التصنيف: ${customerTypeLabels[profileCustomer.customer_type] || profileCustomer.customer_type}` : "",
+                      profileCustomer.city ? `المدينة: ${profileCustomer.city}` : "",
+                      Number(profileCustomer.credit_limit || 0) > 0 ? `الحد الائتماني: ${formatCurrency(profileCustomer.credit_limit)}` : "",
+                      "",
+                      "*ملخص الحساب:*",
+                      `الرصيد السابق (الافتتاحي): ${formatCurrency(statement.opening_balance)}`,
+                      `إجمالي الإضافات (مدين): ${formatCurrency(totalDebit)}`,
+                      `إجمالي المدفوعات والمرتجعات (دائن): ${formatCurrency(totalCredit)}`,
+                      `عدد الحركات: ${statement.entries.length}`,
+                      `*الرصيد الحالي المستحق: ${formatCurrency(statement.closing_balance)}*`,
+                      "",
+                      lines.length > 0 ? "*تفاصيل الحركات:*" : "لا توجد حركات مسجلة.",
+                      ...lines,
+                    ].filter((line, index, arr) => line !== "" || (index > 0 && arr[index - 1] !== "")).join("\n");
                     if (!openWhatsApp(profileCustomer.whatsapp_number || profileCustomer.phone, message)) notifyError("رقم العميل غير متاح أو غير صالح للواتساب");
                   }}><WhatsAppIcon /> إرسال كشف الحساب</button>
                   <button

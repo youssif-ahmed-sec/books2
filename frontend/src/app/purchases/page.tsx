@@ -44,19 +44,42 @@ function cleanWhatsAppPhone(phone?: string | null): string {
 }
 
 function buildPurchaseWhatsAppMessage(doc: Document, supplierName?: string): string {
-  const items = doc.lines
-    .map(line => `• ${line.product_name}: ${moneylessNumber(Number(line.quantity))} ${line.unit_name}`)
-    .join("\n");
-  const notePart = doc.note ? `\nملاحظة: ${doc.note}\n` : "";
-  return `السلام عليكم ورحمة الله وبركاته
-السادة ${supplierName || doc.supplier_name} المحترمين
-
-نود إرسال طلب الشراء رقم ${doc.public_number} المعتمد من طرفنا:
-
-الأصناف المطلوبة:
-${items}
-${notePart}
-شاكرين ومقدرين حسن تعاونكم معنا.`;
+  const dateStr = doc.created_at
+    ? new Date(doc.created_at).toLocaleString("ar-EG", { timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+    : "";
+  const items = doc.lines.map((line, idx) => {
+    const qty = Number(line.quantity || 0);
+    const factor = Number(line.conversion_factor || 1);
+    const baseQty = Number(line.base_quantity || qty * factor);
+    const receivedBase = Number(line.received_base_quantity || 0);
+    const baseDetail = factor > 1 ? ` (إجمالي ${moneylessNumber(baseQty)} ${line.base_unit_name})` : "";
+    const receivedDetail = receivedBase > 0
+      ? `\n   المستلم: ${moneylessNumber(receivedBase)} ${line.base_unit_name} | المتبقي: ${moneylessNumber(Math.max(0, baseQty - receivedBase))} ${line.base_unit_name}`
+      : "";
+    return `${idx + 1}. *${line.product_name}*\n   الكمية المطلوبة: ${moneylessNumber(qty)} ${line.unit_name}${baseDetail}${receivedDetail}`;
+  }).join("\n");
+  const receiptsPart = doc.receipts?.length
+    ? `\n*سجل الاستلامات (${doc.receipts.length}):*\n` + doc.receipts.map((r, i) =>
+      `${i + 1}. إيصال استلام رقم #${r.public_number} بتاريخ ${new Date(r.created_at).toLocaleDateString("ar-EG", { timeZone: "Africa/Cairo" })}`
+    ).join("\n")
+    : "";
+  const notePart = doc.note ? `\n*ملاحظات:* ${doc.note}\n` : "";
+  return [
+    "*مكتبة سعود الشافعي*",
+    "السلام عليكم ورحمة الله وبركاته",
+    `السادة *${supplierName || doc.supplier_name}* المحترمين`,
+    "",
+    `*تفاصيل أمر الشراء رقم #${doc.public_number}*`,
+    dateStr ? `تاريخ الطلب: ${dateStr}` : "",
+    `الحالة: ${statusLabel[doc.status] || doc.status}`,
+    `عدد الأصناف: ${doc.lines.length}`,
+    "",
+    "*الأصناف المطلوبة:*",
+    items,
+    receiptsPart,
+    notePart,
+    "شاكرين ومقدرين حسن تعاونكم معنا.",
+  ].filter((line, index, arr) => line !== "" || (index > 0 && arr[index - 1] !== "")).join("\n");
 }
 
 function PurchaseEditor({ initial, suppliers, onClose, onSaved }: {

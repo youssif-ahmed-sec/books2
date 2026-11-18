@@ -158,7 +158,7 @@ interface PosDraft {
 }
 
 interface HeldCart { id: string; savedAt: number; draft: PosDraft }
-interface PendingCheckout { savedAt: number; draft: PosDraft; payload: CheckoutPayload }
+interface PendingCheckout { savedAt: number; draft: PosDraft; payload: CheckoutPayload; printReceipt?: boolean }
 
 const draftKey = (userId: string) => `pos-draft:${userId}`;
 const heldKey = (userId: string) => `pos-held:${userId}`;
@@ -240,6 +240,7 @@ export default function POSPage() {
   const [deliveryFee, setDeliveryFee] = useState("");
   const [saleCustomerName, setSaleCustomerName] = useState("");
   const [checkoutError, setCheckoutError] = useState("");
+  const [printReceipt, setPrintReceipt] = useState(true);
   const [heldCarts, setHeldCarts] = useState<HeldCart[]>([]);
   const [heldOpen, setHeldOpen] = useState(false);
   const [pendingCheckout, setPendingCheckout] = useState<PendingCheckout | null>(null);
@@ -1059,7 +1060,7 @@ export default function POSPage() {
     window.requestAnimationFrame(() => searchInput.current?.focus());
     latestPrintOrder.current = res.id;
     if (!printNow) {
-      setPrintStatus("تم التحقق من الفاتورة المسجلة. يمكنك إرسالها للطابعة عند الحاجة.");
+      setPrintStatus("يمكنك إرسال الفاتورة للطابعة عند الحاجة.");
       return;
     }
     setPrintStatus("جاري إرسال الفاتورة للطابعة...");
@@ -1140,7 +1141,7 @@ export default function POSPage() {
       }
       const sold = retry?.draft || { ...currentDraft(), cart: saleCart, selectedCustomer: saleCustomerId,
         saleCustomerName: resolvedCustomer?.name || saleCustomerName, checkoutRequest: checkoutRequest.current };
-      submitted = retry || { savedAt: timestamp(), draft: sold, payload };
+      submitted = retry || { savedAt: timestamp(), draft: sold, payload, printReceipt };
       if (!draftOwner.current) throw new Error("تعذر تحديد المستخدم. حدّث الصفحة قبل إتمام البيع.");
       sessionStorage.setItem(draftKey(draftOwner.current), JSON.stringify(sold));
       sessionStorage.setItem(attemptKey(draftOwner.current), JSON.stringify(submitted));
@@ -1148,7 +1149,7 @@ export default function POSPage() {
       const res = await fetchApi("/orders", {
         method: "POST", body: JSON.stringify(payload), silentErrors: true,
       }) as CompletedCheckout;
-      finishSale(res, sold, true);
+      finishSale(res, sold, submitted.printReceipt === true);
     } catch (error: unknown) {
       const status = error && typeof error === "object" && "status" in error ? Number(error.status) : 0;
       if (requestSent && submitted && !(status >= 400 && status < 500 && status !== 408 && status !== 429)) {
@@ -1208,8 +1209,45 @@ export default function POSPage() {
           <div className="flex flex-wrap gap-2">
             <button type="button" className="app-secondary-button" onClick={() => setReceiptOpen(true)}>عرض الفاتورة</button>
             <button type="button" className="app-secondary-button flex items-center gap-2" onClick={() => {
-              const lines = receiptItems.map(item => `${item.nameAr} · ${item.quantity} ${item.unitName} · ${formatCurrency(item.quantity * item.unitPrice)}`);
-              const message = [`فاتورة رقم ${lastOrder.publicNumber}`, `العميل: ${lastOrder.customerName || "عميل نقدي"}`, ...lines, `الإجمالي قبل الخصم: ${formatCurrency(lastOrder.subtotal)}`, `الخصم: ${formatCurrency(lastOrder.discount)}`, `التوصيل: ${formatCurrency(lastOrder.shippingCost || 0)}`, `رسوم المحفظة: ${formatCurrency(lastOrder.walletFee || 0)}`, `الإجمالي: ${formatCurrency(lastOrder.totalAmount)}`, `المدفوع: ${formatCurrency(lastOrder.amountReceived || 0)}`, `المتبقي: ${formatCurrency(lastOrder.remainingAmount || 0)}`].join("\n");
+              const methodNames: Record<string, string> = { Cash: "نقدي", Instapay: "إنستا باي", Wallet: "محفظة إلكترونية", Credit: "آجل", "آجل": "آجل" };
+              const dateStr = lastOrder.createdAt
+                ? new Date(lastOrder.createdAt).toLocaleString("ar-EG", { timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+                : new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+              const itemLines = receiptItems.map((item, idx) =>
+                `${idx + 1}. *${item.nameAr}*\n   الكمية: ${item.quantity} ${item.unitName} × ${formatCurrency(item.unitPrice)} = ${formatCurrency(item.quantity * item.unitPrice)}`
+              );
+              const totalUnits = receiptItems.reduce((sum, item) => sum + item.quantity, 0);
+              const paymentLine = lastOrder.receivedMethod
+                ? `طريقة الدفع: ${methodNames[lastOrder.paymentMethod] || lastOrder.paymentMethod} (دفعة ${methodNames[lastOrder.receivedMethod] || lastOrder.receivedMethod})`
+                : `طريقة الدفع: ${methodNames[lastOrder.paymentMethod] || lastOrder.paymentMethod}`;
+              const message = [
+                "*مكتبة سعود الشافعي*",
+                `*تفاصيل فاتورة بيع رقم #${lastOrder.publicNumber}*`,
+                `التاريخ: ${dateStr}`,
+                lastOrder.employeeName ? `البائع: ${lastOrder.employeeName}` : "",
+                "",
+                "*بيانات العميل:*",
+                `العميل: ${lastOrder.customerName || "عميل نقدي"}`,
+                lastOrder.customerPhone ? `الهاتف: ${lastOrder.customerPhone}` : "",
+                lastOrder.isDelivery && lastOrder.customerAddress ? `عنوان التوصيل: ${lastOrder.customerAddress}` : "",
+                paymentLine,
+                lastOrder.expectedCollectionMethod ? `طريقة التحصيل المتوقعة: ${methodNames[lastOrder.expectedCollectionMethod] || lastOrder.expectedCollectionMethod}` : "",
+                lastOrder.nextDueDate ? `تاريخ الاستحقاق القادم: ${lastOrder.nextDueDate}` : "",
+                "",
+                `*الأصناف (${receiptItems.length} صنف · إجمالي الكميات ${totalUnits}):*`,
+                ...itemLines,
+                "",
+                "*الملخص المالي:*",
+                `الإجمالي قبل الخصم: ${formatCurrency(lastOrder.subtotal)}`,
+                `الخصم: ${formatCurrency(lastOrder.discount)}${lastOrder.discountPercent ? ` (${lastOrder.discountPercent}%)` : ""}`,
+                lastOrder.shippingCost ? `التوصيل: ${formatCurrency(lastOrder.shippingCost)}` : "",
+                lastOrder.walletFee ? `رسوم المحفظة: ${formatCurrency(lastOrder.walletFee)}` : "",
+                `*الإجمالي النهائي: ${formatCurrency(lastOrder.totalAmount)}*`,
+                `المدفوع: ${formatCurrency(lastOrder.amountReceived || 0)}`,
+                `المتبقي: ${formatCurrency(lastOrder.remainingAmount || 0)}`,
+                "",
+                "شكراً لتعاملكم مع مكتبة سعود الشافعي.",
+              ].filter((line, index, arr) => line !== "" || (index > 0 && arr[index - 1] !== "")).join("\n");
               if (!openWhatsApp(lastWhatsAppPhone, message)) notifyError("رقم العميل غير متاح أو غير صالح للواتساب");
             }}><WhatsAppIcon /> إرسال الفاتورة عبر واتساب</button>
             <button type="button" className="app-secondary-button" onClick={reprintReceipt} disabled={!lastPrintJob || isSendingReceipt}>
@@ -1434,7 +1472,7 @@ export default function POSPage() {
                           <button type="button" aria-label={`تقليل كمية ${item.nameAr}`} onClick={() => updateCartItemQuantity(item.id, item.quantity - 1)} className="w-10 h-10 flex items-center justify-center hover:bg-white/10 text-white rounded-md transition-colors">
                             <span className="material-symbols-outlined text-lg">remove</span>
                           </button>
-                          <input type="number" inputMode="numeric" min="1" step="1" aria-label={`كمية ${item.nameAr} بال${item.unitName}`} value={item.quantity} onFocus={event => event.currentTarget.select()} onBlur={event => { event.currentTarget.value = String(item.quantity); }} onChange={event => {
+                          <input type="number" inputMode="numeric" min="1" step="1" aria-label={`كمية ${item.nameAr} بال${item.unitName}`} value={item.quantity} onWheel={event => event.currentTarget.blur()} onFocus={event => event.currentTarget.select()} onBlur={event => { event.currentTarget.value = String(item.quantity); }} onChange={event => {
                             const quantity = Number(event.target.value);
                             if (Number.isInteger(quantity) && quantity > 0) updateCartItemQuantity(item.id, quantity);
                           }} className="w-16 h-10 rounded-md border border-white/20 bg-surface-container text-center text-lg font-bold text-primary focus:ring-2 focus:ring-primary/50" />
@@ -1453,6 +1491,10 @@ export default function POSPage() {
             <div className="shrink-0 space-y-2 border-t border-white/10 p-4">
               {cartReviewError && <p role="alert" className="rounded-lg bg-amber-500/10 p-3 text-sm text-amber-300">{cartReviewError}</p>}
               {checkoutError && <p role="alert" className="rounded-lg bg-red-500/10 p-3 text-sm text-[#ffb4ab]">{checkoutError}</p>}
+              <label className="flex cursor-pointer items-center gap-2 py-2 text-sm font-semibold">
+                <input type="checkbox" checked={printReceipt} onChange={event => setPrintReceipt(event.target.checked)} disabled={isProcessing || reviewingCart} className="h-4 w-4 accent-primary" />
+                <span>طباعة الإيصال بعد البيع</span>
+              </label>
               <button type="button" onClick={() => void handleCheckout()}
                 disabled={Boolean(checkoutBlock) || isProcessing || reviewingCart || Boolean(pendingCheckout)}
                 aria-describedby={checkoutBlock ? "pos-checkout-block" : undefined}

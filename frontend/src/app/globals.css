@@ -431,13 +431,35 @@ html[data-theme="light"] .login-input::placeholder { color: #9c8d82; }
 
 @media (min-width: 1280px) and (max-width: 1365px) {
   .app-side-nav { width: 272px; }
-  .app-main { margin-right: 308px; margin-left: 24px; }
-  .app-top-nav { right: 308px; left: 24px; }
-  .app-side-page { margin-right: 308px; }
+  .app-main { margin-right: 308px; margin-left: 24px; transition: margin-right 200ms ease; }
+  .app-top-nav { right: 308px; left: 24px; transition: right 200ms ease, padding-right 200ms ease; }
+  .app-side-page { margin-right: 308px; transition: margin-right 200ms ease; }
+  html[data-sidebar-collapsed="true"] .app-main { margin-right: 116px !important; }
+  html[data-sidebar-collapsed="true"] .app-top-nav { right: 116px !important; }
+  html[data-sidebar-collapsed="true"] .app-side-page { margin-right: 116px !important; }
 }
 @media (min-width: 1366px) {
   .app-side-nav { top: 32px; right: 32px; bottom: 32px; width: 336px; }
-  .app-side-page { margin-right: 380px; }
+  .app-main { transition: margin-right 200ms ease; }
+  .app-top-nav { transition: right 200ms ease, padding-right 200ms ease; }
+  .app-side-page { margin-right: 380px; transition: margin-right 200ms ease; }
+  html[data-sidebar-collapsed="true"] .app-main { margin-right: 124px !important; }
+  html[data-sidebar-collapsed="true"] .app-top-nav { right: 124px !important; }
+  html[data-sidebar-collapsed="true"] .app-side-page { margin-right: 124px !important; }
+}
+@media (min-width: 1280px) {
+  .app-side-nav { transition: width 200ms ease, transform 200ms ease; }
+  html[data-sidebar-collapsed="true"] .app-side-nav { width: 80px; }
+  html[data-sidebar-collapsed="true"] .app-side-content { padding: 16px 8px; }
+  html[data-sidebar-collapsed="true"] .app-side-brand { margin-bottom: 16px; gap: 0; }
+  html[data-sidebar-collapsed="true"] .app-side-brand > div:first-child > div:last-child { width: 48px; height: 48px; }
+  html[data-sidebar-collapsed="true"] .app-side-brand svg { width: 30px; height: 30px; }
+  html[data-sidebar-collapsed="true"] .app-side-brand-text,
+  html[data-sidebar-collapsed="true"] .app-side-label { display: none; }
+  html[data-sidebar-collapsed="true"] .app-side-toggle { position: static; margin: 0 auto 12px; }
+  html[data-sidebar-collapsed="true"] .app-side-link { position: relative; width: 48px; height: 48px; margin: 0 auto; padding: 0; justify-content: center; }
+  html[data-sidebar-collapsed="true"] .app-side-badge { position: absolute; top: 0; left: 0; margin: 0; }
+  html[data-sidebar-collapsed="true"] .app-side-footer { padding-top: 16px; }
 }
 @media (max-width: 520px) {
   .app-top-nav { gap: 8px; padding-left: 10px; }

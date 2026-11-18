@@ -7,7 +7,7 @@ import { fetchApi } from "@/lib/api";
 import { getOptimizedImageUrl } from "@/lib/cloudinary";
 import { getCurrentUser } from "@/lib/currentUser";
 import { notifyError, notifySuccess } from "@/lib/notifications";
-import { refreshNotificationBell } from "@/lib/notificationEvents";
+import { NOTIFICATION_NAVIGATE_EVENT, refreshNotificationBell } from "@/lib/notificationEvents";
 import { useConfirmAction } from "@/components/ConfirmationProvider";
 import { EditProductPanel } from "@/components/EditProductPanel";
 import BarcodePrintDialog from "@/components/BarcodePrintDialog";
@@ -58,8 +58,17 @@ function ProductDetails() {
   const [printing, setPrinting] = useState(false);
 
   useEffect(() => {
+    const onNavigate = () => setRevision(value => value + 1);
+    window.addEventListener(NOTIFICATION_NAVIGATE_EVENT, onNavigate);
+    return () => window.removeEventListener(NOTIFICATION_NAVIGATE_EVENT, onNavigate);
+  }, []);
+
+  useEffect(() => {
     if (!id) { const timer = window.setTimeout(() => { setError("لم يُحدد منتج لعرضه"); setLoading(false); }, 0); return () => window.clearTimeout(timer); }
     let active = true;
+    const timer = window.setTimeout(() => {
+    setLoading(true);
+    setError("");
     Promise.all([
       fetchApi(`/products/${id}`),
       fetchApi(`/inventory/balances?product_id=${encodeURIComponent(id)}`),
@@ -77,7 +86,8 @@ function ProductDetails() {
       setRole(user.role);
     }).catch(reason => active && setError(reason instanceof Error ? reason.message : "تعذر تحميل تفاصيل المنتج"))
       .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
+    }, 0);
+    return () => { active = false; window.clearTimeout(timer); };
   }, [id, revision]);
 
   const deleteProduct = async () => {
