@@ -71,6 +71,9 @@ export const ReceiptPrint = forwardRef<HTMLDivElement, ReceiptPrintProps>(({ ord
       {order?.remainingAmount != null && <div style={{ display: "flex", justifyContent: "space-between" }}><span>المتبقي</span><strong>{money(order.remainingAmount)}</strong></div>}
     </div>
     <footer style={{ textAlign: "center", paddingTop: 10 }}>
+      <div style={{ fontSize: 10, fontWeight: 700, marginBottom: 6, lineHeight: 1.5 }}>
+        الاستبدال والاسترجاع خلال 14 يومًا، بشرط بقاء المنتج بحالته الأصلية 100% كما تم استلامه.
+      </div>
       <strong style={{ fontSize: 14 }}>شكرًا لزيارتكم</strong>
       {order?.publicNumber && <div style={{ display: "flex", justifyContent: "center", marginTop: 8 }}><Barcode value={String(order.publicNumber)} format="CODE128" height={45} width={1.2} margin={0} displayValue={false} /></div>}
       <small style={{ display: "block", marginTop: 5, fontWeight: 700 }}>امسح الباركود للبحث عن الفاتورة</small>

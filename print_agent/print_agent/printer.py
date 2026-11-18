@@ -802,7 +802,11 @@ class PrinterManager:
             y += u(34)
 
         line(y, dash=True)
-        y += u(16)
+        y += u(14)
+        draw_center("الاستبدال والاسترجاع خلال 14 يومًا،", y, fonts["tiny"])
+        y += u(28)
+        draw_center("بشرط بقاء المنتج بحالته الأصلية 100% كما تم استلامه.", y, fonts["tiny"])
+        y += u(34)
         draw_center("شكرًا لزيارتكم", y, fonts["footer"])
         y += u(34)
         y = self._document_barcode(image, y + u(18), order_number, scale, large=True, show_text=False)

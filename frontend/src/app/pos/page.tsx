@@ -142,6 +142,7 @@ interface PosDraft {
   warehouseId: string;
   selectedCustomer: string;
   discountPercent?: number;
+  discountFixed?: number;
   discount?: number;
   paymentMethod: string;
   cashReceived: string;
@@ -265,6 +266,7 @@ export default function POSPage() {
   const [userRole, setUserRole] = useState<UserRole | null>(null);
   const [cashierName, setCashierName] = useState("");
   const [discountPercent, setDiscountPercent] = useState(0);
+  const [discountFixed, setDiscountFixed] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState("Cash");
   const [walletAvailable, setWalletAvailable] = useState(false);
   const [warehouses, setWarehouses] = useState<{ id: string; name: string }[]>([]);
@@ -317,7 +319,8 @@ export default function POSPage() {
             setWarehouseId(current => current || saved.warehouseId || "");
             setSelectedCustomer(saved.selectedCustomer || "");
             setDiscountPercent(Number(saved.discountPercent) || 0);
-            if (saved.discount && saved.discountPercent == null) setCheckoutError("الخصم القديم كان بالجنيه؛ أدخله كنسبة قبل البيع.");
+            setDiscountFixed(Number(saved.discountFixed) || 0);
+            if (saved.discount && saved.discountPercent == null && saved.discountFixed == null) setCheckoutError("الخصم القديم كان بالجنيه؛ أدخله قبل البيع.");
             setPaymentMethod(posPaymentMethods.some(method => method === saved.paymentMethod) ? saved.paymentMethod : "Cash");
             setCashReceived(saved.isCreditSale ? saved.cashReceived || "" : "");
             setExpectedCollectionMethod(saved.expectedCollectionMethod || "");
@@ -348,6 +351,7 @@ export default function POSPage() {
               setWarehouseId(attempt.draft.warehouseId);
               setSelectedCustomer(attempt.draft.selectedCustomer);
               setDiscountPercent(Number(attempt.draft.discountPercent) || 0);
+              setDiscountFixed(Number(attempt.draft.discountFixed) || 0);
               setPaymentMethod(attempt.draft.paymentMethod);
               setCashReceived(attempt.draft.cashReceived);
               setExpectedCollectionMethod(attempt.draft.expectedCollectionMethod || "");
@@ -390,13 +394,13 @@ export default function POSPage() {
       return;
     }
     const saved: PosDraft = { savedAt: Date.now(), cart, warehouseId, selectedCustomer,
-      discountPercent, paymentMethod, cashReceived, expectedCollectionMethod, nextDueDate, isCreditSale, isDelivery, deliveryFee, saleCustomerName,
+      discountPercent, discountFixed, paymentMethod, cashReceived, expectedCollectionMethod, nextDueDate, isCreditSale, isDelivery, deliveryFee, saleCustomerName,
       customerPhone, customerAddress, customerType, checkoutRequest: checkoutRequest.current };
     try { sessionStorage.setItem(key, JSON.stringify(saved)); } catch { /* Storage is optional; checkout still works. */ }
-  }, [draftReady, cart, warehouseId, selectedCustomer, discountPercent, paymentMethod, cashReceived, expectedCollectionMethod, nextDueDate, isCreditSale, isDelivery, deliveryFee, saleCustomerName, customerPhone, customerAddress, customerType]);
+  }, [draftReady, cart, warehouseId, selectedCustomer, discountPercent, discountFixed, paymentMethod, cashReceived, expectedCollectionMethod, nextDueDate, isCreditSale, isDelivery, deliveryFee, saleCustomerName, customerPhone, customerAddress, customerType]);
 
   const currentDraft = (): PosDraft => ({ savedAt: timestamp(), cart, warehouseId, selectedCustomer,
-    discountPercent, paymentMethod, cashReceived, expectedCollectionMethod, nextDueDate, isCreditSale, isDelivery, deliveryFee, saleCustomerName,
+    discountPercent, discountFixed, paymentMethod, cashReceived, expectedCollectionMethod, nextDueDate, isCreditSale, isDelivery, deliveryFee, saleCustomerName,
     customerPhone, customerAddress, customerType, checkoutRequest: checkoutRequest.current });
 
   const persistHeld = (next: HeldCart[]) => {
@@ -419,7 +423,7 @@ export default function POSPage() {
     setCart([]); cartRef.current = []; checkoutRequest.current = null;
     setSelectedCustomer(""); setSaleCustomerName(""); setCustomerName(""); setCustomerPhone("");
     setCustomerAddress(""); setCustomerType("Retail Customer"); setCustomerLookup("idle");
-    setDiscountPercent(0); setCashReceived(""); setExpectedCollectionMethod(""); setNextDueDate("");
+    setDiscountPercent(0); setDiscountFixed(0); setCashReceived(""); setExpectedCollectionMethod(""); setNextDueDate("");
     setIsCreditSale(false); setIsDelivery(false); setDeliveryFee(""); setPaymentMethod("Cash"); setCheckoutError(""); setCartReviewError("");
     searchInput.current?.focus();
   };
@@ -498,7 +502,7 @@ export default function POSPage() {
       setCart(result.reviewed); cartRef.current = result.reviewed;
       const customerMissing = Boolean(saved.selectedCustomer && !customers.some(customer => customer.id === saved.selectedCustomer));
       setSelectedCustomer(customerMissing ? "" : saved.selectedCustomer);
-      setDiscountPercent(Number(saved.discountPercent) || 0); setPaymentMethod(saved.paymentMethod);
+      setDiscountPercent(Number(saved.discountPercent) || 0); setDiscountFixed(Number(saved.discountFixed) || 0); setPaymentMethod(saved.paymentMethod);
       setCashReceived(saved.cashReceived); setExpectedCollectionMethod(saved.expectedCollectionMethod || "");
       setNextDueDate(saved.nextDueDate || "");
       setIsCreditSale(Boolean(saved.isCreditSale)); setIsDelivery(Boolean(saved.isDelivery));
@@ -509,7 +513,7 @@ export default function POSPage() {
       checkoutRequest.current = null;
       setCartReviewError(result.issue || (customerMissing ? "العميل المسجل في السلة لم يعد متاحًا. اختر عميلًا قبل البيع." : ""));
       setCheckoutError(result.priceChanged ? "تغيّر سعر صنف في السلة؛ راجع الإجمالي قبل إتمام البيع." :
-        saved.discount && saved.discountPercent == null ? "الخصم القديم كان بالجنيه؛ أدخله كنسبة قبل البيع." : "");
+        saved.discount && saved.discountPercent == null && saved.discountFixed == null ? "الخصم القديم كان بالجنيه؛ أدخله قبل البيع." : "");
       persistHeld(heldCarts.filter(row => row.id !== held.id));
       setHeldOpen(false);
     } catch (error) {
@@ -966,7 +970,10 @@ export default function POSPage() {
 
   const subtotalCents = Math.round(cart.reduce((sum, item) => sum + item.totalPrice, 0) * 100);
   const subtotal = subtotalCents / 100;
-  const discountCents = Math.round(subtotalCents * discountPercent / 100);
+  const percentDiscountCents = Math.round(subtotalCents * discountPercent / 100);
+  const fixedDiscountCents = Math.round(Math.max(0, discountFixed) * 100);
+  const rawDiscountCents = percentDiscountCents + fixedDiscountCents;
+  const discountCents = Math.min(subtotalCents, rawDiscountCents);
   const discountAmount = discountCents / 100;
   const validDeliveryFee = /^\d+(?:\.\d{1,2})?$/.test(deliveryFee) && Number.isFinite(Number(deliveryFee)) && Number(deliveryFee) <= 9999999999.99;
   const shippingCents = isDelivery && validDeliveryFee ? Math.round(Number(deliveryFee) * 100) : 0;
@@ -981,6 +988,8 @@ export default function POSPage() {
   const checkoutBlock = savingCustomer ? "جارٍ حفظ العميل" : !referenceReady || !draftReady ? "جارٍ تحميل بيانات البيع" : referenceError || (!warehouseId ? "اختر مخزن البيع" :
     cart.length === 0 ? "أضف صنفًا إلى السلة" :
     !Number.isFinite(discountPercent) || discountPercent < 0 || discountPercent > 100 || Math.abs(discountPercent * 100 - Math.round(discountPercent * 100)) > 1e-6 ? "راجع نسبة الخصم من 0 إلى 100 (رقمان بعد الفاصلة كحد أقصى)" :
+    !Number.isFinite(discountFixed) || discountFixed < 0 || Math.abs(discountFixed * 100 - Math.round(discountFixed * 100)) > 1e-6 ? "راجع قيمة الخصم الثابت (رقمان بعد الفاصلة كحد أقصى)" :
+    rawDiscountCents > subtotalCents ? "إجمالي الخصم أكبر من قيمة الفاتورة" :
     isDelivery && !validDeliveryFee ? "اكتب رسوم التوصيل، واكتب 0 لو التوصيل مجاني" :
     customerPhone.length === 11 && (customerLookup === "idle" || customerLookup === "searching") ? "جارٍ البحث عن العميل" :
     customerPhone.length === 11 && customerLookup === "error" ? "تعذر البحث عن رقم العميل. حاول مجددًا" :
@@ -1052,7 +1061,7 @@ export default function POSPage() {
       } catch { /* The committed sale is still shown on screen. */ }
     }
     setPendingCheckout(null); setAttemptNotice(""); setCheckoutError(""); setCartReviewError("");
-    setDiscountPercent(0); setCashReceived(""); setExpectedCollectionMethod(""); setNextDueDate(""); setIsCreditSale(false); setIsDelivery(false); setDeliveryFee(""); setSaleCustomerName("");
+    setDiscountPercent(0); setDiscountFixed(0); setCashReceived(""); setExpectedCollectionMethod(""); setNextDueDate(""); setIsCreditSale(false); setIsDelivery(false); setDeliveryFee(""); setSaleCustomerName("");
     setSelectedCustomer(""); setCustomerName(""); setCustomerPhone(""); setCustomerAddress("");
     setNewAddress(""); setAddingAddress(false);
     catalogCache.current = null; completeCatalogCache.current = null; setCatalogRefresh(value => value + 1);
@@ -1118,7 +1127,7 @@ export default function POSPage() {
         source: isDelivery ? "Delivery" : "Walk-In Customer",
         discount_amount: discountAmount,
         shipping_cost: isDelivery ? Number(deliveryFee) : 0,
-        discount_percent: discountPercent,
+        discount_percent: fixedDiscountCents === 0 && discountPercent > 0 ? discountPercent : undefined,
         expected_total: totalAmount,
         payment_method: isCreditSale ? "Deferred Payment" : paymentMethod,
         items: saleCart.map(item => ({
@@ -1246,6 +1255,7 @@ export default function POSPage() {
                 `المدفوع: ${formatCurrency(lastOrder.amountReceived || 0)}`,
                 `المتبقي: ${formatCurrency(lastOrder.remainingAmount || 0)}`,
                 "",
+                "الاستبدال والاسترجاع خلال 14 يومًا، بشرط بقاء المنتج بحالته الأصلية 100% كما تم استلامه.",
                 "شكراً لتعاملكم مع مكتبة سعود الشافعي.",
               ].filter((line, index, arr) => line !== "" || (index > 0 && arr[index - 1] !== "")).join("\n");
               if (!openWhatsApp(lastWhatsAppPhone, message)) notifyError("رقم العميل غير متاح أو غير صالح للواتساب");
@@ -1338,22 +1348,40 @@ export default function POSPage() {
                 <span className="font-bold">{subtotal.toFixed(2)} ج.م</span>
               </div>
 
-              <div className="flex items-center justify-between gap-4">
-                <span className="app-muted text-sm">الخصم (٪):</span>
-                <div className="relative w-24">
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    step="0.01"
-                    aria-label="الخصم"
-                    value={discountPercent || ""}
-                    onChange={(e) => setDiscountPercent(Number(e.target.value))}
-                    disabled={userRole !== "ADMIN"}
-                    className="w-full bg-surface border border-white/10 rounded-lg py-1 px-3 text-sm text-center focus:ring-1 focus:ring-primary focus:outline-none"
-                    placeholder="0"
-                  />
-                  <span className="app-muted absolute left-2 top-1.5 text-xs">٪</span>
+              <div className="flex items-center justify-between gap-2">
+                <span className="app-muted text-sm">الخصم:</span>
+                <div className="flex items-center gap-2">
+                  <div className="relative w-24">
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.01"
+                      aria-label="الخصم بالنسبية"
+                      value={discountPercent || ""}
+                      onWheel={(e) => e.currentTarget.blur()}
+                      onChange={(e) => setDiscountPercent(Number(e.target.value))}
+                      disabled={userRole !== "ADMIN"}
+                      className="w-full bg-surface border border-white/10 rounded-lg py-1 px-3 text-sm text-center focus:ring-1 focus:ring-primary focus:outline-none"
+                      placeholder="0"
+                    />
+                    <span className="app-muted absolute left-2 top-1.5 text-xs">٪</span>
+                  </div>
+                  <div className="relative w-24">
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      aria-label="الخصم الثابت"
+                      value={discountFixed || ""}
+                      onWheel={(e) => e.currentTarget.blur()}
+                      onChange={(e) => setDiscountFixed(Number(e.target.value))}
+                      disabled={userRole !== "ADMIN"}
+                      className="w-full bg-surface border border-white/10 rounded-lg py-1 pl-7 pr-2 text-sm text-center focus:ring-1 focus:ring-primary focus:outline-none"
+                      placeholder="0"
+                    />
+                    <span className="app-muted absolute left-2 top-1.5 text-[11px]">ج.م</span>
+                  </div>
                 </div>
               </div>
               {discountAmount > 0 && <div className="flex justify-between text-sm"><span>قيمة الخصم</span><span>-{discountAmount.toFixed(2)} ج.م</span></div>}
@@ -1593,7 +1621,7 @@ export default function POSPage() {
             ) : products.length > 0 ? (
               <div className="space-y-3">
                 <div className="grid gap-3 2xl:grid-cols-2">
-                {products.map(product => {
+                {[...products].sort((a, b) => Number(b.current_stock > 0) - Number(a.current_stock > 0)).map(product => {
                   const baseUnit = product.units.find(unit => unit.unit_name === product.base_unit) || product.units[0];
                   const level = customers.find(customer => customer.id === selectedCustomer)?.price_level || "Retail";
                   const primaryPrice = baseUnit?.prices.find(candidate => candidate.price_level === level) ||

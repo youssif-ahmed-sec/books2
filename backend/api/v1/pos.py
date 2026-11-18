@@ -167,5 +167,7 @@ async def search_pos_products(
             setattr(p, "current_stock", max(0, available))
         else:
             setattr(p, "current_stock", stock_map.get(p.id, 0))
-        
+
+    products.sort(key=lambda p: 0 if Decimal(str(getattr(p, "current_stock", 0) or 0)) > 0 else 1)
+
     return [visible_product(product, current_user.role) for product in products]

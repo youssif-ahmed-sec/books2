@@ -17,6 +17,20 @@ class CustomerPaymentCreate(BaseModel):
     next_due_date: date | None = None
 
 
+class OrderScanCollectCreate(BaseModel):
+    request_id: UUID
+    query: str = Field(min_length=1, max_length=120)
+    method: CollectedPaymentMethod | None = None
+
+
+class OrderScanCollectResponse(BaseModel):
+    order_id: UUID
+    public_number: int
+    customer_name: str
+    already_collected: bool
+    confirmed_amount: Decimal
+
+
 class PaymentResponse(BaseModel):
     id: UUID
     order_id: UUID | None

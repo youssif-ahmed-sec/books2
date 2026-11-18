@@ -12,8 +12,9 @@ from sqlalchemy.orm import aliased
 from core.dependencies import require_admin, require_pos_orders_access, get_current_user
 from core.idempotency import IdempotencyConflict
 from database import get_db
-from models.user import User, RoleEnum
+from models.user import AuditLog, User, RoleEnum
 from schemas.order import OrderCreate, OrderDraftCreate, OrderResponse, OrderStatusUpdate, QuotationResponse, OrderAssignmentUpdate, OrderPreparation, LeadCreate
+from schemas.payment import OrderScanCollectCreate, OrderScanCollectResponse
 from models.customer import Customer
 from models.financial import Payment
 from models.order import CustomerDebtAllocation, Order, OrderStatusEnum
@@ -60,7 +61,7 @@ async def list_invoices(
         Order.status.in_(invoice_statuses),
     )
     if _user.role != RoleEnum.ADMIN:
-        query = query.where(Order.user_id == _user.id)
+        query = query.where(or_(Order.user_id == _user.id, Order.cashier_collected_by_id == _user.id))
     term = search.strip()
     if term:
         escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -114,11 +115,60 @@ async def list_invoices(
             "status": eff_status,
             "total_amount": order.total_amount,
             "payment_method": order.payment_method,
+            "cashier_collected": order.cashier_collected,
+            "cashier_expected_amount": order.cashier_expected_amount,
+            "deferred_remaining": remaining,
             "payment_status": "paid" if order.payment_method != "Deferred Payment" or remaining == 0
                 else "untracked" if remaining is None else "due",
             "created_at": order.created_at,
         })
     return result
+
+
+@router.post("/collect-scan", response_model=OrderScanCollectResponse, status_code=status.HTTP_201_CREATED)
+async def collect_order_by_scan(
+    payload: OrderScanCollectCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_pos_orders_access),
+):
+    raw_query = payload.query.strip()
+    if not raw_query:
+        raise HTTPException(status_code=422, detail="أدخل رقم الفاتورة أو امسح الباركود")
+    statement = select(Order)
+    if raw_query.isdigit():
+        number = int(raw_query)
+        if number > 9223372036854775807:
+            raise HTTPException(status_code=422, detail="رقم الفاتورة غير صالح")
+        statement = statement.where(Order.public_number == number)
+    else:
+        try:
+            statement = statement.where(Order.id == UUID(raw_query))
+        except ValueError:
+            raise HTTPException(status_code=404, detail="لم يتم العثور على فاتورة بهذا الرقم")
+
+    order = (await db.execute(statement.with_for_update())).scalar_one_or_none()
+    if order is None:
+        raise HTTPException(status_code=404, detail="لم يتم العثور على الفاتورة")
+    if order.status not in (OrderStatusEnum.DELIVERED.value, OrderStatusEnum.CLOSED.value):
+        raise HTTPException(status_code=400, detail="لا يمكن تأكيد التحصيل لهذه الفاتورة")
+    if order.cashier_collected is None:
+        raise HTTPException(status_code=400, detail="هذه الفاتورة لا تدخل في متابعة التحصيل الجديدة")
+
+    already_collected = order.cashier_collected
+    if not already_collected:
+        order.cashier_collected = True
+        order.cashier_collected_by_id = current_user.id
+        order.cashier_collected_at = datetime.now(timezone.utc)
+        db.add(AuditLog(user_id=current_user.id, action="CONFIRM_CASHIER_COLLECTION",
+                        entity_type="Order", entity_id=str(order.id),
+                        new_value={"order_public_number": order.public_number, "amount": str(order.cashier_expected_amount)}))
+        await db.commit()
+    customer = (await db.execute(select(Customer.name).where(Customer.id == order.customer_id))).scalar_one_or_none() if order.customer_id else None
+    return OrderScanCollectResponse(
+        order_id=order.id, public_number=order.public_number,
+        customer_name=customer or "عميل نقدي", already_collected=already_collected,
+        confirmed_amount=order.cashier_expected_amount,
+    )
 
 
 @router.get("/{order_id}/activity")
@@ -401,7 +451,7 @@ async def get_order_quotation(
     if (current_user.role != RoleEnum.ADMIN and order["status"] in (
         OrderStatusEnum.DELIVERED.value, OrderStatusEnum.CLOSED.value,
         OrderStatusEnum.RETURNED.value, OrderStatusEnum.EXCHANGE.value,
-    ) and order["user_id"] != current_user.id):
+    ) and order["user_id"] != current_user.id and order.get("cashier_collected_by_id") != current_user.id):
         raise HTTPException(status_code=404, detail="Order not found")
     if order["customer_id"]:
         customer = (await db.execute(select(Customer.name, Customer.phone, Customer.address).where(
