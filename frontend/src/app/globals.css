@@ -1037,3 +1037,6 @@ html[data-theme="light"] .app-side-nav {
     box-shadow: -12px 0 45px rgba(67, 42, 25, 0.15) !important;
   }
 }
+
+.app-invoice-collected { color: #6ee7a3; }
+html[data-theme="light"] .app-invoice-collected { color: #047345; }

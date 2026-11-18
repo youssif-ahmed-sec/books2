@@ -65,6 +65,10 @@ class Order(Base):
     expected_collection_method = Column(String(32), nullable=True)
     next_due_date = Column(Date, nullable=True)
     deferred_remaining = Column(Numeric(12, 2), nullable=True)
+    cashier_collected = Column(Boolean, nullable=True)
+    cashier_expected_amount = Column(Numeric(12, 2), nullable=True)
+    cashier_collected_by_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    cashier_collected_at = Column(DateTime(timezone=True), nullable=True)
 
     payment_method  = Column(String, default="Cash")
     notes           = Column(Text, nullable=True)

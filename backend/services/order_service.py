@@ -180,6 +180,7 @@ class OrderService:
     def _build_order_dict(order, items):
         return {
             "id":              order.id,
+            "cashier_collected_by_id": order.cashier_collected_by_id,
             "public_number":   order.public_number,
             "customer_id":     order.customer_id,
             "customer_address": order.customer_address,
@@ -492,6 +493,10 @@ class OrderService:
         if order_in.payment_method == "Deferred Payment" and order_in.received_method == "Wallet" and collected_base is not None:
             collected_base += wallet_fee
         if not defer_payment:
+            cashier_amount = (collected_base or Decimal("0")) if order_in.payment_method == "Deferred Payment" else order.total_amount
+            if cashier_amount > 0:
+                order.cashier_collected = False
+                order.cashier_expected_amount = cashier_amount
             await OrderService._settle_sale(db, order, current_user_id, collected_base, order_in.received_method)
         await OrderService._record_customer_sale(db, order.customer_id, order.total_amount)
         db.add(AuditLog(user_id=current_user_id, action="CREATE_POS_INVOICE", entity_type="Order", entity_id=str(order.id), new_value={"total": str(order.total_amount), "payment_method": order.payment_method}))

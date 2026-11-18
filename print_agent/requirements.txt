@@ -7,3 +7,6 @@ qrcode
 python-barcode
 Pillow
 pywin32
+
+# Used by the separately packaged Windows updater
+psutil
