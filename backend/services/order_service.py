@@ -73,11 +73,15 @@ class OrderService:
         return total
 
     @staticmethod
-    async def _check_pricing_policy(db: AsyncSession, customer_id: Optional[UUID], items, discount: Decimal, user_id: UUID) -> None:
+    async def _check_pricing_policy(db: AsyncSession, customer_id: Optional[UUID], items, discount: Decimal, user_id: UUID,
+                                    *, allow_cashier_discount: bool = False) -> None:
         user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
         if user is None or user.is_deleted or not user.is_active:
             raise PermissionError("Active staff account required.")
-        if discount > 0 and user.role != RoleEnum.ADMIN:
+        can_apply_discount = user.role == RoleEnum.ADMIN or (
+            allow_cashier_discount and user.role == RoleEnum.CASHIER_ORDERS
+        )
+        if discount > 0 and not can_apply_discount:
             raise PermissionError("Admin approval is required for a discount.")
 
         expected_level = "Retail"
@@ -254,8 +258,10 @@ class OrderService:
                 raise ValueError("This correction payment method needs manual review.")
         elif defer_payment or original_order_id is not None or pricing_user_id is not None:
             raise ValueError("Correction checkout requires trusted correction lines.")
-        await OrderService._check_pricing_policy(db, order_in.customer_id, order_in.items, order_in.discount_amount,
-                                                 pricing_user_id or current_user_id)
+        await OrderService._check_pricing_policy(
+            db, order_in.customer_id, order_in.items, order_in.discount_amount, pricing_user_id or current_user_id,
+            allow_cashier_discount=correction_lines is None,
+        )
         selected_address = order_in.customer_address.strip() if order_in.customer_address is not None else None
         if selected_address:
             if order_in.customer_id is None:

@@ -11,6 +11,7 @@ import { ReceiptPrint } from "@/components/pos/ReceiptPrint";
 import { sendLocalPrint } from "@/lib/localPrint";
 import { errorMessage } from "@/lib/errors";
 import { posCheckoutError } from "@/lib/posCheckoutErrors";
+import { salesRoles } from "@/lib/routeRoles";
 import { getUserRole, type UserRole } from "@/utils/auth";
 import { armUiSound, playUiSound } from "@/lib/uiSounds";
 import { getCurrentUser } from "@/lib/currentUser";
@@ -265,8 +266,11 @@ export default function POSPage() {
   const [savingCustomer, setSavingCustomer] = useState(false);
   const [userRole, setUserRole] = useState<UserRole | null>(null);
   const [cashierName, setCashierName] = useState("");
-  const [discountPercent, setDiscountPercent] = useState(0);
-  const [discountFixed, setDiscountFixed] = useState(0);
+  const [discountPercentInput, setDiscountPercentInput] = useState("");
+  const [discountFixedInput, setDiscountFixedInput] = useState("");
+  const discountPercent = Number(discountPercentInput);
+  const discountFixed = Number(discountFixedInput);
+  const canApplyDiscount = userRole !== null && salesRoles.includes(userRole);
   const [paymentMethod, setPaymentMethod] = useState("Cash");
   const [walletAvailable, setWalletAvailable] = useState(false);
   const [warehouses, setWarehouses] = useState<{ id: string; name: string }[]>([]);
@@ -318,8 +322,8 @@ export default function POSPage() {
             cartRef.current = restoredCart;
             setWarehouseId(current => current || saved.warehouseId || "");
             setSelectedCustomer(saved.selectedCustomer || "");
-            setDiscountPercent(Number(saved.discountPercent) || 0);
-            setDiscountFixed(Number(saved.discountFixed) || 0);
+            setDiscountPercentInput(String(Number(saved.discountPercent) || ""));
+            setDiscountFixedInput(String(Number(saved.discountFixed) || ""));
             if (saved.discount && saved.discountPercent == null && saved.discountFixed == null) setCheckoutError("الخصم القديم كان بالجنيه؛ أدخله قبل البيع.");
             setPaymentMethod(posPaymentMethods.some(method => method === saved.paymentMethod) ? saved.paymentMethod : "Cash");
             setCashReceived(saved.isCreditSale ? saved.cashReceived || "" : "");
@@ -350,8 +354,8 @@ export default function POSPage() {
               cartRef.current = attempt.draft.cart;
               setWarehouseId(attempt.draft.warehouseId);
               setSelectedCustomer(attempt.draft.selectedCustomer);
-              setDiscountPercent(Number(attempt.draft.discountPercent) || 0);
-              setDiscountFixed(Number(attempt.draft.discountFixed) || 0);
+              setDiscountPercentInput(String(Number(attempt.draft.discountPercent) || ""));
+              setDiscountFixedInput(String(Number(attempt.draft.discountFixed) || ""));
               setPaymentMethod(attempt.draft.paymentMethod);
               setCashReceived(attempt.draft.cashReceived);
               setExpectedCollectionMethod(attempt.draft.expectedCollectionMethod || "");
@@ -423,7 +427,7 @@ export default function POSPage() {
     setCart([]); cartRef.current = []; checkoutRequest.current = null;
     setSelectedCustomer(""); setSaleCustomerName(""); setCustomerName(""); setCustomerPhone("");
     setCustomerAddress(""); setCustomerType("Retail Customer"); setCustomerLookup("idle");
-    setDiscountPercent(0); setDiscountFixed(0); setCashReceived(""); setExpectedCollectionMethod(""); setNextDueDate("");
+    setDiscountPercentInput(""); setDiscountFixedInput(""); setCashReceived(""); setExpectedCollectionMethod(""); setNextDueDate("");
     setIsCreditSale(false); setIsDelivery(false); setDeliveryFee(""); setPaymentMethod("Cash"); setCheckoutError(""); setCartReviewError("");
     searchInput.current?.focus();
   };
@@ -502,7 +506,7 @@ export default function POSPage() {
       setCart(result.reviewed); cartRef.current = result.reviewed;
       const customerMissing = Boolean(saved.selectedCustomer && !customers.some(customer => customer.id === saved.selectedCustomer));
       setSelectedCustomer(customerMissing ? "" : saved.selectedCustomer);
-      setDiscountPercent(Number(saved.discountPercent) || 0); setDiscountFixed(Number(saved.discountFixed) || 0); setPaymentMethod(saved.paymentMethod);
+      setDiscountPercentInput(String(Number(saved.discountPercent) || "")); setDiscountFixedInput(String(Number(saved.discountFixed) || "")); setPaymentMethod(saved.paymentMethod);
       setCashReceived(saved.cashReceived); setExpectedCollectionMethod(saved.expectedCollectionMethod || "");
       setNextDueDate(saved.nextDueDate || "");
       setIsCreditSale(Boolean(saved.isCreditSale)); setIsDelivery(Boolean(saved.isDelivery));
@@ -1061,7 +1065,7 @@ export default function POSPage() {
       } catch { /* The committed sale is still shown on screen. */ }
     }
     setPendingCheckout(null); setAttemptNotice(""); setCheckoutError(""); setCartReviewError("");
-    setDiscountPercent(0); setDiscountFixed(0); setCashReceived(""); setExpectedCollectionMethod(""); setNextDueDate(""); setIsCreditSale(false); setIsDelivery(false); setDeliveryFee(""); setSaleCustomerName("");
+    setDiscountPercentInput(""); setDiscountFixedInput(""); setCashReceived(""); setExpectedCollectionMethod(""); setNextDueDate(""); setIsCreditSale(false); setIsDelivery(false); setDeliveryFee(""); setSaleCustomerName("");
     setSelectedCustomer(""); setCustomerName(""); setCustomerPhone(""); setCustomerAddress("");
     setNewAddress(""); setAddingAddress(false);
     catalogCache.current = null; completeCatalogCache.current = null; setCatalogRefresh(value => value + 1);
@@ -1348,39 +1352,41 @@ export default function POSPage() {
                 <span className="font-bold">{subtotal.toFixed(2)} ج.م</span>
               </div>
 
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center justify-between gap-2" role="group" aria-label="الخصم">
                 <span className="app-muted text-sm">الخصم:</span>
                 <div className="flex items-center gap-2">
                   <div className="relative w-24">
                     <input
                       type="number"
+                      inputMode="decimal"
                       min="0"
                       max="100"
                       step="0.01"
-                      aria-label="الخصم بالنسبية"
-                      value={discountPercent || ""}
+                      aria-label="نسبة الخصم"
+                      value={discountPercentInput}
                       onWheel={(e) => e.currentTarget.blur()}
-                      onChange={(e) => setDiscountPercent(Number(e.target.value))}
-                      disabled={userRole !== "ADMIN"}
-                      className="w-full bg-surface border border-white/10 rounded-lg py-1 px-3 text-sm text-center focus:ring-1 focus:ring-primary focus:outline-none"
+                      onChange={(e) => setDiscountPercentInput(e.target.value)}
+                      disabled={!canApplyDiscount}
+                      className="w-full bg-surface border border-white/10 rounded-lg py-1 pl-6 pr-2 text-sm text-center focus:ring-1 focus:ring-primary focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
                       placeholder="0"
                     />
-                    <span className="app-muted absolute left-2 top-1.5 text-xs">٪</span>
+                    <span aria-hidden="true" className="app-muted pointer-events-none absolute left-2 top-1.5 text-xs">٪</span>
                   </div>
                   <div className="relative w-24">
                     <input
                       type="number"
+                      inputMode="decimal"
                       min="0"
                       step="0.01"
                       aria-label="الخصم الثابت"
-                      value={discountFixed || ""}
+                      value={discountFixedInput}
                       onWheel={(e) => e.currentTarget.blur()}
-                      onChange={(e) => setDiscountFixed(Number(e.target.value))}
-                      disabled={userRole !== "ADMIN"}
-                      className="w-full bg-surface border border-white/10 rounded-lg py-1 pl-7 pr-2 text-sm text-center focus:ring-1 focus:ring-primary focus:outline-none"
+                      onChange={(e) => setDiscountFixedInput(e.target.value)}
+                      disabled={!canApplyDiscount}
+                      className="w-full bg-surface border border-white/10 rounded-lg py-1 pl-7 pr-2 text-sm text-center focus:ring-1 focus:ring-primary focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
                       placeholder="0"
                     />
-                    <span className="app-muted absolute left-2 top-1.5 text-[11px]">ج.م</span>
+                    <span aria-hidden="true" className="app-muted pointer-events-none absolute left-2 top-1.5 text-[11px]">ج.م</span>
                   </div>
                 </div>
               </div>
